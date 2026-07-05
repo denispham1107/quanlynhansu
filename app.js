@@ -1315,7 +1315,7 @@ function groupTasksByWorkOrder(tasks) {
   return groups;
 }
 
-function renderTicketGroup(group) {
+function renderTicketGroup(group, mode = "admin") {
   return `
     <section class="ticket-group">
       <div class="ticket-group-header">
@@ -1326,7 +1326,7 @@ function renderTicketGroup(group) {
         <span class="ticket-count">${group.tasks.length} công việc</span>
       </div>
       <div class="ticket-tasks">
-        ${group.tasks.map((task) => renderTaskCard(task, "admin")).join("")}
+        ${group.tasks.map((task) => renderTaskCard(task, mode)).join("")}
       </div>
     </section>
   `;
@@ -1350,8 +1350,8 @@ function renderEmployeeTasks() {
 
   els.employeeTaskList.classList.remove("empty");
 
-  els.employeeTaskList.innerHTML = filtered
-    .map((task) => renderTaskCard(task, "employee"))
+  els.employeeTaskList.innerHTML = groupTasksByWorkOrder(filtered)
+    .map((group) => renderTicketGroup(group, "employee"))
     .join("");
 
   updateCountdowns();
@@ -1383,12 +1383,6 @@ function renderTaskCard(task, mode) {
       </div>
 
       <div class="task-meta">
-        ${mode === "employee" ? `
-        <div class="meta-box">
-          <span>Phiếu công việc</span>
-          <strong>${escapeHtml(task.workOrderName || "--")}</strong>
-        </div>
-        ` : ""}
         <div class="meta-box">
           <span>Nhân viên</span>
           <strong>${escapeHtml(task.assignedToName || "--")}</strong>
