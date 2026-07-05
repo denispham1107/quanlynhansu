@@ -4,6 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Phần mềm giao việc nhân viên</title>
+  <meta name="theme-color" content="#2563eb" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Shop Task" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -41,7 +47,23 @@
         <div class="app-title">Quản lý giao việc</div>
         <div id="currentUserText" class="current-user">Đang tải...</div>
       </div>
-      <button id="logoutBtn" class="btn ghost">Đăng xuất</button>
+      <div class="topbar-actions">
+        <button id="enableNotificationsBtn" class="btn ghost notify-permission-btn" type="button">Bật thông báo</button>
+        <div class="notification-wrap">
+          <button id="notificationBellBtn" class="notification-btn" type="button" aria-label="Thông báo">
+            🔔
+            <span id="notificationBadge" class="notification-badge hidden">0</span>
+          </button>
+          <div id="notificationPanel" class="notification-panel hidden">
+            <div class="notification-panel-head">
+              <strong>Thông báo</strong>
+              <button id="markAllNotificationsReadBtn" class="link-btn" type="button">Đánh dấu đã đọc</button>
+            </div>
+            <div id="notificationList" class="notification-list empty-box">Chưa có thông báo.</div>
+          </div>
+        </div>
+        <button id="logoutBtn" class="btn ghost">Đăng xuất</button>
+      </div>
     </header>
 
     <!-- ADMIN DASHBOARD -->
@@ -105,7 +127,7 @@
             <h3>Tất cả công việc</h3>
             <p class="muted">Admin thấy toàn bộ công việc của shop.</p>
           </div>
-          <div class="filters">
+          <div class="filters enhanced-filters">
             <select id="adminStatusFilter" aria-label="Lọc trạng thái">
               <option value="all">Tất cả trạng thái</option>
               <option value="doing">Đang làm</option>
@@ -118,8 +140,19 @@
             <select id="adminEmployeeFilter" aria-label="Lọc nhân viên">
               <option value="all">Tất cả nhân viên</option>
             </select>
+            <select id="adminDateMode" aria-label="Lọc thời gian">
+              <option value="all">Tất cả ngày</option>
+              <option value="today">Hôm nay</option>
+              <option value="single">Chọn 1 ngày</option>
+              <option value="range">Khoảng ngày</option>
+            </select>
+            <input id="adminSingleDate" class="date-filter-control hidden" type="date" aria-label="Chọn ngày giao việc" />
+            <input id="adminDateFrom" class="date-filter-control hidden" type="date" aria-label="Từ ngày" />
+            <input id="adminDateTo" class="date-filter-control hidden" type="date" aria-label="Đến ngày" />
+            <button id="adminClearDateFilter" class="btn ghost small" type="button">Xóa lọc ngày</button>
           </div>
         </div>
+        <p id="adminDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
         <div id="adminTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>
     </main>
@@ -135,12 +168,25 @@
       </section>
 
       <section class="panel task-panel">
-        <div class="panel-header">
+        <div class="panel-header task-filter-row">
           <div>
             <h3>Danh sách việc cần làm</h3>
             <p class="muted">Bấm “Hoàn thành” khi đã làm xong để gửi Admin duyệt.</p>
           </div>
+          <div class="filters enhanced-filters employee-date-filters">
+            <select id="employeeDateMode" aria-label="Lọc thời gian công việc của tôi">
+              <option value="all">Tất cả ngày</option>
+              <option value="today">Hôm nay</option>
+              <option value="single">Chọn 1 ngày</option>
+              <option value="range">Khoảng ngày</option>
+            </select>
+            <input id="employeeSingleDate" class="date-filter-control hidden" type="date" aria-label="Chọn ngày" />
+            <input id="employeeDateFrom" class="date-filter-control hidden" type="date" aria-label="Từ ngày" />
+            <input id="employeeDateTo" class="date-filter-control hidden" type="date" aria-label="Đến ngày" />
+            <button id="employeeClearDateFilter" class="btn ghost small" type="button">Xóa lọc ngày</button>
+          </div>
         </div>
+        <p id="employeeDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
         <div id="employeeTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>
     </main>

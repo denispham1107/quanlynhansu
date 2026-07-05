@@ -55,9 +55,24 @@ const state = {
   profile: null,
   employees: [],
   tasks: [],
+  notifications: [],
+  knownNotificationIds: new Set(),
+  notificationsReady: false,
   unsubs: [],
   adminStatusFilter: "all",
-  adminEmployeeFilter: "all"
+  adminEmployeeFilter: "all",
+  adminDateFilter: {
+    mode: "all",
+    single: "",
+    from: "",
+    to: ""
+  },
+  employeeDateFilter: {
+    mode: "all",
+    single: "",
+    from: "",
+    to: ""
+  }
 };
 
 // =========================
@@ -82,12 +97,30 @@ const els = {
   taskAssignee: $("#taskAssignee"),
   adminEmployeeFilter: $("#adminEmployeeFilter"),
   adminStatusFilter: $("#adminStatusFilter"),
+  adminDateMode: $("#adminDateMode"),
+  adminSingleDate: $("#adminSingleDate"),
+  adminDateFrom: $("#adminDateFrom"),
+  adminDateTo: $("#adminDateTo"),
+  adminClearDateFilter: $("#adminClearDateFilter"),
+  adminDateSummary: $("#adminDateSummary"),
   adminTaskList: $("#adminTaskList"),
+  employeeDateMode: $("#employeeDateMode"),
+  employeeSingleDate: $("#employeeSingleDate"),
+  employeeDateFrom: $("#employeeDateFrom"),
+  employeeDateTo: $("#employeeDateTo"),
+  employeeClearDateFilter: $("#employeeClearDateFilter"),
+  employeeDateSummary: $("#employeeDateSummary"),
   employeeTaskList: $("#employeeTaskList"),
   statDoing: $("#statDoing"),
   statSubmitted: $("#statSubmitted"),
   statOverdue: $("#statOverdue"),
-  statCompleted: $("#statCompleted")
+  statCompleted: $("#statCompleted"),
+  enableNotificationsBtn: $("#enableNotificationsBtn"),
+  notificationBellBtn: $("#notificationBellBtn"),
+  notificationPanel: $("#notificationPanel"),
+  notificationList: $("#notificationList"),
+  notificationBadge: $("#notificationBadge"),
+  markAllNotificationsReadBtn: $("#markAllNotificationsReadBtn")
 };
 
 function escapeHtml(value = "") {
@@ -118,7 +151,7 @@ function toast(message, type = "info") {
   item.textContent = message;
   $("#toastHost").appendChild(item);
 
-  setTimeout(() => item.remove(), 3600);
+  setTimeout(() => item.remove(), 4200);
 }
 
 function timestampToDate(value) {
@@ -136,6 +169,30 @@ function formatDateTime(value) {
     dateStyle: "short",
     timeStyle: "short"
   }).format(date);
+}
+
+function formatDateOnly(value) {
+  if (!value) return "--";
+  const [year, month, day] = String(value).split("-");
+  if (!year || !month || !day) return value;
+  return `${day}/${month}/${year}`;
+}
+
+function toLocalDateInputValue(date) {
+  if (!(date instanceof Date)) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function todayInputValue() {
+  return toLocalDateInputValue(new Date());
+}
+
+function getTaskDateValue(task) {
+  if (task.taskDate) return task.taskDate;
+  return toLocalDateInputValue(timestampToDate(task.createdAt));
 }
 
 function formatMinutes(totalMinutes = 0) {
@@ -228,6 +285,374 @@ function initials(name = "NV") {
 }
 
 // =========================
+// PWA + Browser notifications
+// =========================
+registerServiceWorker();
+updateNotificationPermissionButton();
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  navigator.serviceWorker.register("./sw.js").catch((error) => {
+    console.warn("Không đăng ký được service worker:", error);
+  });
+}
+
+function notificationSupported() {
+  return "Notification" in window;
+}
+
+function updateNotificationPermissionButton() {
+  const button = els.enableNotificationsBtn;
+  if (!button) return;
+
+  button.classList.remove("is-enabled", "is-blocked");
+
+  if (!notificationSupported()) {
+    button.textContent = "Trình duyệt không hỗ trợ thông báo";
+    button.disabled = true;
+    return;
+  }
+
+  if (Notification.permission === "granted") {
+    button.textContent = "Đã bật thông báo";
+    button.classList.add("is-enabled");
+    button.disabled = false;
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    button.textContent = "Thông báo đang bị chặn";
+    button.classList.add("is-blocked");
+    button.disabled = false;
+    return;
+  }
+
+  button.textContent = "Bật thông báo";
+  button.disabled = false;
+}
+
+async function requestNotificationPermission() {
+  if (!notificationSupported()) {
+    toast("Trình duyệt này chưa hỗ trợ thông báo hệ thống.", "error");
+    return;
+  }
+
+  const permission = await Notification.requestPermission();
+  updateNotificationPermissionButton();
+
+  if (permission === "granted") {
+    toast("Đã bật thông báo trên thiết bị này.", "success");
+    await showSystemNotification({
+      id: "permission-test",
+      title: "Shop Task đã bật thông báo",
+      message: "Bạn sẽ nhận thông báo khi có việc mới hoặc khi công việc được xác nhận."
+    });
+  } else if (permission === "denied") {
+    toast("Bạn đã chặn thông báo. Hãy mở khóa trong cài đặt trình duyệt nếu muốn bật lại.", "error");
+  } else {
+    toast("Bạn chưa cấp quyền thông báo.", "info");
+  }
+}
+
+async function showSystemNotification(notification) {
+  if (!notificationSupported() || Notification.permission !== "granted") return;
+
+  const title = notification.title || "Shop Task";
+  const options = {
+    body: notification.message || "Bạn có thông báo mới.",
+    icon: "./icon-192.png",
+    badge: "./icon-192.png",
+    tag: notification.id || notification.taskId || `${Date.now()}`,
+    data: {
+      url: "./",
+      taskId: notification.taskId || null
+    }
+  };
+
+  try {
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification(title, options);
+      return;
+    }
+  } catch (error) {
+    console.warn("Không hiển thị được notification qua service worker:", error);
+  }
+
+  try {
+    new Notification(title, options);
+  } catch (error) {
+    console.warn("Không hiển thị được notification:", error);
+  }
+}
+
+els.enableNotificationsBtn?.addEventListener("click", requestNotificationPermission);
+
+els.notificationBellBtn?.addEventListener("click", () => {
+  els.notificationPanel.classList.toggle("hidden");
+});
+
+document.addEventListener("click", (event) => {
+  if (!els.notificationPanel || els.notificationPanel.classList.contains("hidden")) return;
+  const clickedInside = event.target.closest(".notification-wrap");
+  if (!clickedInside) els.notificationPanel.classList.add("hidden");
+});
+
+els.markAllNotificationsReadBtn?.addEventListener("click", markAllNotificationsRead);
+
+function setupNotificationListener() {
+  if (!state.user) return;
+
+  state.notifications = [];
+  state.knownNotificationIds = new Set();
+  state.notificationsReady = false;
+  renderNotifications();
+
+  const notificationsQuery = query(
+    collection(db, "notifications"),
+    where("recipientUid", "==", state.user.uid)
+  );
+
+  const unsubscribe = onSnapshot(
+    notificationsQuery,
+    (snapshot) => {
+      const docs = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .sort((a, b) => {
+          const bTime = timestampToDate(b.createdAt)?.getTime() || 0;
+          const aTime = timestampToDate(a.createdAt)?.getTime() || 0;
+          return bTime - aTime;
+        });
+
+      state.notifications = docs;
+      renderNotifications();
+
+      if (!state.notificationsReady) {
+        state.knownNotificationIds = new Set(snapshot.docs.map((item) => item.id));
+        state.notificationsReady = true;
+        return;
+      }
+
+      snapshot.docChanges().forEach((change) => {
+        if (change.type !== "added") return;
+        if (state.knownNotificationIds.has(change.doc.id)) return;
+
+        const notification = { id: change.doc.id, ...change.doc.data() };
+        state.knownNotificationIds.add(change.doc.id);
+
+        toast(notification.message || notification.title || "Bạn có thông báo mới.", "info");
+        showSystemNotification(notification);
+      });
+    },
+    (error) => {
+      console.error(error);
+      toast("Không đọc được thông báo. Kiểm tra Firestore Rules cho collection notifications.", "error");
+    }
+  );
+
+  state.unsubs.push(unsubscribe);
+}
+
+function renderNotifications() {
+  if (!els.notificationList || !els.notificationBadge) return;
+
+  const unreadCount = state.notifications.filter((item) => !item.readAt).length;
+
+  els.notificationBadge.textContent = String(unreadCount);
+  els.notificationBadge.classList.toggle("hidden", unreadCount === 0);
+
+  if (!state.notifications.length) {
+    els.notificationList.innerHTML = "Chưa có thông báo.";
+    els.notificationList.classList.add("empty-box");
+    return;
+  }
+
+  els.notificationList.classList.remove("empty-box");
+  els.notificationList.innerHTML = state.notifications
+    .slice(0, 30)
+    .map((item) => `
+      <article class="notification-item ${item.readAt ? "" : "unread"}">
+        <strong>${escapeHtml(item.title || "Thông báo")}</strong>
+        <p>${escapeHtml(item.message || "")}</p>
+        <time>${formatDateTime(item.createdAt)}</time>
+        ${item.readAt ? "" : `<button class="link-btn" data-action="mark-notification-read" data-notification-id="${escapeHtml(item.id)}" type="button">Đã đọc</button>`}
+      </article>
+    `)
+    .join("");
+}
+
+async function markNotificationRead(notificationId) {
+  if (!notificationId) return;
+
+  try {
+    await updateDoc(doc(db, "notifications", notificationId), {
+      readAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error(error);
+    toast("Không đánh dấu được thông báo đã đọc.", "error");
+  }
+}
+
+async function markAllNotificationsRead() {
+  const unread = state.notifications.filter((item) => !item.readAt);
+  if (!unread.length) return;
+
+  try {
+    await Promise.all(
+      unread.slice(0, 30).map((item) => updateDoc(doc(db, "notifications", item.id), {
+        readAt: serverTimestamp()
+      }))
+    );
+  } catch (error) {
+    console.error(error);
+    toast("Không đánh dấu được toàn bộ thông báo.", "error");
+  }
+}
+
+async function createNotification({ recipientUid, type, title, message, taskId, taskTitle }) {
+  if (!recipientUid || !state.user) return;
+
+  const notificationRef = doc(collection(db, "notifications"));
+
+  await setDoc(notificationRef, {
+    id: notificationRef.id,
+    recipientUid,
+    type,
+    title,
+    message,
+    taskId: taskId || null,
+    taskTitle: taskTitle || null,
+    actorUid: state.user.uid,
+    actorName: state.profile?.name || state.user.email || "Người dùng",
+    createdAt: serverTimestamp(),
+    readAt: null
+  });
+}
+
+async function createNotifications(items) {
+  const unique = [];
+  const seen = new Set();
+
+  items.forEach((item) => {
+    if (!item.recipientUid) return;
+    const key = `${item.recipientUid}-${item.type}-${item.taskId || ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(item);
+  });
+
+  if (!unique.length) return;
+
+  try {
+    await Promise.all(unique.map((item) => createNotification(item)));
+  } catch (error) {
+    console.error("Không tạo được thông báo:", error);
+    toast("Thao tác chính đã xong nhưng chưa ghi được thông báo. Kiểm tra Firestore Rules notifications.", "error");
+  }
+}
+
+// =========================
+// Date filter helpers
+// =========================
+function bindDateFilterControls(scope) {
+  const prefix = scope === "admin" ? "admin" : "employee";
+  const modeEl = els[`${prefix}DateMode`];
+  const singleEl = els[`${prefix}SingleDate`];
+  const fromEl = els[`${prefix}DateFrom`];
+  const toEl = els[`${prefix}DateTo`];
+  const clearEl = els[`${prefix}ClearDateFilter`];
+
+  if (!modeEl) return;
+
+  const onChange = () => {
+    state[`${prefix}DateFilter`] = {
+      mode: modeEl.value,
+      single: singleEl?.value || "",
+      from: fromEl?.value || "",
+      to: toEl?.value || ""
+    };
+
+    refreshDateFilterVisibility(scope);
+
+    if (scope === "admin") renderAdminTasks();
+    if (scope === "employee") renderEmployeeTasks();
+  };
+
+  modeEl.addEventListener("change", () => {
+    if (modeEl.value === "today") {
+      const today = todayInputValue();
+      if (singleEl) singleEl.value = today;
+    }
+    onChange();
+  });
+
+  [singleEl, fromEl, toEl].forEach((input) => input?.addEventListener("change", onChange));
+
+  clearEl?.addEventListener("click", () => {
+    modeEl.value = "all";
+    if (singleEl) singleEl.value = "";
+    if (fromEl) fromEl.value = "";
+    if (toEl) toEl.value = "";
+    onChange();
+  });
+
+  refreshDateFilterVisibility(scope);
+}
+
+function refreshDateFilterVisibility(scope) {
+  const prefix = scope === "admin" ? "admin" : "employee";
+  const filter = state[`${prefix}DateFilter`];
+  const singleEl = els[`${prefix}SingleDate`];
+  const fromEl = els[`${prefix}DateFrom`];
+  const toEl = els[`${prefix}DateTo`];
+  const clearEl = els[`${prefix}ClearDateFilter`];
+  const summaryEl = els[`${prefix}DateSummary`];
+
+  singleEl?.classList.toggle("hidden", !["single", "today"].includes(filter.mode));
+  fromEl?.classList.toggle("hidden", filter.mode !== "range");
+  toEl?.classList.toggle("hidden", filter.mode !== "range");
+  clearEl?.classList.toggle("hidden", filter.mode === "all");
+
+  if (summaryEl) summaryEl.textContent = getDateFilterSummary(filter);
+}
+
+function getDateFilterSummary(filter) {
+  if (filter.mode === "today") return `Đang hiển thị công việc giao hôm nay (${formatDateOnly(todayInputValue())}).`;
+  if (filter.mode === "single") return filter.single
+    ? `Đang hiển thị công việc giao ngày ${formatDateOnly(filter.single)}.`
+    : "Chọn ngày để lọc công việc.";
+  if (filter.mode === "range") {
+    if (filter.from && filter.to) return `Đang hiển thị công việc từ ${formatDateOnly(filter.from)} đến ${formatDateOnly(filter.to)}.`;
+    if (filter.from) return `Đang hiển thị công việc từ ${formatDateOnly(filter.from)} trở đi.`;
+    if (filter.to) return `Đang hiển thị công việc đến ${formatDateOnly(filter.to)}.`;
+    return "Chọn khoảng ngày để lọc công việc.";
+  }
+  return "Đang hiển thị tất cả ngày giao việc.";
+}
+
+function isTaskInDateFilter(task, filter) {
+  const taskDate = getTaskDateValue(task);
+  if (!taskDate) return filter.mode === "all";
+
+  if (filter.mode === "all") return true;
+  if (filter.mode === "today") return taskDate === todayInputValue();
+  if (filter.mode === "single") return filter.single ? taskDate === filter.single : true;
+
+  if (filter.mode === "range") {
+    const fromOk = filter.from ? taskDate >= filter.from : true;
+    const toOk = filter.to ? taskDate <= filter.to : true;
+    return fromOk && toOk;
+  }
+
+  return true;
+}
+
+bindDateFilterControls("admin");
+bindDateFilterControls("employee");
+
+// =========================
 // Auth flow
 // =========================
 els.loginForm.addEventListener("submit", async (event) => {
@@ -283,9 +708,13 @@ onAuthStateChanged(auth, async (user) => {
   state.profile = null;
   state.employees = [];
   state.tasks = [];
+  state.notifications = [];
+  state.knownNotificationIds = new Set();
+  state.notificationsReady = false;
 
   if (!user) {
     showLogin();
+    renderNotifications();
     return;
   }
 
@@ -301,6 +730,7 @@ onAuthStateChanged(auth, async (user) => {
     state.profile = profileSnap.data();
 
     showApp();
+    setupNotificationListener();
 
     if (state.profile.role === "admin") {
       setupAdminDashboard();
@@ -319,6 +749,7 @@ function showLogin() {
   els.appView.classList.add("hidden");
   els.adminView.classList.add("hidden");
   els.employeeView.classList.add("hidden");
+  els.notificationPanel?.classList.add("hidden");
 }
 
 function showApp() {
@@ -328,6 +759,7 @@ function showApp() {
   const roleText = state.profile.role === "admin" ? "Admin" : "Nhân viên";
 
   els.currentUserText.textContent = `${state.profile.name || state.user.email} • ${roleText}`;
+  updateNotificationPermissionButton();
 }
 
 function cleanupSubscriptions() {
@@ -380,7 +812,7 @@ function handleSnapshotError(error) {
 
 function renderEmployees() {
   if (!state.employees.length) {
-    els.employeeList.innerHTML = "";
+    els.employeeList.innerHTML = "Chưa có nhân viên.";
     els.employeeList.classList.add("empty");
     return;
   }
@@ -525,13 +957,32 @@ els.createTaskForm.addEventListener("submit", async (event) => {
       differencePercent: null
     });
 
+    await createNotifications([
+      {
+        recipientUid: assignedToUid,
+        type: "task_assigned",
+        title: "Bạn có công việc mới",
+        message: `${state.profile.name || "Admin"} đã giao cho bạn: ${title}. Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.`,
+        taskId: taskRef.id,
+        taskTitle: title
+      },
+      {
+        recipientUid: state.user.uid,
+        type: "task_assigned_admin",
+        title: "Đã giao việc thành công",
+        message: `Bạn đã giao “${title}” cho ${assignedEmployee.name}.`,
+        taskId: taskRef.id,
+        taskTitle: title
+      }
+    ]);
+
     els.createTaskForm.reset();
     $("#taskHours").value = 0;
     $("#taskMinutes").value = 30;
 
     els.taskModal.classList.add("hidden");
 
-    toast("Đã giao việc thành công.", "success");
+    toast("Đã giao việc thành công và gửi thông báo.", "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không giao được việc.", "error");
@@ -609,21 +1060,29 @@ function setupEmployeeDashboard() {
 // =========================
 // Render tasks
 // =========================
+function getAdminBaseFilteredTasks(computedTasks) {
+  return computedTasks
+    .filter((task) => isTaskInDateFilter(task, state.adminDateFilter))
+    .filter((task) => state.adminEmployeeFilter === "all" || task.assignedToUid === state.adminEmployeeFilter);
+}
+
 function renderAdminTasks() {
   const computed = state.tasks.map((task) => ({
     ...task,
     displayStatus: getDisplayStatus(task)
   }));
 
+  const baseFiltered = getAdminBaseFilteredTasks(computed);
+
   const stats = {
-    doing: computed.filter((task) => (
+    doing: baseFiltered.filter((task) => (
       task.displayStatus === "doing" ||
       task.displayStatus === "near_due" ||
       task.displayStatus === "redo"
     )).length,
-    submitted: computed.filter((task) => task.displayStatus === "submitted").length,
-    overdue: computed.filter((task) => task.displayStatus === "overdue").length,
-    completed: computed.filter((task) => task.displayStatus === "completed").length
+    submitted: baseFiltered.filter((task) => task.displayStatus === "submitted").length,
+    overdue: baseFiltered.filter((task) => task.displayStatus === "overdue").length,
+    completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
 
   els.statDoing.textContent = stats.doing;
@@ -631,7 +1090,7 @@ function renderAdminTasks() {
   els.statOverdue.textContent = stats.overdue;
   els.statCompleted.textContent = stats.completed;
 
-  let filtered = computed;
+  let filtered = baseFiltered;
 
   if (state.adminStatusFilter !== "all") {
     filtered = filtered.filter((task) => (
@@ -640,12 +1099,10 @@ function renderAdminTasks() {
     ));
   }
 
-  if (state.adminEmployeeFilter !== "all") {
-    filtered = filtered.filter((task) => task.assignedToUid === state.adminEmployeeFilter);
-  }
+  refreshDateFilterVisibility("admin");
 
   if (!filtered.length) {
-    els.adminTaskList.innerHTML = "";
+    els.adminTaskList.innerHTML = "Không có công việc phù hợp bộ lọc.";
     els.adminTaskList.classList.add("empty");
     return;
   }
@@ -660,19 +1117,24 @@ function renderAdminTasks() {
 }
 
 function renderEmployeeTasks() {
-  if (!state.tasks.length) {
-    els.employeeTaskList.innerHTML = "";
+  const filtered = state.tasks
+    .filter((task) => isTaskInDateFilter(task, state.employeeDateFilter))
+    .map((task) => ({
+      ...task,
+      displayStatus: getDisplayStatus(task)
+    }));
+
+  refreshDateFilterVisibility("employee");
+
+  if (!filtered.length) {
+    els.employeeTaskList.innerHTML = "Không có công việc phù hợp bộ lọc.";
     els.employeeTaskList.classList.add("empty");
     return;
   }
 
   els.employeeTaskList.classList.remove("empty");
 
-  els.employeeTaskList.innerHTML = state.tasks
-    .map((task) => ({
-      ...task,
-      displayStatus: getDisplayStatus(task)
-    }))
+  els.employeeTaskList.innerHTML = filtered
     .map((task) => renderTaskCard(task, "employee"))
     .join("");
 
@@ -711,7 +1173,7 @@ function renderTaskCard(task, mode) {
         </div>
         <div class="meta-box">
           <span>Ngày giao</span>
-          <strong>${escapeHtml(task.taskDate || formatDateTime(task.createdAt))}</strong>
+          <strong>${escapeHtml(formatDateOnly(getTaskDateValue(task)))}</strong>
         </div>
         <div class="meta-box">
           <span>Thời gian quy định</span>
@@ -814,7 +1276,7 @@ function renderTaskActions(task, permissions) {
   return `<div class="task-actions">${buttons.join("")}</div>`;
 }
 
-// Event delegation cho các nút trong task card.
+// Event delegation cho các nút trong task card và notification list.
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-action]");
 
@@ -822,8 +1284,6 @@ document.addEventListener("click", async (event) => {
 
   const action = button.dataset.action;
   const taskId = button.dataset.taskId;
-
-  if (!taskId) return;
 
   if (action === "submit-task") {
     await submitTask(taskId, button);
@@ -835,6 +1295,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "redo-task") {
     await requestRedo(taskId, button);
+  }
+
+  if (action === "mark-notification-read") {
+    await markNotificationRead(button.dataset.notificationId);
   }
 });
 
@@ -852,6 +1316,17 @@ async function submitTask(taskId, button) {
       status: "submitted",
       submittedAt: serverTimestamp()
     });
+
+    await createNotifications([
+      {
+        recipientUid: task.assignedByUid,
+        type: "task_submitted",
+        title: "Nhân viên báo hoàn thành",
+        message: `${state.profile.name || "Nhân viên"} đã báo hoàn thành: ${task.title}. Vui lòng kiểm tra và xác nhận.`,
+        taskId,
+        taskTitle: task.title
+      }
+    ]);
 
     toast("Đã gửi báo hoàn thành. Vui lòng chờ Admin xác nhận.", "success");
   } catch (error) {
@@ -892,7 +1367,28 @@ async function approveTask(taskId, button) {
       differencePercent: result.differencePercent
     });
 
-    toast("Đã xác nhận hoàn thành và tính kết quả.", "success");
+    const resultText = taskResultShortText(result);
+
+    await createNotifications([
+      {
+        recipientUid: task.assignedToUid,
+        type: "task_approved",
+        title: "Công việc đã được Admin xác nhận",
+        message: `Công việc “${task.title}” đã hoàn thành. Kết quả: ${resultText}.`,
+        taskId,
+        taskTitle: task.title
+      },
+      {
+        recipientUid: state.user.uid,
+        type: "task_approved_admin",
+        title: "Đã xác nhận hoàn thành",
+        message: `Bạn đã xác nhận “${task.title}” của ${task.assignedToName}. Kết quả: ${resultText}.`,
+        taskId,
+        taskTitle: task.title
+      }
+    ]);
+
+    toast("Đã xác nhận hoàn thành, tính kết quả và gửi thông báo.", "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không xác nhận được công việc.", "error");
@@ -901,14 +1397,35 @@ async function approveTask(taskId, button) {
   }
 }
 
+function taskResultShortText(result) {
+  if (result.resultType === "faster") return `nhanh hơn ${result.differenceMinutes} phút (${result.differencePercent}%)`;
+  if (result.resultType === "slower") return `chậm hơn ${result.differenceMinutes} phút (${result.differencePercent}%)`;
+  return "đúng thời gian";
+}
+
 async function requestRedo(taskId, button) {
   setButtonLoading(button, true, "Đang cập nhật...");
 
   try {
+    const task = state.tasks.find((item) => item.id === taskId);
+
     await updateDoc(doc(db, "tasks", taskId), {
       status: "redo",
       submittedAt: null
     });
+
+    if (task) {
+      await createNotifications([
+        {
+          recipientUid: task.assignedToUid,
+          type: "task_redo",
+          title: "Admin yêu cầu làm lại",
+          message: `Công việc “${task.title}” cần làm lại. Vui lòng kiểm tra lại yêu cầu.`,
+          taskId,
+          taskTitle: task.title
+        }
+      ]);
+    }
 
     toast("Đã yêu cầu nhân viên làm lại.", "success");
   } catch (error) {

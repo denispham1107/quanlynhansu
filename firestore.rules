@@ -24,6 +24,21 @@ service cloud.firestore {
       return status in ["doing", "submitted", "completed", "redo", "overdue"];
     }
 
+    function taskDoc(taskId) {
+      return /databases/$(database)/documents/tasks/$(taskId);
+    }
+
+    function isValidNotificationType(type) {
+      return type in [
+        "task_assigned",
+        "task_assigned_admin",
+        "task_submitted",
+        "task_approved",
+        "task_approved_admin",
+        "task_redo"
+      ];
+    }
+
     match /users/{userId} {
       // Admin đọc tất cả user; nhân viên chỉ đọc hồ sơ của chính mình.
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
@@ -118,5 +133,60 @@ service cloud.firestore {
 
       allow delete: if isAdmin();
     }
+
+    match /notifications/{notificationId} {
+      // Mỗi người chỉ đọc thông báo gửi cho chính mình. Admin có thể đọc tất cả để hỗ trợ kiểm tra lỗi.
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.recipientUid == request.auth.uid);
+
+      // Admin tạo thông báo khi giao việc, xác nhận hoàn thành, yêu cầu làm lại.
+      // Nhân viên chỉ được tạo thông báo "đã báo hoàn thành" gửi về đúng Admin giao việc.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          "id",
+          "recipientUid",
+          "type",
+          "title",
+          "message",
+          "taskId",
+          "taskTitle",
+          "actorUid",
+          "actorName",
+          "createdAt",
+          "readAt"
+        ])
+        && request.resource.data.id == notificationId
+        && request.resource.data.recipientUid is string
+        && exists(userDoc(request.resource.data.recipientUid))
+        && isValidNotificationType(request.resource.data.type)
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.taskId is string
+        && exists(taskDoc(request.resource.data.taskId))
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorName is string
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.readAt == null
+        && (
+          isAdmin()
+          || (
+            request.resource.data.type == "task_submitted"
+            && get(taskDoc(request.resource.data.taskId)).data.assignedToUid == request.auth.uid
+            && get(taskDoc(request.resource.data.taskId)).data.assignedByUid == request.resource.data.recipientUid
+          )
+        );
+
+      // Người nhận được đánh dấu thông báo của mình là đã đọc.
+      allow update: if signedIn()
+        && resource.data.recipientUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readAt"])
+        && request.resource.data.readAt == request.time;
+
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.recipientUid == request.auth.uid);
+    }
+
   }
 }
