@@ -20,7 +20,8 @@ import {
   orderBy,
   onSnapshot,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 // =========================
@@ -94,7 +95,9 @@ const els = {
   openTaskModalBtn: $("#openTaskModalBtn"),
   taskModal: $("#taskModal"),
   createTaskForm: $("#createTaskForm"),
-  taskAssignee: $("#taskAssignee"),
+  workOrderName: $("#workOrderName"),
+  addTaskRowBtn: $("#addTaskRowBtn"),
+  taskRowsContainer: $("#taskRowsContainer"),
   adminEmployeeFilter: $("#adminEmployeeFilter"),
   adminStatusFilter: $("#adminStatusFilter"),
   adminDateMode: $("#adminDateMode"),
@@ -832,16 +835,27 @@ function renderEmployees() {
     .join("");
 }
 
-function renderEmployeeSelects() {
-  const employeeOptions = state.employees
+function employeeOptionsHtml() {
+  return state.employees
     .map((employee) => (
       `<option value="${escapeHtml(employee.uid)}">${escapeHtml(employee.name)} - ${escapeHtml(employee.email)}</option>`
     ))
     .join("");
+}
 
-  els.taskAssignee.innerHTML = `<option value="">Chọn nhân viên</option>${employeeOptions}`;
+function renderEmployeeSelects() {
+  const employeeOptions = employeeOptionsHtml();
+
   els.adminEmployeeFilter.innerHTML = `<option value="all">Tất cả nhân viên</option>${employeeOptions}`;
   els.adminEmployeeFilter.value = state.adminEmployeeFilter;
+
+  // Nếu modal tạo phiếu đang mở, cập nhật lại danh sách nhân viên trong từng dòng
+  // (giữ nguyên lựa chọn cũ nếu nhân viên đó vẫn còn trong danh sách).
+  $$("#taskRowsContainer .row-assignee").forEach((select) => {
+    const currentValue = select.value;
+    select.innerHTML = `<option value="">Chọn nhân viên</option>${employeeOptions}`;
+    if (currentValue) select.value = currentValue;
+  });
 }
 
 els.createEmployeeForm.addEventListener("submit", async (event) => {
@@ -887,14 +901,114 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
   }
 });
 
+// =========================
+// Quản lý các dòng công việc trong phiếu (task rows)
+// =========================
+let taskRowIdCounter = 0;
+
+function createTaskRowElement() {
+  taskRowIdCounter += 1;
+  const rowId = `row-${taskRowIdCounter}`;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "task-row";
+  wrapper.dataset.rowId = rowId;
+
+  wrapper.innerHTML = `
+    <div class="task-row-head">
+      <strong>Công việc</strong>
+      <button type="button" class="icon-btn small" data-action="remove-task-row" data-row-id="${rowId}" aria-label="Xóa công việc này">×</button>
+    </div>
+    <label>
+      Tên công việc
+      <input type="text" class="row-title" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
+    </label>
+    <label>
+      Mô tả công việc
+      <textarea class="row-description" rows="3" placeholder="Ghi rõ yêu cầu, tiêu chuẩn hoàn thành..." required></textarea>
+    </label>
+    <div class="two-col">
+      <label>
+        Ngày giao việc
+        <input type="date" class="row-date" required />
+      </label>
+      <label>
+        Người được giao
+        <select class="row-assignee" required>
+          <option value="">Chọn nhân viên</option>
+          ${employeeOptionsHtml()}
+        </select>
+      </label>
+    </div>
+    <div class="two-col">
+      <label>
+        Số giờ
+        <input type="number" class="row-hours" min="0" max="168" value="0" required />
+      </label>
+      <label>
+        Số phút
+        <input type="number" class="row-minutes" min="0" max="59" value="30" required />
+      </label>
+    </div>
+  `;
+
+  wrapper.querySelector(".row-date").valueAsDate = new Date();
+
+  return wrapper;
+}
+
+function addTaskRow() {
+  els.taskRowsContainer.appendChild(createTaskRowElement());
+  updateTaskRowHeadings();
+}
+
+function removeTaskRow(rowId) {
+  const rows = $$("#taskRowsContainer .task-row");
+  if (rows.length <= 1) {
+    toast("Phiếu cần có ít nhất 1 công việc.", "error");
+    return;
+  }
+
+  const row = els.taskRowsContainer.querySelector(`[data-row-id="${rowId}"]`);
+  row?.remove();
+  updateTaskRowHeadings();
+}
+
+function updateTaskRowHeadings() {
+  const rows = $$("#taskRowsContainer .task-row");
+
+  rows.forEach((row, index) => {
+    row.querySelector(".task-row-head strong").textContent = `Công việc #${index + 1}`;
+  });
+
+  // Chỉ cho xóa khi có nhiều hơn 1 dòng.
+  rows.forEach((row) => {
+    const removeBtn = row.querySelector('[data-action="remove-task-row"]');
+    if (removeBtn) removeBtn.classList.toggle("hidden", rows.length <= 1);
+  });
+}
+
+function resetTaskRows() {
+  els.taskRowsContainer.innerHTML = "";
+  addTaskRow();
+}
+
+els.addTaskRowBtn.addEventListener("click", addTaskRow);
+
+els.taskRowsContainer.addEventListener("click", (event) => {
+  const button = event.target.closest('[data-action="remove-task-row"]');
+  if (!button) return;
+  removeTaskRow(button.dataset.rowId);
+});
+
 els.openTaskModalBtn.addEventListener("click", () => {
   if (!state.employees.length) {
     toast("Bạn cần tạo ít nhất 1 tài khoản nhân viên trước khi giao việc.", "error");
     return;
   }
 
-  const today = new Date();
-  $("#taskDate").valueAsDate = today;
+  els.workOrderName.value = "";
+  resetTaskRows();
 
   els.taskModal.classList.remove("hidden");
 });
@@ -905,87 +1019,147 @@ $$("[data-close-modal]").forEach((button) => {
   });
 });
 
+function readTaskRowsData() {
+  const rowElements = $$("#taskRowsContainer .task-row");
+
+  return rowElements.map((row, index) => {
+    const title = row.querySelector(".row-title").value.trim();
+    const description = row.querySelector(".row-description").value.trim();
+    const taskDate = row.querySelector(".row-date").value;
+    const assignedToUid = row.querySelector(".row-assignee").value;
+    const hours = Number(row.querySelector(".row-hours").value || 0);
+    const minutes = Number(row.querySelector(".row-minutes").value || 0);
+    const deadlineMinutes = hours * 60 + minutes;
+    const assignedEmployee = state.employees.find((employee) => employee.uid === assignedToUid);
+
+    return {
+      index,
+      title,
+      description,
+      taskDate,
+      assignedToUid,
+      assignedEmployee,
+      deadlineMinutes
+    };
+  });
+}
+
+function validateTaskRows(rows) {
+  if (!rows.length) {
+    return "Phiếu cần có ít nhất 1 công việc.";
+  }
+
+  for (const row of rows) {
+    const rowLabel = `Công việc #${row.index + 1}`;
+
+    if (!row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
+    if (!row.description) return `${rowLabel}: vui lòng nhập mô tả công việc.`;
+    if (!row.assignedEmployee) return `${rowLabel}: vui lòng chọn nhân viên hợp lệ.`;
+    if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
+    if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
+  }
+
+  return null;
+}
+
 els.createTaskForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   if (state.profile?.role !== "admin") return;
 
   const button = $("#createTaskBtn");
-  setButtonLoading(button, true, "Đang giao việc...");
+  setButtonLoading(button, true, "Đang tạo phiếu...");
 
   try {
-    const title = $("#taskTitle").value.trim();
-    const description = $("#taskDescription").value.trim();
-    const assignedToUid = $("#taskAssignee").value;
-    const assignedEmployee = state.employees.find((employee) => employee.uid === assignedToUid);
-    const hours = Number($("#taskHours").value || 0);
-    const minutes = Number($("#taskMinutes").value || 0);
-    const deadlineMinutes = hours * 60 + minutes;
+    const workOrderName = els.workOrderName.value.trim();
 
-    if (!assignedEmployee) {
-      throw new Error("Vui lòng chọn nhân viên hợp lệ.");
+    if (!workOrderName) {
+      throw new Error("Vui lòng nhập tên phiếu công việc.");
     }
 
-    if (deadlineMinutes <= 0) {
-      throw new Error("Thời gian cần hoàn thành phải lớn hơn 0 phút.");
+    const rows = readTaskRowsData();
+    const validationError = validateTaskRows(rows);
+
+    if (validationError) {
+      throw new Error(validationError);
     }
 
     const now = new Date();
-    const deadlineAt = new Date(now.getTime() + deadlineMinutes * 60 * 1000);
-    const taskDateInput = $("#taskDate").value;
+    const batch = writeBatch(db);
 
-    const taskRef = doc(collection(db, "tasks"));
-
-    await setDoc(taskRef, {
-      id: taskRef.id,
-      title,
-      description,
-      taskDate: taskDateInput,
-      assignedToUid,
-      assignedToName: assignedEmployee.name,
-      assignedByUid: state.user.uid,
-      assignedByName: state.profile.name,
+    const workOrderRef = doc(collection(db, "workOrders"));
+    batch.set(workOrderRef, {
+      id: workOrderRef.id,
+      name: workOrderName,
+      createdByUid: state.user.uid,
+      createdByName: state.profile.name,
       createdAt: serverTimestamp(),
-      deadlineMinutes,
-      deadlineAt: Timestamp.fromDate(deadlineAt),
-      submittedAt: null,
-      approvedAt: null,
-      status: "doing",
-      actualMinutes: null,
-      resultType: null,
-      differenceMinutes: null,
-      differencePercent: null
+      taskCount: rows.length
     });
 
-    await createNotifications([
-      {
-        recipientUid: assignedToUid,
+    const notificationItems = [];
+    const createdTaskRefs = [];
+
+    rows.forEach((row) => {
+      const deadlineAt = new Date(now.getTime() + row.deadlineMinutes * 60 * 1000);
+      const taskRef = doc(collection(db, "tasks"));
+      createdTaskRefs.push({ ref: taskRef, row });
+
+      batch.set(taskRef, {
+        id: taskRef.id,
+        title: row.title,
+        description: row.description,
+        taskDate: row.taskDate,
+        assignedToUid: row.assignedToUid,
+        assignedToName: row.assignedEmployee.name,
+        assignedByUid: state.user.uid,
+        assignedByName: state.profile.name,
+        workOrderId: workOrderRef.id,
+        workOrderName,
+        createdAt: serverTimestamp(),
+        deadlineMinutes: row.deadlineMinutes,
+        deadlineAt: Timestamp.fromDate(deadlineAt),
+        submittedAt: null,
+        approvedAt: null,
+        status: "doing",
+        actualMinutes: null,
+        resultType: null,
+        differenceMinutes: null,
+        differencePercent: null
+      });
+
+      notificationItems.push({
+        recipientUid: row.assignedToUid,
         type: "task_assigned",
         title: "Bạn có công việc mới",
-        message: `${state.profile.name || "Admin"} đã giao cho bạn: ${title}. Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.`,
+        message: `${state.profile.name || "Admin"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Hạn hoàn thành: ${formatMinutes(row.deadlineMinutes)}.`,
         taskId: taskRef.id,
-        taskTitle: title
-      },
-      {
-        recipientUid: state.user.uid,
-        type: "task_assigned_admin",
-        title: "Đã giao việc thành công",
-        message: `Bạn đã giao “${title}” cho ${assignedEmployee.name}.`,
-        taskId: taskRef.id,
-        taskTitle: title
-      }
-    ]);
+        taskTitle: row.title
+      });
+    });
 
-    els.createTaskForm.reset();
-    $("#taskHours").value = 0;
-    $("#taskMinutes").value = 30;
+    await batch.commit();
+
+    notificationItems.push({
+      recipientUid: state.user.uid,
+      type: "task_assigned_admin",
+      title: "Đã tạo phiếu công việc",
+      message: `Bạn đã tạo phiếu “${workOrderName}” với ${rows.length} công việc.`,
+      taskId: createdTaskRefs[0].ref.id,
+      taskTitle: workOrderName
+    });
+
+    await createNotifications(notificationItems);
+
+    els.workOrderName.value = "";
+    resetTaskRows();
 
     els.taskModal.classList.add("hidden");
 
-    toast("Đã giao việc thành công và gửi thông báo.", "success");
+    toast(`Đã tạo phiếu “${workOrderName}” với ${rows.length} công việc.`, "success");
   } catch (error) {
     console.error(error);
-    toast(error.message || "Không giao được việc.", "error");
+    toast(error.message || "Không tạo được phiếu công việc.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -1109,11 +1283,53 @@ function renderAdminTasks() {
 
   els.adminTaskList.classList.remove("empty");
 
-  els.adminTaskList.innerHTML = filtered
-    .map((task) => renderTaskCard(task, "admin"))
+  els.adminTaskList.innerHTML = groupTasksByWorkOrder(filtered)
+    .map((group) => renderTicketGroup(group))
     .join("");
 
   updateCountdowns();
+}
+
+// Gom các công việc thuộc cùng 1 phiếu (workOrder) lại với nhau, giữ nguyên thứ tự
+// xuất hiện đầu tiên của mỗi phiếu (task mới nhất trước, vì state.tasks đã sort desc).
+function groupTasksByWorkOrder(tasks) {
+  const groups = [];
+  const groupByKey = new Map();
+
+  tasks.forEach((task) => {
+    const key = task.workOrderId || "legacy";
+
+    if (!groupByKey.has(key)) {
+      const group = {
+        key,
+        name: task.workOrderName || "Công việc lẻ (giao trước khi có Phiếu)",
+        tasks: []
+      };
+      groupByKey.set(key, group);
+      groups.push(group);
+    }
+
+    groupByKey.get(key).tasks.push(task);
+  });
+
+  return groups;
+}
+
+function renderTicketGroup(group) {
+  return `
+    <section class="ticket-group">
+      <div class="ticket-group-header">
+        <div>
+          <span class="ticket-badge">Phiếu công việc</span>
+          <h4>${escapeHtml(group.name)}</h4>
+        </div>
+        <span class="ticket-count">${group.tasks.length} công việc</span>
+      </div>
+      <div class="ticket-tasks">
+        ${group.tasks.map((task) => renderTaskCard(task, "admin")).join("")}
+      </div>
+    </section>
+  `;
 }
 
 function renderEmployeeTasks() {
@@ -1167,6 +1383,12 @@ function renderTaskCard(task, mode) {
       </div>
 
       <div class="task-meta">
+        ${mode === "employee" ? `
+        <div class="meta-box">
+          <span>Phiếu công việc</span>
+          <strong>${escapeHtml(task.workOrderName || "--")}</strong>
+        </div>
+        ` : ""}
         <div class="meta-box">
           <span>Nhân viên</span>
           <strong>${escapeHtml(task.assignedToName || "--")}</strong>

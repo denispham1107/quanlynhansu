@@ -74,7 +74,7 @@
           <h2>Giao việc và duyệt kết quả nhân viên</h2>
           <p class="muted">Theo dõi realtime: đang làm, gần hết giờ, quá hạn, chờ xác nhận và đã hoàn thành.</p>
         </div>
-        <button id="openTaskModalBtn" class="btn primary large">+ Thêm công việc</button>
+        <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
       </section>
 
       <section class="stats-grid">
@@ -192,50 +192,33 @@
     </main>
   </section>
 
-  <!-- CREATE TASK MODAL -->
+  <!-- CREATE WORK ORDER (PHIẾU CÔNG VIỆC) MODAL -->
   <div id="taskModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
     <div class="modal-backdrop" data-close-modal></div>
     <div class="modal-card">
       <div class="modal-header">
         <div>
           <p class="eyebrow">Giao việc mới</p>
-          <h3 id="taskModalTitle">+ Thêm công việc</h3>
+          <h3 id="taskModalTitle">+ Tạo phiếu công việc</h3>
         </div>
         <button class="icon-btn" data-close-modal aria-label="Đóng">×</button>
       </div>
 
       <form id="createTaskForm" class="form-stack">
         <label>
-          Tên công việc
-          <input id="taskTitle" type="text" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
+          Tên phiếu công việc
+          <input id="workOrderName" type="text" placeholder="Ví dụ: Dọn dẹp cửa hàng cuối tuần" required />
         </label>
-        <label>
-          Mô tả công việc
-          <textarea id="taskDescription" rows="4" placeholder="Ghi rõ yêu cầu, tiêu chuẩn hoàn thành..." required></textarea>
-        </label>
-        <div class="two-col">
-          <label>
-            Ngày giao việc
-            <input id="taskDate" type="date" required />
-          </label>
-          <label>
-            Người được giao
-            <select id="taskAssignee" required>
-              <option value="">Chọn nhân viên</option>
-            </select>
-          </label>
+
+        <div class="task-rows-block">
+          <div class="task-rows-header">
+            <h4>Danh sách công việc trong phiếu</h4>
+            <button id="addTaskRowBtn" class="btn ghost small" type="button">+ Thêm công việc</button>
+          </div>
+          <div id="taskRowsContainer" class="task-rows-container"></div>
         </div>
-        <div class="two-col">
-          <label>
-            Số giờ
-            <input id="taskHours" type="number" min="0" max="168" value="0" required />
-          </label>
-          <label>
-            Số phút
-            <input id="taskMinutes" type="number" min="0" max="59" value="30" required />
-          </label>
-        </div>
-        <button id="createTaskBtn" class="btn primary" type="submit">Giao việc</button>
+
+        <button id="createTaskBtn" class="btn primary" type="submit">Tạo phiếu &amp; giao việc</button>
       </form>
     </div>
   </div>

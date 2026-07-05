@@ -1,9 +1,11 @@
+// Thay toàn bộ thông tin bên dưới bằng Firebase Web App config của dự án bạn.
+// Firebase web config có thể đặt ở frontend. Đây KHÔNG phải private key Admin SDK.
+// Bảo mật thật sự nằm ở Firebase Authentication + Firestore Security Rules.
 export const firebaseConfig = {
-  apiKey: "AIzaSyCh-ngJV1Oj0xZUx4Hq-c6gWs0V9Kvwbds",
-  authDomain: "quanlynhansu-6e63b.firebaseapp.com",
-  projectId: "quanlynhansu-6e63b",
-  storageBucket: "quanlynhansu-6e63b.firebasestorage.app",
-  messagingSenderId: "397661730137",
-  appId: "1:397661730137:web:a25523d25d81fd3f4cc848",
-  measurementId: "G-NYBQE7WI2N"
+  apiKey: "YOUR_FIREBASE_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_FIREBASE_APP_ID"
 };

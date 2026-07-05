@@ -28,6 +28,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/tasks/$(taskId);
     }
 
+    function workOrderDoc(workOrderId) {
+      return /databases/$(database)/documents/workOrders/$(workOrderId);
+    }
+
     function isValidNotificationType(type) {
       return type in [
         "task_assigned",
@@ -65,6 +69,33 @@ service cloud.firestore {
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
 
+    match /workOrders/{workOrderId} {
+      // Chỉ Admin tạo/đọc/xoá phiếu công việc. Nhân viên xem tên phiếu qua
+      // trường workOrderName đã được ghi kèm trong từng task, không cần đọc trực tiếp collection này.
+      allow read: if isAdmin();
+
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          "id",
+          "name",
+          "createdByUid",
+          "createdByName",
+          "createdAt",
+          "taskCount"
+        ])
+        && request.resource.data.id == workOrderId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdByName is string
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.taskCount is int
+        && request.resource.data.taskCount > 0;
+
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
     match /tasks/{taskId} {
       // Admin đọc tất cả task; nhân viên chỉ đọc task được giao cho chính mình.
       allow read: if isAdmin()
@@ -81,6 +112,8 @@ service cloud.firestore {
           "assignedToName",
           "assignedByUid",
           "assignedByName",
+          "workOrderId",
+          "workOrderName",
           "createdAt",
           "deadlineMinutes",
           "deadlineAt",
@@ -101,6 +134,11 @@ service cloud.firestore {
         && get(userDoc(request.resource.data.assignedToUid)).data.role == "employee"
         && request.resource.data.assignedByUid == request.auth.uid
         && request.resource.data.assignedByName is string
+        && request.resource.data.workOrderId is string
+        && request.resource.data.workOrderId.size() > 0
+        && exists(workOrderDoc(request.resource.data.workOrderId))
+        && request.resource.data.workOrderName is string
+        && request.resource.data.workOrderName.size() > 0
         && request.resource.data.createdAt == request.time
         && request.resource.data.deadlineMinutes is int
         && request.resource.data.deadlineMinutes > 0
