@@ -1,4 +1,4 @@
-const CACHE_NAME = "shop-task-v2";
+const CACHE_NAME = "shop-task-v3";
 const CORE_ASSETS = [
   "./",
   "./index.html",
