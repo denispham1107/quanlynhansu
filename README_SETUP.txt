@@ -17,3 +17,4 @@ Bước nhanh:
 6. Tạo document users/{ADMIN_UID} với role = admin.
 7. Publish firestore.rules.
 8. Mở index.html bằng local server hoặc deploy Firebase Hosting/GitHub Pages.
+Update deploy trigger
