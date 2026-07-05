@@ -223,12 +223,34 @@ els.loginForm.addEventListener("submit", async (event) => {
     const password = $("#loginPassword").value;
     await signInWithEmailAndPassword(auth, email, password);
   } catch (error) {
-    console.error(error);
-    toast("Đăng nhập thất bại. Kiểm tra email/mật khẩu hoặc tài khoản Firebase.", "error");
-  } finally {
-    setButtonLoading(button, false);
+  console.error("LOGIN ERROR:", error);
+
+  let message = `Lỗi đăng nhập: ${error.code || error.message}`;
+
+  if (error.code === "auth/invalid-credential") {
+    message = "Sai email hoặc mật khẩu, hoặc tài khoản chưa được tạo trong Firebase Authentication.";
   }
-});
+
+  if (error.code === "auth/user-not-found") {
+    message = "Email này chưa có trong Firebase Authentication > Users.";
+  }
+
+  if (error.code === "auth/wrong-password") {
+    message = "Sai mật khẩu.";
+  }
+
+  if (error.code === "auth/operation-not-allowed") {
+    message = "Bạn chưa bật Email/Password trong Firebase Authentication.";
+  }
+
+  if (error.code === "auth/unauthorized-domain") {
+    message = "Domain GitHub Pages chưa được thêm vào Firebase Authorized domains.";
+  }
+
+  toast(message, "error");
+} finally {
+  setButtonLoading(button, false);
+}
 
 els.logoutBtn.addEventListener("click", async () => {
   await signOut(auth);
