@@ -1,0 +1,122 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(userDoc(request.auth.uid))
+        && get(userDoc(request.auth.uid)).data.role == "admin";
+    }
+
+    function isValidRole(role) {
+      return role in ["admin", "employee"];
+    }
+
+    function isValidTaskStatus(status) {
+      return status in ["doing", "submitted", "completed", "redo", "overdue"];
+    }
+
+    match /users/{userId} {
+      // Admin đọc tất cả user; nhân viên chỉ đọc hồ sơ của chính mình.
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+
+      // Admin tạo hồ sơ user sau khi tạo tài khoản bằng Firebase Auth.
+      // Admin đầu tiên nên tạo thủ công theo hướng dẫn, trước khi bật rules chặt này.
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(["uid", "name", "email", "role", "createdByUid", "createdAt"])
+        && request.resource.data.uid == userId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.email is string
+        && isValidRole(request.resource.data.role)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+
+      // Chỉ Admin được sửa user. Không cho đổi uid/email gốc qua client.
+      allow update: if isAdmin()
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.role in ["admin", "employee"];
+
+      // Có thể xoá hồ sơ nhân viên, nhưng không cho Admin tự xoá chính mình từ client.
+      allow delete: if isAdmin() && request.auth.uid != userId;
+    }
+
+    match /tasks/{taskId} {
+      // Admin đọc tất cả task; nhân viên chỉ đọc task được giao cho chính mình.
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.assignedToUid == request.auth.uid);
+
+      // Chỉ Admin được giao việc.
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          "id",
+          "title",
+          "description",
+          "taskDate",
+          "assignedToUid",
+          "assignedToName",
+          "assignedByUid",
+          "assignedByName",
+          "createdAt",
+          "deadlineMinutes",
+          "deadlineAt",
+          "submittedAt",
+          "approvedAt",
+          "status",
+          "actualMinutes",
+          "resultType",
+          "differenceMinutes",
+          "differencePercent"
+        ])
+        && request.resource.data.id == taskId
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.description is string
+        && request.resource.data.assignedToUid is string
+        && exists(userDoc(request.resource.data.assignedToUid))
+        && get(userDoc(request.resource.data.assignedToUid)).data.role == "employee"
+        && request.resource.data.assignedByUid == request.auth.uid
+        && request.resource.data.assignedByName is string
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.deadlineMinutes is int
+        && request.resource.data.deadlineMinutes > 0
+        && request.resource.data.deadlineMinutes <= 10080
+        && request.resource.data.deadlineAt is timestamp
+        && request.resource.data.deadlineAt > request.time
+        && request.resource.data.status == "doing"
+        && request.resource.data.submittedAt == null
+        && request.resource.data.approvedAt == null
+        && request.resource.data.actualMinutes == null
+        && request.resource.data.resultType == null
+        && request.resource.data.differenceMinutes == null
+        && request.resource.data.differencePercent == null;
+
+      // Nhân viên chỉ được bấm Hoàn thành task của chính mình.
+      // Không được tự chuyển sang completed, không được sửa nội dung/deadline/người nhận.
+      allow update: if signedIn()
+        && resource.data.assignedToUid == request.auth.uid
+        && resource.data.status in ["doing", "redo", "overdue"]
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "submittedAt"])
+        && request.resource.data.status == "submitted"
+        && request.resource.data.submittedAt == request.time;
+
+      // Admin được duyệt hoàn thành, yêu cầu làm lại, hoặc đánh dấu quá hạn.
+      allow update: if isAdmin()
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.assignedToUid == resource.data.assignedToUid
+        && request.resource.data.assignedByUid == resource.data.assignedByUid
+        && isValidTaskStatus(request.resource.data.status);
+
+      allow delete: if isAdmin();
+    }
+  }
+}

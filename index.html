@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phần mềm giao việc nhân viên</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="toastHost" class="toast-host"></div>
+
+  <!-- LOGIN -->
+  <section id="loginView" class="login-view">
+    <div class="login-card">
+      <div class="brand-badge">SHOP TASK</div>
+      <h1>Đăng nhập quản lý giao việc</h1>
+      <p class="muted">Admin giao việc, nhân viên nhận việc, theo dõi deadline và kết quả hoàn thành.</p>
+
+      <form id="loginForm" class="form-stack">
+        <label>
+          Email
+          <input id="loginEmail" type="email" autocomplete="email" placeholder="admin@shop.com" required />
+        </label>
+        <label>
+          Mật khẩu
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" required />
+        </label>
+        <button id="loginBtn" class="btn primary" type="submit">Đăng nhập</button>
+      </form>
+
+      <p class="small-note">
+        Chưa có Admin? Hãy tạo tài khoản Admin đầu tiên theo hướng dẫn ở cuối câu trả lời.
+      </p>
+    </div>
+  </section>
+
+  <!-- APP -->
+  <section id="appView" class="app-view hidden">
+    <header class="topbar">
+      <div>
+        <div class="app-title">Quản lý giao việc</div>
+        <div id="currentUserText" class="current-user">Đang tải...</div>
+      </div>
+      <button id="logoutBtn" class="btn ghost">Đăng xuất</button>
+    </header>
+
+    <!-- ADMIN DASHBOARD -->
+    <main id="adminView" class="page hidden">
+      <section class="hero-panel">
+        <div>
+          <p class="eyebrow">Admin Dashboard</p>
+          <h2>Giao việc và duyệt kết quả nhân viên</h2>
+          <p class="muted">Theo dõi realtime: đang làm, gần hết giờ, quá hạn, chờ xác nhận và đã hoàn thành.</p>
+        </div>
+        <button id="openTaskModalBtn" class="btn primary large">+ Thêm công việc</button>
+      </section>
+
+      <section class="stats-grid">
+        <div class="stat-card"><span>Đang làm</span><strong id="statDoing">0</strong></div>
+        <div class="stat-card warning"><span>Chờ xác nhận</span><strong id="statSubmitted">0</strong></div>
+        <div class="stat-card danger"><span>Quá hạn</span><strong id="statOverdue">0</strong></div>
+        <div class="stat-card success"><span>Đã hoàn thành</span><strong id="statCompleted">0</strong></div>
+      </section>
+
+      <div class="admin-grid">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Tạo tài khoản nhân viên</h3>
+              <p class="muted">Admin tạo email/mật khẩu cho nhân viên đăng nhập.</p>
+            </div>
+          </div>
+
+          <form id="createEmployeeForm" class="form-stack compact">
+            <label>
+              Tên nhân viên
+              <input id="employeeName" type="text" placeholder="Ví dụ: Phúc" required />
+            </label>
+            <label>
+              Email đăng nhập
+              <input id="employeeEmail" type="email" placeholder="phuc@shop.com" required />
+            </label>
+            <label>
+              Mật khẩu
+              <input id="employeePassword" type="password" placeholder="Tối thiểu 6 ký tự" minlength="6" required />
+            </label>
+            <button id="createEmployeeBtn" class="btn secondary" type="submit">Tạo nhân viên</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Danh sách nhân viên</h3>
+              <p class="muted">Nhân viên sẽ xuất hiện trong form giao việc.</p>
+            </div>
+          </div>
+          <div id="employeeList" class="employee-list empty-box">Chưa có nhân viên.</div>
+        </section>
+      </div>
+
+      <section class="panel task-panel">
+        <div class="panel-header task-filter-row">
+          <div>
+            <h3>Tất cả công việc</h3>
+            <p class="muted">Admin thấy toàn bộ công việc của shop.</p>
+          </div>
+          <div class="filters">
+            <select id="adminStatusFilter" aria-label="Lọc trạng thái">
+              <option value="all">Tất cả trạng thái</option>
+              <option value="doing">Đang làm</option>
+              <option value="near_due">Gần hết giờ</option>
+              <option value="overdue">Quá hạn</option>
+              <option value="submitted">Chờ xác nhận</option>
+              <option value="completed">Đã hoàn thành</option>
+              <option value="redo">Yêu cầu làm lại</option>
+            </select>
+            <select id="adminEmployeeFilter" aria-label="Lọc nhân viên">
+              <option value="all">Tất cả nhân viên</option>
+            </select>
+          </div>
+        </div>
+        <div id="adminTaskList" class="task-list empty-box">Chưa có công việc.</div>
+      </section>
+    </main>
+
+    <!-- EMPLOYEE DASHBOARD -->
+    <main id="employeeView" class="page hidden">
+      <section class="hero-panel employee-hero">
+        <div>
+          <p class="eyebrow">Trang nhân viên</p>
+          <h2>Công việc của tôi</h2>
+          <p class="muted">Bạn chỉ thấy các công việc được giao cho tài khoản của mình.</p>
+        </div>
+      </section>
+
+      <section class="panel task-panel">
+        <div class="panel-header">
+          <div>
+            <h3>Danh sách việc cần làm</h3>
+            <p class="muted">Bấm “Hoàn thành” khi đã làm xong để gửi Admin duyệt.</p>
+          </div>
+        </div>
+        <div id="employeeTaskList" class="task-list empty-box">Chưa có công việc.</div>
+      </section>
+    </main>
+  </section>
+
+  <!-- CREATE TASK MODAL -->
+  <div id="taskModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Giao việc mới</p>
+          <h3 id="taskModalTitle">+ Thêm công việc</h3>
+        </div>
+        <button class="icon-btn" data-close-modal aria-label="Đóng">×</button>
+      </div>
+
+      <form id="createTaskForm" class="form-stack">
+        <label>
+          Tên công việc
+          <input id="taskTitle" type="text" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
+        </label>
+        <label>
+          Mô tả công việc
+          <textarea id="taskDescription" rows="4" placeholder="Ghi rõ yêu cầu, tiêu chuẩn hoàn thành..." required></textarea>
+        </label>
+        <div class="two-col">
+          <label>
+            Ngày giao việc
+            <input id="taskDate" type="date" required />
+          </label>
+          <label>
+            Người được giao
+            <select id="taskAssignee" required>
+              <option value="">Chọn nhân viên</option>
+            </select>
+          </label>
+        </div>
+        <div class="two-col">
+          <label>
+            Số giờ
+            <input id="taskHours" type="number" min="0" max="168" value="0" required />
+          </label>
+          <label>
+            Số phút
+            <input id="taskMinutes" type="number" min="0" max="59" value="30" required />
+          </label>
+        </div>
+        <button id="createTaskBtn" class="btn primary" type="submit">Giao việc</button>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
