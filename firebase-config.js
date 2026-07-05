@@ -1,7 +1,3 @@
-// Firebase web config được phép để trong frontend.
-// Đây KHÔNG phải private key.
-// Không đưa Service Account JSON, OpenAI API key hoặc secret backend vào frontend.
-
 export const firebaseConfig = {
   apiKey: "AIzaSyAlHZbudVUTQXScsV9filiijd8aGGmnzvT0",
   authDomain: "quanlynhansu-6e63b.firebaseapp.com",
