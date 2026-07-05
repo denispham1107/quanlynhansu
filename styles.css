@@ -562,6 +562,31 @@ textarea:focus {
   border-radius: 10px;
 }
 
+.modal-footer-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.ticket-group.is-draft-ticket {
+  border-style: dashed;
+  background: #fffbeb;
+}
+
+.ticket-badge.is-draft-badge {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fde68a;
+}
+
+.ticket-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-card.is-draft { border-left-color: #94a3b8; background: #f8fafc; }
+.status-draft { color: #475467; background: #eef2f7; }
+
 .ticket-group {
   display: grid;
   gap: 12px;
