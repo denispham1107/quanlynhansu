@@ -1253,6 +1253,8 @@ async function persistWorkOrder(dispatch, button) {
         assignedByName: state.profile.name,
         workOrderId: workOrderRef.id,
         workOrderName,
+        // Lưu tổng số công việc của phiếu vào từng task để các màn hình có thể hiển thị thống nhất.
+        workOrderTaskCount: rows.length,
         createdAt: serverTimestamp(),
         deadlineMinutes,
         deadlineAt: null,
@@ -1553,7 +1555,24 @@ function setupEmployeeDashboard() {
     handleSnapshotError
   );
 
-  state.unsubs.push(unsubTasks);
+  // Nhân viên cũng cần đọc collection workOrders để hiển thị đúng tổng số công việc trong phiếu.
+  // Ví dụ Admin thấy "Spa5 - 2 công việc" thì Nhân viên cũng phải thấy đúng "Spa5 - 2 công việc",
+  // dù nhân viên đó chỉ được giao 1 công việc bên trong phiếu.
+  const employeeWorkOrdersQuery = query(collection(db, "workOrders"), orderBy("createdAt", "desc"));
+
+  const unsubEmployeeWorkOrders = onSnapshot(
+    employeeWorkOrdersQuery,
+    (snapshot) => {
+      state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderEmployeeTasks();
+    },
+    (error) => {
+      console.error(error);
+      toast("Không đọc được thông tin phiếu công việc. Cần cập nhật Firestore Rules cho collection workOrders.", "error");
+    }
+  );
+
+  state.unsubs.push(unsubTasks, unsubEmployeeWorkOrders);
 }
 
 // =========================
@@ -1624,6 +1643,25 @@ function renderAdminTasks() {
   updateCountdowns();
 }
 
+function getWorkOrderMeta(workOrderId) {
+  if (!workOrderId || workOrderId === "legacy") return null;
+  return state.workOrders.find((workOrder) => workOrder.id === workOrderId) || null;
+}
+
+function getWorkOrderTotalTaskCount(workOrderId, tasksInGroup) {
+  const workOrder = getWorkOrderMeta(workOrderId);
+  const countFromWorkOrder = Number(workOrder?.taskCount || 0);
+
+  if (countFromWorkOrder > 0) return countFromWorkOrder;
+
+  const countFromTask = Math.max(
+    0,
+    ...tasksInGroup.map((task) => Number(task.workOrderTaskCount || 0))
+  );
+
+  return countFromTask > 0 ? countFromTask : tasksInGroup.length;
+}
+
 // Gom các công việc thuộc cùng 1 phiếu (workOrder) lại với nhau.
 function groupTasksByWorkOrder(tasks) {
   const groups = [];
@@ -1631,19 +1669,23 @@ function groupTasksByWorkOrder(tasks) {
 
   tasks.forEach((task) => {
     const key = task.workOrderId || "legacy";
+    const workOrder = getWorkOrderMeta(key);
 
     if (!groupByKey.has(key)) {
       const group = {
         key,
-        name: task.workOrderName || "Công việc lẻ (giao trước khi có Phiếu)",
+        name: workOrder?.name || task.workOrderName || "Công việc lẻ (giao trước khi có Phiếu)",
         tasks: [],
-        createdAtMs: timestampToDate(task.createdAt)?.getTime() || 0
+        totalTaskCount: Number(workOrder?.taskCount || task.workOrderTaskCount || 0),
+        createdAtMs: timestampToDate(workOrder?.createdAt)?.getTime() || timestampToDate(task.createdAt)?.getTime() || 0
       };
       groupByKey.set(key, group);
       groups.push(group);
     }
 
-    groupByKey.get(key).tasks.push(task);
+    const group = groupByKey.get(key);
+    group.tasks.push(task);
+    group.totalTaskCount = getWorkOrderTotalTaskCount(key, group.tasks);
   });
 
   return groups;
@@ -1662,6 +1704,7 @@ function withEmptyDraftGroups(groups, showEmptyDrafts) {
       key: wo.id,
       name: wo.name,
       tasks: [],
+      totalTaskCount: Number(wo.taskCount || 0),
       createdAtMs: timestampToDate(wo.createdAt)?.getTime() || 0
     }));
 
@@ -1670,7 +1713,9 @@ function withEmptyDraftGroups(groups, showEmptyDrafts) {
 
 function renderTicketGroup(group, mode = "admin") {
   const isDraft = !group.tasks.length || group.tasks.every((task) => task.status === "draft");
-  const taskCount = group.tasks.length;
+  // Admin có thể thấy toàn bộ task trong phiếu, nhưng Nhân viên chỉ đọc được task của chính mình.
+  // Vì vậy tiêu đề phiếu phải dùng tổng số công việc lưu ở workOrders.taskCount, không dùng số task đang hiển thị.
+  const taskCount = Number(group.totalTaskCount || group.tasks.length || 0);
   const ticketTitle = `${group.name} - ${taskCount} công việc`;
   const actionButtons = [];
 
