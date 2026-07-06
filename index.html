@@ -12,6 +12,102 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
+
+  <style>
+    .photo-requirement-box {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      margin-top: 12px;
+      border: 1px dashed #bfdbfe;
+      border-radius: 18px;
+      background: #f8fbff;
+    }
+    .checkbox-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      color: #172554;
+    }
+    .checkbox-line input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #2563eb;
+    }
+    .photo-report-box {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 16px;
+      margin-top: 14px;
+      border: 1px solid #dbeafe;
+      border-radius: 18px;
+      background: #f8fbff;
+    }
+    .photo-report-box.is-missing {
+      border-color: #fed7aa;
+      background: #fff7ed;
+    }
+    .photo-report-box strong,
+    .photo-report-box span {
+      display: block;
+    }
+    .photo-report-box span {
+      margin-top: 4px;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .photo-report-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 14px;
+      max-height: 65vh;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .photo-report-item {
+      display: grid;
+      gap: 8px;
+      text-decoration: none;
+      color: inherit;
+      border: 1px solid #dbeafe;
+      border-radius: 16px;
+      padding: 8px;
+      background: #fff;
+    }
+    .photo-report-item img {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      border-radius: 12px;
+      background: #e2e8f0;
+    }
+    .photo-report-item strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .photo-report-item span {
+      display: block;
+      margin-top: 3px;
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.35;
+    }
+    @media (max-width: 640px) {
+      .photo-report-box {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .photo-report-grid {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      }
+    }
+  </style>
 </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
@@ -228,6 +324,21 @@
           <button id="saveDraftBtn" class="btn ghost" type="button">💾 Lưu (chưa giao việc)</button>
           <button id="createTaskBtn" class="btn primary" type="submit">Tạo phiếu &amp; giao việc</button>
         </div>
+
+        <div class="photo-requirement-box">
+          <label class="checkbox-line">
+            <input id="photoRequiredCheckbox" type="checkbox" checked />
+            Bắt buộc đăng hình
+          </label>
+          <label>
+            Số lượng hình gửi
+            <input id="requiredPhotoCount" type="number" min="1" max="100" step="1" value="10" />
+          </label>
+          <p class="small-note">
+            Nếu bật “Bắt buộc đăng hình”, nhân viên phải đăng đủ số lượng hình thành công trước khi bấm “Hoàn thành”.
+            Nếu tắt, nhân viên có thể hoàn thành công việc mà không cần đăng hình.
+          </p>
+        </div>
       </form>
     </div>
   </div>
@@ -272,6 +383,24 @@
     </div>
   </div>
 
+
+
+  <!-- PHOTO REPORT MODAL -->
+  <div id="photoReportModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="photoReportModalTitle">
+    <div class="modal-backdrop" data-close-photo-modal></div>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Ảnh báo cáo</p>
+          <h3 id="photoReportModalTitle">Hình ảnh nhân viên đã đăng</h3>
+          <p id="photoReportTaskTitle" class="muted">Công việc</p>
+          <p id="photoReportSummary" class="small-note">Đã đăng 0 hình</p>
+        </div>
+        <button class="icon-btn" data-close-photo-modal aria-label="Đóng">×</button>
+      </div>
+      <div id="photoReportGrid" class="photo-report-grid empty-box">Chưa có hình báo cáo.</div>
+    </div>
+  </div>
 
   <!-- EXTEND TASK TIME MODAL -->
   <div id="extendTimeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="extendTimeModalTitle">

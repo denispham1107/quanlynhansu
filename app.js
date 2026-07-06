@@ -24,8 +24,15 @@ import {
   Timestamp,
   arrayUnion,
   writeBatch,
-  runTransaction
+  runTransaction,
+  increment
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
 // =========================
 // Firebase init
@@ -33,6 +40,7 @@ import {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -81,7 +89,8 @@ const state = {
     to: ""
   },
   extendTimeTaskId: null,
-  reassignTaskId: null
+  reassignTaskId: null,
+  photoReportTaskId: null
 };
 
 // =========================
@@ -148,7 +157,13 @@ const els = {
   reassignTaskTitle: $("#reassignTaskTitle"),
   reassignCurrentEmployee: $("#reassignCurrentEmployee"),
   reassignEmployeeSelect: $("#reassignEmployeeSelect"),
-  confirmReassignEmployeeBtn: $("#confirmReassignEmployeeBtn")
+  confirmReassignEmployeeBtn: $("#confirmReassignEmployeeBtn"),
+  photoRequiredCheckbox: $("#photoRequiredCheckbox"),
+  requiredPhotoCount: $("#requiredPhotoCount"),
+  photoReportModal: $("#photoReportModal"),
+  photoReportTaskTitle: $("#photoReportTaskTitle"),
+  photoReportSummary: $("#photoReportSummary"),
+  photoReportGrid: $("#photoReportGrid")
 };
 
 function escapeHtml(value = "") {
@@ -210,6 +225,54 @@ function formatFullDateTime(value) {
   const minutes = String(date.getMinutes()).padStart(2, "0");
 
   return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
+function formatFileSize(bytes = 0) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function makeId(prefix = "id") {
+  if (window.crypto?.randomUUID) return `${prefix}-${window.crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function sanitizeStorageFileName(fileName = "image") {
+  const name = String(fileName)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+
+  return name || "image";
+}
+
+function getTaskPhotos(task) {
+  return Array.isArray(task?.photos) ? task.photos.filter((item) => item?.url) : [];
+}
+
+function getTaskPhotoCount(task) {
+  const count = Number(task?.photoCount ?? getTaskPhotos(task).length ?? 0);
+  return Number.isFinite(count) ? count : 0;
+}
+
+function taskRequiresPhotos(task) {
+  return Boolean(task?.photoRequired);
+}
+
+function getTaskRequiredPhotoCount(task) {
+  if (!taskRequiresPhotos(task)) return 0;
+  const count = Number(task?.requiredPhotoCount || 0);
+  return Number.isFinite(count) && count > 0 ? count : 1;
+}
+
+function hasEnoughRequiredPhotos(task) {
+  if (!taskRequiresPhotos(task)) return true;
+  return getTaskPhotoCount(task) >= getTaskRequiredPhotoCount(task);
 }
 
 function formatDateOnly(value) {
@@ -947,7 +1010,7 @@ function renderEmployeeSelects() {
   // (giữ nguyên lựa chọn cũ nếu nhân viên đó vẫn còn trong danh sách).
   $$("#taskRowsContainer .row-assignee").forEach((select) => {
     const currentValue = select.value;
-    select.innerHTML = `<option value="">Chọn nhân viên</option>${employeeOptions}`;
+    select.innerHTML = `<option value="">Chờ chọn người</option>${employeeOptions}`;
     if (currentValue) select.value = currentValue;
   });
 
@@ -1105,6 +1168,59 @@ function resetTaskRows() {
   addTaskRow();
 }
 
+function resetPhotoRequirementControls() {
+  if (els.photoRequiredCheckbox) els.photoRequiredCheckbox.checked = true;
+  if (els.requiredPhotoCount) {
+    els.requiredPhotoCount.value = 10;
+    els.requiredPhotoCount.disabled = false;
+  }
+}
+
+function setPhotoRequirementControlsFromTask(task = null) {
+  if (!els.photoRequiredCheckbox || !els.requiredPhotoCount) return;
+
+  const required = task ? Boolean(task.photoRequired) : true;
+  const count = task ? getTaskRequiredPhotoCount(task) : 10;
+
+  els.photoRequiredCheckbox.checked = required;
+  els.requiredPhotoCount.value = required ? Math.max(1, count) : 10;
+  els.requiredPhotoCount.disabled = !required;
+}
+
+function readPhotoRequirementOptions() {
+  const required = Boolean(els.photoRequiredCheckbox?.checked);
+  const count = required ? Number(els.requiredPhotoCount?.value || 0) : 0;
+
+  return {
+    photoRequired: required,
+    requiredPhotoCount: required ? count : 0
+  };
+}
+
+function validatePhotoRequirementOptions(options) {
+  if (!options.photoRequired) return null;
+
+  if (!Number.isInteger(options.requiredPhotoCount) || options.requiredPhotoCount <= 0) {
+    return "Vui lòng nhập số lượng hình cần gửi lớn hơn 0.";
+  }
+
+  if (options.requiredPhotoCount > 100) {
+    return "Số lượng hình cần gửi tối đa là 100 hình cho mỗi công việc.";
+  }
+
+  return null;
+}
+
+els.photoRequiredCheckbox?.addEventListener("change", () => {
+  const checked = Boolean(els.photoRequiredCheckbox.checked);
+  if (els.requiredPhotoCount) {
+    els.requiredPhotoCount.disabled = !checked;
+    if (checked && Number(els.requiredPhotoCount.value || 0) <= 0) {
+      els.requiredPhotoCount.value = 10;
+    }
+  }
+});
+
 els.addTaskRowBtn.addEventListener("click", addTaskRow);
 
 els.taskRowsContainer.addEventListener("click", (event) => {
@@ -1118,6 +1234,7 @@ els.openTaskModalBtn.addEventListener("click", () => {
   $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
   els.workOrderName.value = "";
   resetTaskRows();
+  resetPhotoRequirementControls();
 
   els.taskModal.classList.remove("hidden");
 });
@@ -1156,6 +1273,7 @@ function openEditWorkOrderModal(workOrderId) {
   }
 
   updateTaskRowHeadings();
+  setPhotoRequirementControlsFromTask(tasksInGroup[0] || null);
 
   $("#taskModalTitle").textContent = "Sửa phiếu công việc (đang Chưa giao việc)";
   els.taskModal.classList.remove("hidden");
@@ -1289,6 +1407,13 @@ async function persistWorkOrder(dispatch, button) {
       throw new Error(validationError);
     }
 
+    const photoOptions = readPhotoRequirementOptions();
+    const photoValidationError = validatePhotoRequirementOptions(photoOptions);
+
+    if (photoValidationError) {
+      throw new Error(photoValidationError);
+    }
+
     const now = new Date();
     const batch = writeBatch(db);
 
@@ -1360,7 +1485,12 @@ async function persistWorkOrder(dispatch, button) {
         actualMinutes: null,
         resultType: null,
         differenceMinutes: null,
-        differencePercent: null
+        differencePercent: null,
+        photoRequired: photoOptions.photoRequired,
+        requiredPhotoCount: photoOptions.requiredPhotoCount,
+        photos: [],
+        photoCount: 0,
+        lastPhotoUploadedAt: null
       };
 
       if (dispatch) {
@@ -1412,6 +1542,7 @@ async function persistWorkOrder(dispatch, button) {
     state.editingWorkOrderId = null;
     els.workOrderName.value = "";
     resetTaskRows();
+    resetPhotoRequirementControls();
     $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
 
     els.taskModal.classList.add("hidden");
@@ -2051,10 +2182,17 @@ function renderTaskCard(task, mode) {
         </div>
       </div>
 
+      ${renderPhotoReportBox(task, mode)}
       ${renderTimeExtensionBox(task)}
       ${renderAssigneeHistoryBox(task)}
       ${renderResultBox(task)}
-      ${renderTaskActions(task, { canEmployeeSubmit, canAdminReview, canAdminExtendTime: canAdminExtendTaskTime(task, mode) })}
+      ${renderTaskActions(task, {
+        canEmployeeSubmit,
+        canAdminReview,
+        canAdminExtendTime: canAdminExtendTaskTime(task, mode),
+        canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
+        submitPhotoReady: hasEnoughRequiredPhotos(task)
+      })}
     </article>
   `;
 }
@@ -2137,6 +2275,36 @@ function renderAssigneeHistoryBox(task) {
   `;
 }
 
+function renderPhotoReportBox(task, mode) {
+  const photoCount = getTaskPhotoCount(task);
+  const required = taskRequiresPhotos(task);
+  const requiredCount = getTaskRequiredPhotoCount(task);
+  const enough = hasEnoughRequiredPhotos(task);
+  const summary = required
+    ? `Bắt buộc ${requiredCount} hình • đã đăng ${photoCount}/${requiredCount}`
+    : `Không bắt buộc đăng hình • đã đăng ${photoCount} hình`;
+
+  const statusText = required
+    ? (enough ? "Đã đủ hình báo cáo" : `Còn thiếu ${Math.max(0, requiredCount - photoCount)} hình`)
+    : "Nhân viên có thể hoàn thành mà không cần đăng hình";
+
+  const canView = photoCount > 0 && (mode === "admin" || mode === "employee");
+
+  return `
+    <div class="photo-report-box ${required && !enough ? "is-missing" : ""}">
+      <div>
+        <strong>Ảnh báo cáo</strong>
+        <span>${escapeHtml(summary)} • ${escapeHtml(statusText)}</span>
+      </div>
+      ${canView ? `
+        <button class="btn ghost small" data-action="view-task-photos" data-task-id="${escapeHtml(task.id)}" type="button">
+          Xem hình (${photoCount})
+        </button>
+      ` : ""}
+    </div>
+  `;
+}
+
 function renderResultBox(task) {
   if (task.status !== "completed" || !task.resultType) return "";
 
@@ -2160,6 +2328,14 @@ function renderResultBox(task) {
 
 function canAdminExtendTaskTime(task, mode) {
   return mode === "admin" && ["doing", "redo", "overdue"].includes(task.status);
+}
+
+function canEmployeeUploadTaskPhotos(task, mode, displayStatus = null) {
+  if (mode !== "employee") return false;
+  if (!task?.id || task.assignedToUid !== state.user?.uid) return false;
+  const visibleStatus = displayStatus || getDisplayStatus(task);
+  return ["doing", "redo", "overdue", "near_due"].includes(visibleStatus)
+    && ["doing", "redo", "overdue"].includes(task.status);
 }
 
 function renderTimeExtensionBox(task) {
@@ -2203,9 +2379,20 @@ function renderTaskActions(task, permissions) {
     `);
   }
 
-  if (permissions.canEmployeeSubmit) {
+  if (permissions.canEmployeeUploadPhotos) {
     buttons.push(`
-      <button class="btn primary" data-action="submit-task" data-task-id="${escapeHtml(task.id)}">
+      <button class="btn secondary" data-action="upload-task-photos" data-task-id="${escapeHtml(task.id)}">
+        Đăng hình
+      </button>
+    `);
+  }
+
+  if (permissions.canEmployeeSubmit) {
+    const disabled = permissions.submitPhotoReady ? "" : " disabled";
+    const title = permissions.submitPhotoReady ? "" : " title=\"Cần đăng đủ số lượng hình theo quy định trước khi hoàn thành\"";
+
+    buttons.push(`
+      <button class="btn primary" data-action="submit-task" data-task-id="${escapeHtml(task.id)}"${disabled}${title}>
         Hoàn thành
       </button>
     `);
@@ -2247,6 +2434,14 @@ document.addEventListener("click", async (event) => {
     openReassignEmployeeModal(taskId);
   }
 
+  if (action === "upload-task-photos") {
+    await openPhotoUploadPicker(taskId, button);
+  }
+
+  if (action === "view-task-photos") {
+    openPhotoReportModal(taskId);
+  }
+
   if (action === "submit-task") {
     await submitTask(taskId, button);
   }
@@ -2286,6 +2481,160 @@ document.addEventListener("keydown", (event) => {
   openReassignEmployeeModal(target.dataset.taskId);
 });
 
+
+// =========================
+// Ảnh báo cáo công việc
+// =========================
+function closePhotoReportModal() {
+  state.photoReportTaskId = null;
+  if (els.photoReportGrid) els.photoReportGrid.innerHTML = "";
+  els.photoReportModal?.classList.add("hidden");
+}
+
+$$('[data-close-photo-modal]').forEach((button) => {
+  button.addEventListener("click", closePhotoReportModal);
+});
+
+function openPhotoReportModal(taskId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+
+  if (!task) {
+    toast("Không tìm thấy công việc cần xem hình.", "error");
+    return;
+  }
+
+  const photos = getTaskPhotos(task)
+    .slice()
+    .sort((a, b) => (timestampToDate(b.uploadedAt)?.getTime() || 0) - (timestampToDate(a.uploadedAt)?.getTime() || 0));
+
+  state.photoReportTaskId = taskId;
+
+  if (els.photoReportTaskTitle) {
+    els.photoReportTaskTitle.textContent = task.title || "Công việc";
+  }
+
+  if (els.photoReportSummary) {
+    const required = taskRequiresPhotos(task)
+      ? `Bắt buộc ${getTaskRequiredPhotoCount(task)} hình`
+      : "Không bắt buộc đăng hình";
+    els.photoReportSummary.textContent = `${required} • Đã đăng ${photos.length} hình`;
+  }
+
+  if (els.photoReportGrid) {
+    els.photoReportGrid.innerHTML = photos.length
+      ? photos.map((photo, index) => `
+        <a class="photo-report-item" href="${escapeHtml(photo.url)}" target="_blank" rel="noopener">
+          <img src="${escapeHtml(photo.url)}" alt="Ảnh báo cáo ${index + 1}" loading="lazy" />
+          <div>
+            <strong>${escapeHtml(photo.name || `Ảnh ${index + 1}`)}</strong>
+            <span>${escapeHtml(photo.uploadedByName || "Nhân viên")} • ${formatFullDateTime(photo.uploadedAt)} • ${formatFileSize(photo.size)}</span>
+          </div>
+        </a>
+      `).join("")
+      : `<div class="empty-box">Chưa có hình báo cáo.</div>`;
+  }
+
+  els.photoReportModal?.classList.remove("hidden");
+}
+
+function validateSelectedPhotoFiles(files) {
+  if (!files.length) return "Vui lòng chọn ít nhất 1 hình.";
+  if (files.length > 30) return "Mỗi lần chỉ nên đăng tối đa 30 hình để tránh lỗi mạng.";
+
+  const maxSize = 10 * 1024 * 1024;
+  const invalidType = files.find((file) => !String(file.type || "").startsWith("image/"));
+  if (invalidType) return `File “${invalidType.name}” không phải là hình ảnh.`;
+
+  const tooLarge = files.find((file) => Number(file.size || 0) > maxSize);
+  if (tooLarge) return `File “${tooLarge.name}” lớn hơn 10MB. Vui lòng chọn hình nhẹ hơn.`;
+
+  return null;
+}
+
+async function openPhotoUploadPicker(taskId, button) {
+  const task = state.tasks.find((item) => item.id === taskId);
+
+  if (!task) {
+    toast("Không tìm thấy công việc cần đăng hình.", "error");
+    return;
+  }
+
+  if (!canEmployeeUploadTaskPhotos(task, "employee", getDisplayStatus(task))) {
+    toast("Chỉ nhân viên đang phụ trách mới được đăng hình cho công việc đang làm.", "error");
+    return;
+  }
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.multiple = true;
+  input.style.display = "none";
+  document.body.appendChild(input);
+
+  input.addEventListener("change", async () => {
+    const files = Array.from(input.files || []);
+    input.remove();
+
+    const validationError = validateSelectedPhotoFiles(files);
+    if (validationError) {
+      toast(validationError, "error");
+      return;
+    }
+
+    setButtonLoading(button, true, "Đang đăng hình...");
+
+    try {
+      const now = new Date();
+      const uploadedPhotos = [];
+
+      for (const file of files) {
+        const photoId = makeId("photo");
+        const safeName = sanitizeStorageFileName(file.name);
+        const path = `task-photos/${task.id}/${Date.now()}-${photoId}-${safeName}`;
+        const fileRef = storageRef(storage, path);
+
+        await uploadBytes(fileRef, file, {
+          contentType: file.type || "image/jpeg",
+          customMetadata: {
+            taskId: task.id,
+            uploadedByUid: state.user.uid
+          }
+        });
+
+        const url = await getDownloadURL(fileRef);
+
+        uploadedPhotos.push({
+          id: photoId,
+          name: file.name || safeName,
+          url,
+          storagePath: path,
+          contentType: file.type || "image/jpeg",
+          size: Number(file.size || 0),
+          uploadedAt: Timestamp.fromDate(now),
+          uploadedByUid: state.user.uid,
+          uploadedByName: state.profile?.name || state.profile?.email || "Nhân viên"
+        });
+      }
+
+      if (!uploadedPhotos.length) return;
+
+      await updateDoc(doc(db, "tasks", task.id), {
+        photos: arrayUnion(...uploadedPhotos),
+        photoCount: increment(uploadedPhotos.length),
+        lastPhotoUploadedAt: serverTimestamp()
+      });
+
+      toast(`Đã đăng thành công ${uploadedPhotos.length} hình.`, "success");
+    } catch (error) {
+      console.error(error);
+      toast(error.message || "Không đăng được hình. Kiểm tra Firebase Storage Rules hoặc kết nối mạng.", "error");
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }, { once: true });
+
+  input.click();
+}
 
 // =========================
 // Đổi nhân viên phụ trách task
