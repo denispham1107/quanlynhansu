@@ -1951,18 +1951,11 @@ document.addEventListener("click", async (event) => {
 });
 
 
-const DEFAULT_TIME_EXTENSION_REASONS = [
-  "Khách/việc phát sinh thêm",
-  "Công việc khó hơn dự kiến",
-  "Chờ vật tư/dụng cụ",
-  "Chờ khách phản hồi",
-  "Ưu tiên việc gấp khác",
-  "Lý do khác"
-];
-
 function getAllTimeExtensionReasons() {
+  // Không dùng mục đích mặc định của hệ thống.
+  // Danh sách mục đích thêm giờ chỉ lấy từ các mục do Admin tự tạo trong Firestore.
   const customReasons = state.timeExtensionReasons.map((reason) => reason.name).filter(Boolean);
-  return Array.from(new Set([...DEFAULT_TIME_EXTENSION_REASONS, ...customReasons]));
+  return Array.from(new Set(customReasons));
 }
 
 function renderExtendReasonOptions(selectedValue = "") {
@@ -2113,7 +2106,8 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
 
   const taskId = state.extendTimeTaskId;
   const minutes = Number(els.extendMinutes.value || 0);
-  const reason = els.extendReasonSelect.value || els.newExtendReason.value.trim();
+  const typedReason = els.newExtendReason.value.trim();
+  const reason = els.extendReasonSelect.value;
 
   if (!taskId) {
     toast("Không xác định được công việc cần thêm giờ.", "error");
@@ -2126,7 +2120,11 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
   }
 
   if (!reason) {
-    toast("Vui lòng chọn hoặc nhập mục đích thêm giờ.", "error");
+    if (typedReason) {
+      toast("Vui lòng bấm + Thêm mục đích trước, sau đó chọn mục đích vừa tạo để cộng giờ.", "error");
+    } else {
+      toast("Vui lòng chọn mục đích thêm giờ. Nếu chưa có mục đích, hãy tạo mới trước.", "error");
+    }
     return;
   }
 
