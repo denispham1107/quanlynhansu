@@ -1,4 +1,4 @@
-SHOP TASK - PHIÊN BẢN V8
+SHOP TASK - PHIÊN BẢN V3
 
 *** QUAN TRỌNG - BẮT BUỘC ĐỌC ***
 Bản này thay đổi cách Admin giao việc:
