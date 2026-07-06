@@ -264,6 +264,94 @@ function isValidSequenceIndex(value) {
   return Number.isInteger(number) && number >= 0;
 }
 
+function getWorkOrderSortIndex(task) {
+  const candidates = [
+    task?.workOrderSortIndex,
+    task?.originalOrderIndex,
+    task?.rowIndex,
+    task?.sortIndex
+  ];
+
+  for (const value of candidates) {
+    if (isValidSequenceIndex(value)) return Number(value);
+  }
+
+  return null;
+}
+
+function getTaskCreatedOrDispatchedMs(task) {
+  return timestampToDate(task?.createdAt)?.getTime()
+    || timestampToDate(task?.dispatchedAt)?.getTime()
+    || 0;
+}
+
+function compareTasksForEmployeeQueue(a, b) {
+  // Thứ tự thật trong phiếu được lưu riêng để không nhầm với sequenceIndex
+  // (sequenceIndex là thứ tự nối tiếp RIÊNG của từng nhân viên trong phiếu).
+  const aOrder = getWorkOrderSortIndex(a);
+  const bOrder = getWorkOrderSortIndex(b);
+
+  if (aOrder !== null && bOrder !== null && aOrder !== bOrder) {
+    return aOrder - bOrder;
+  }
+
+  if (aOrder !== null && bOrder === null) return -1;
+  if (aOrder === null && bOrder !== null) return 1;
+
+  const aSequence = isValidSequenceIndex(a?.sequenceIndex) ? Number(a.sequenceIndex) : null;
+  const bSequence = isValidSequenceIndex(b?.sequenceIndex) ? Number(b.sequenceIndex) : null;
+
+  if (aSequence !== null && bSequence !== null && aSequence !== bSequence) {
+    return aSequence - bSequence;
+  }
+
+  if (aSequence !== null && bSequence === null) return -1;
+  if (aSequence === null && bSequence !== null) return 1;
+
+  const aTime = getTaskCreatedOrDispatchedMs(a);
+  const bTime = getTaskCreatedOrDispatchedMs(b);
+
+  if (aTime !== bTime) return aTime - bTime;
+
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
+function compareTasksForWorkOrderOrder(a, b) {
+  const aOrder = getWorkOrderSortIndex(a);
+  const bOrder = getWorkOrderSortIndex(b);
+
+  if (aOrder !== null && bOrder !== null && aOrder !== bOrder) {
+    return aOrder - bOrder;
+  }
+
+  if (aOrder !== null && bOrder === null) return -1;
+  if (aOrder === null && bOrder !== null) return 1;
+
+  const aSequence = isValidSequenceIndex(a?.sequenceIndex) ? Number(a.sequenceIndex) : null;
+  const bSequence = isValidSequenceIndex(b?.sequenceIndex) ? Number(b.sequenceIndex) : null;
+
+  if (aSequence !== null && bSequence !== null && aSequence !== bSequence) {
+    return aSequence - bSequence;
+  }
+
+  const aTime = getTaskCreatedOrDispatchedMs(a);
+  const bTime = getTaskCreatedOrDispatchedMs(b);
+
+  if (aTime !== bTime) return aTime - bTime;
+
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
+function normalizeWorkOrderSortIndexes(tasks) {
+  return tasks
+    .slice()
+    .sort(compareTasksForWorkOrderOrder)
+    .map((task, index) => ({
+      ...task,
+      workOrderSortIndex: getWorkOrderSortIndex(task) ?? index
+    }));
+}
+
 function getTaskScheduledStartDate(task) {
   return timestampToDate(task.scheduledStartAt)
     || timestampToDate(task.dispatchedAt)
@@ -288,24 +376,8 @@ function hasTaskStarted(task, now = new Date()) {
 }
 
 function compareTasksForSequentialSchedule(a, b) {
-  const aSequence = isValidSequenceIndex(a.sequenceIndex) ? Number(a.sequenceIndex) : null;
-  const bSequence = isValidSequenceIndex(b.sequenceIndex) ? Number(b.sequenceIndex) : null;
-
-  if (aSequence !== null && bSequence !== null && aSequence !== bSequence) {
-    return aSequence - bSequence;
-  }
-
-  if (aSequence !== null && bSequence === null) return -1;
-  if (aSequence === null && bSequence !== null) return 1;
-
-  const aCreated = timestampToDate(a.createdAt)?.getTime() || 0;
-  const bCreated = timestampToDate(b.createdAt)?.getTime() || 0;
-
-  if (aCreated !== bCreated) return aCreated - bCreated;
-
-  return String(a.id || "").localeCompare(String(b.id || ""));
+  return compareTasksForEmployeeQueue(a, b);
 }
-
 function compareTasksForDisplay(a, b) {
   const aStart = getTaskScheduledStartDate(a)?.getTime() || 0;
   const bStart = getTaskScheduledStartDate(b)?.getTime() || 0;
@@ -330,30 +402,46 @@ function getEmployeeScheduleBaseStart(tasks, fallbackStartDate = new Date()) {
 }
 
 function buildSequentialRowSchedule(rows, baseStartDate = new Date()) {
-  const cursorByEmployee = new Map();
-  const sequenceByEmployee = new Map();
+  // Quan trọng: không nối tiếp theo toàn bộ phiếu.
+  // Phải nhóm theo nhân viên trước, rồi mỗi nhân viên có một hàng đợi thời gian riêng.
   const plan = new Map();
+  const rowsByEmployee = new Map();
 
   rows.forEach((row) => {
     const employeeKey = row.assignedToUid || "__unassigned__";
-    const scheduledStartAt = cursorByEmployee.get(employeeKey) || baseStartDate;
-    const sequenceIndex = sequenceByEmployee.get(employeeKey) || 0;
-    const deadlineMinutes = Number(row.deadlineMinutes || 0);
-    const deadlineAt = new Date(scheduledStartAt.getTime() + deadlineMinutes * 60 * 1000);
 
-    plan.set(row.index, {
-      scheduledStartAt,
-      deadlineAt,
-      sequenceIndex
+    if (!rowsByEmployee.has(employeeKey)) {
+      rowsByEmployee.set(employeeKey, []);
+    }
+
+    rowsByEmployee.get(employeeKey).push(row);
+  });
+
+  rowsByEmployee.forEach((employeeRows) => {
+    const orderedRows = employeeRows
+      .slice()
+      .sort((a, b) => Number(a.index || 0) - Number(b.index || 0));
+
+    let cursor = baseStartDate;
+
+    orderedRows.forEach((row, sequenceIndex) => {
+      const deadlineMinutes = Number(row.deadlineMinutes || 0);
+      const scheduledStartAt = cursor;
+      const deadlineAt = new Date(scheduledStartAt.getTime() + deadlineMinutes * 60 * 1000);
+
+      plan.set(row.index, {
+        scheduledStartAt,
+        deadlineAt,
+        sequenceIndex,
+        workOrderSortIndex: Number(row.index || 0)
+      });
+
+      cursor = deadlineAt;
     });
-
-    cursorByEmployee.set(employeeKey, deadlineAt);
-    sequenceByEmployee.set(employeeKey, sequenceIndex + 1);
   });
 
   return plan;
 }
-
 function buildSequentialTaskSchedule(tasks, baseStartDate = new Date(), options = {}) {
   const { forceBaseStart = false } = options;
   const plan = new Map();
@@ -370,7 +458,7 @@ function buildSequentialTaskSchedule(tasks, baseStartDate = new Date(), options 
   });
 
   groupsByEmployee.forEach((employeeTasks) => {
-    const orderedTasks = employeeTasks.slice().sort(compareTasksForSequentialSchedule);
+    const orderedTasks = employeeTasks.slice().sort(compareTasksForEmployeeQueue);
     let cursor = forceBaseStart
       ? baseStartDate
       : getEmployeeScheduleBaseStart(orderedTasks, baseStartDate);
@@ -379,11 +467,13 @@ function buildSequentialTaskSchedule(tasks, baseStartDate = new Date(), options 
       const deadlineMinutes = Number(task.deadlineMinutes || 0);
       const scheduledStartAt = cursor;
       const deadlineAt = new Date(scheduledStartAt.getTime() + deadlineMinutes * 60 * 1000);
+      const existingWorkOrderSortIndex = getWorkOrderSortIndex(task);
 
       plan.set(task.id, {
         scheduledStartAt,
         deadlineAt,
-        sequenceIndex
+        sequenceIndex,
+        workOrderSortIndex: existingWorkOrderSortIndex
       });
 
       cursor = deadlineAt;
@@ -392,7 +482,6 @@ function buildSequentialTaskSchedule(tasks, baseStartDate = new Date(), options 
 
   return plan;
 }
-
 function getFallbackSequenceIndex(task, taskList = state.tasks) {
   if (isValidSequenceIndex(task.sequenceIndex)) return Number(task.sequenceIndex);
 
@@ -403,7 +492,7 @@ function getFallbackSequenceIndex(task, taskList = state.tasks) {
       item.status !== "draft"
     )
     .slice()
-    .sort(compareTasksForSequentialSchedule);
+    .sort(compareTasksForEmployeeQueue);
 
   const index = relatedTasks.findIndex((item) => item.id === task.id);
   return index >= 0 ? index : 0;
@@ -1263,7 +1352,10 @@ function openEditWorkOrderModal(workOrderId) {
   els.taskRowsContainer.innerHTML = "";
 
   if (tasksInGroup.length) {
-    tasksInGroup.forEach((task) => {
+    tasksInGroup
+      .slice()
+      .sort(compareTasksForWorkOrderOrder)
+      .forEach((task) => {
       const deadlineMinutes = Number(task.deadlineMinutes || 0);
 
       els.taskRowsContainer.appendChild(createTaskRowElement({
@@ -1416,8 +1508,10 @@ async function persistWorkOrder(dispatch, button) {
         workOrderName,
         // Lưu tổng số công việc của phiếu vào từng task để các màn hình có thể hiển thị thống nhất.
         workOrderTaskCount: rows.length,
+        // workOrderSortIndex giữ thứ tự thật của task trong toàn phiếu để render/sửa/migrate ổn định.
+        workOrderSortIndex: schedulePlan?.workOrderSortIndex ?? row.index,
         // sequenceIndex là thứ tự riêng của nhân viên trong phiếu, dùng để xếp lịch nối tiếp.
-        sequenceIndex: schedulePlan?.sequenceIndex ?? row.index,
+        sequenceIndex: schedulePlan?.sequenceIndex ?? 0,
         createdAt: serverTimestamp(),
         scheduledStartAt: null,
         deadlineMinutes,
@@ -1534,9 +1628,10 @@ async function dispatchWorkOrder(workOrderId, button) {
     const now = new Date();
     const batch = writeBatch(db);
     const notificationItems = [];
-    const schedulePlan = buildSequentialTaskSchedule(tasksInGroup, now, { forceBaseStart: true });
+    const normalizedTasksInGroup = normalizeWorkOrderSortIndexes(tasksInGroup);
+    const schedulePlan = buildSequentialTaskSchedule(normalizedTasksInGroup, now, { forceBaseStart: true });
 
-    tasksInGroup.forEach((task) => {
+    normalizedTasksInGroup.forEach((task) => {
       const plan = schedulePlan.get(task.id);
 
       batch.update(doc(db, "tasks", task.id), {
@@ -1544,7 +1639,8 @@ async function dispatchWorkOrder(workOrderId, button) {
         dispatchedAt: serverTimestamp(),
         scheduledStartAt: Timestamp.fromDate(plan.scheduledStartAt),
         deadlineAt: Timestamp.fromDate(plan.deadlineAt),
-        sequenceIndex: plan.sequenceIndex
+        sequenceIndex: plan.sequenceIndex,
+        workOrderSortIndex: plan.workOrderSortIndex ?? getWorkOrderSortIndex(task) ?? 0
       });
 
       notificationItems.push({
@@ -1702,9 +1798,10 @@ async function syncSequentialScheduleByAdmin() {
   const now = new Date();
 
   tasksByWorkOrder.forEach((tasksInGroup) => {
-    const plan = buildSequentialTaskSchedule(tasksInGroup, now);
+    const normalizedTasksInGroup = normalizeWorkOrderSortIndexes(tasksInGroup);
+    const plan = buildSequentialTaskSchedule(normalizedTasksInGroup, now);
 
-    tasksInGroup.forEach((task) => {
+    normalizedTasksInGroup.forEach((task) => {
       const item = plan.get(task.id);
       if (!item) return;
 
@@ -1720,6 +1817,10 @@ async function syncSequentialScheduleByAdmin() {
 
       if (currentSequence !== item.sequenceIndex) {
         updates.sequenceIndex = item.sequenceIndex;
+      }
+
+      if (getWorkOrderSortIndex(task) === null && item.workOrderSortIndex !== null) {
+        updates.workOrderSortIndex = item.workOrderSortIndex;
       }
 
       if (canAdjustDeadline && (!currentDeadline || Math.abs(currentDeadline.getTime() - item.deadlineAt.getTime()) > 1000)) {
@@ -2426,53 +2527,70 @@ async function ensureCustomTimeExtensionReason(name) {
 async function shiftFollowingTasksAfterExtension(baseTask, addedMinutes) {
   if (!baseTask?.workOrderId || !baseTask.assignedToUid || addedMinutes <= 0) return 0;
 
-  const relatedTasks = state.tasks
-    .map((task) => task.id === baseTask.id ? { ...task, ...baseTask } : task)
+  // Sau khi cộng giờ cho task hiện tại, tính lại toàn bộ hàng đợi phía sau
+  // của CHÍNH nhân viên đó trong CHÍNH phiếu đó. Không đụng task nhân viên khác.
+  const employeeTasks = state.tasks
+    .map((task) => (task.id === baseTask.id ? { ...task, ...baseTask } : task))
     .filter((task) => (
-      task.id !== baseTask.id &&
       task.status !== "draft" &&
       task.workOrderId === baseTask.workOrderId &&
       task.assignedToUid === baseTask.assignedToUid
     ))
     .slice()
-    .sort(compareTasksForSequentialSchedule);
+    .sort(compareTasksForEmployeeQueue);
 
-  const baseSequenceIndex = getFallbackSequenceIndex(baseTask, [baseTask, ...relatedTasks]);
-  const affectedTasks = relatedTasks.filter((task) => (
-    getFallbackSequenceIndex(task, [baseTask, ...relatedTasks]) > baseSequenceIndex
-  ));
+  const baseIndex = employeeTasks.findIndex((task) => task.id === baseTask.id);
+  if (baseIndex < 0 || baseIndex >= employeeTasks.length - 1) return 0;
 
-  if (!affectedTasks.length) return 0;
+  let cursor = getTaskDeadlineDate(baseTask);
+  if (!cursor) return 0;
 
   const batch = writeBatch(db);
-  const shiftMs = addedMinutes * 60 * 1000;
   const now = Date.now();
+  let affectedCount = 0;
 
-  affectedTasks.forEach((task) => {
-    const currentStart = getTaskScheduledStartDate(task);
-    const currentDeadline = getTaskDeadlineDate(task);
+  employeeTasks.forEach((task, sequenceIndex) => {
+    if (task.id === baseTask.id) {
+      return;
+    }
 
-    if (!currentStart || !currentDeadline) return;
+    if (sequenceIndex <= baseIndex) {
+      return;
+    }
 
-    const newStart = new Date(currentStart.getTime() + shiftMs);
-    const newDeadline = new Date(currentDeadline.getTime() + shiftMs);
+    const deadlineMinutes = Number(task.deadlineMinutes || 0);
+    if (deadlineMinutes <= 0) return;
+
+    const newStart = cursor;
+    const newDeadline = new Date(newStart.getTime() + deadlineMinutes * 60 * 1000);
     const updates = {
       scheduledStartAt: Timestamp.fromDate(newStart),
       deadlineAt: Timestamp.fromDate(newDeadline),
-      sequenceIndex: getFallbackSequenceIndex(task, [baseTask, ...relatedTasks])
+      sequenceIndex
     };
+
+    if (getWorkOrderSortIndex(task) === null) {
+      const fullWorkOrderTasks = normalizeWorkOrderSortIndexes(
+        state.tasks.filter((item) => item.workOrderId === baseTask.workOrderId)
+      );
+      const fallbackOrderIndex = fullWorkOrderTasks.findIndex((item) => item.id === task.id);
+      if (fallbackOrderIndex >= 0) updates.workOrderSortIndex = fallbackOrderIndex;
+    }
 
     if (task.status === "overdue" && newDeadline.getTime() > now) {
       updates.status = "doing";
     }
 
     batch.update(doc(db, "tasks", task.id), updates);
+    affectedCount += 1;
+    cursor = newDeadline;
   });
 
-  await batch.commit();
-  return affectedTasks.length;
-}
+  if (!affectedCount) return 0;
 
+  await batch.commit();
+  return affectedCount;
+}
 els.extendTimeForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
