@@ -79,7 +79,8 @@ const state = {
     from: "",
     to: ""
   },
-  extendTimeTaskId: null
+  extendTimeTaskId: null,
+  reassignTaskId: null
 };
 
 // =========================
@@ -140,7 +141,13 @@ const els = {
   newExtendReason: $("#newExtendReason"),
   addExtendReasonBtn: $("#addExtendReasonBtn"),
   extendReasonList: $("#extendReasonList"),
-  confirmExtendTimeBtn: $("#confirmExtendTimeBtn")
+  confirmExtendTimeBtn: $("#confirmExtendTimeBtn"),
+  reassignEmployeeModal: $("#reassignEmployeeModal"),
+  reassignEmployeeForm: $("#reassignEmployeeForm"),
+  reassignTaskTitle: $("#reassignTaskTitle"),
+  reassignCurrentEmployee: $("#reassignCurrentEmployee"),
+  reassignEmployeeSelect: $("#reassignEmployeeSelect"),
+  confirmReassignEmployeeBtn: $("#confirmReassignEmployeeBtn")
 };
 
 function escapeHtml(value = "") {
@@ -926,6 +933,10 @@ function renderEmployeeSelects() {
     select.innerHTML = `<option value="">Chọn nhân viên</option>${employeeOptions}`;
     if (currentValue) select.value = currentValue;
   });
+
+  if (state.reassignTaskId && els.reassignEmployeeModal && !els.reassignEmployeeModal.classList.contains("hidden")) {
+    renderReassignEmployeeOptions(state.reassignTaskId);
+  }
 }
 
 els.createEmployeeForm.addEventListener("submit", async (event) => {
@@ -1873,6 +1884,58 @@ function renderEmployeeTasks() {
   updateCountdowns();
 }
 
+function canAdminReassignTask(task, mode, displayStatus = null) {
+  if (mode !== "admin" || state.profile?.role !== "admin") return false;
+  if (!task?.id || !task.assignedToUid) return false;
+
+  const visibleStatus = displayStatus || getDisplayStatus(task);
+
+  return (
+    ["doing", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
+    && ["doing", "redo", "overdue"].includes(task.status)
+  );
+}
+
+function renderAssignedEmployeeMeta(task, mode, displayStatus) {
+  const employeeName = task.assignedToName || "--";
+
+  if (!canAdminReassignTask(task, mode, displayStatus)) {
+    return `<strong>${escapeHtml(employeeName)}</strong>`;
+  }
+
+  return `
+    <button
+      class="link-btn assignee-change-btn"
+      data-action="open-reassign-employee"
+      data-task-id="${escapeHtml(task.id)}"
+      type="button"
+      title="Đổi nhân viên phụ trách"
+    >
+      ${escapeHtml(employeeName)}
+    </button>
+  `;
+}
+
+function isUnfinishedAssignedTask(task) {
+  return Boolean(task?.assignedToUid) && !["draft", "completed"].includes(task.status);
+}
+
+function employeeHasUnfinishedTask(employeeUid, ignoredTaskId = "") {
+  return state.tasks.some((task) => (
+    task.id !== ignoredTaskId
+    && task.assignedToUid === employeeUid
+    && isUnfinishedAssignedTask(task)
+  ));
+}
+
+function getAvailableReplacementEmployees(task) {
+  return state.employees.filter((employee) => (
+    employee.uid
+    && employee.uid !== task.assignedToUid
+    && !employeeHasUnfinishedTask(employee.uid, task.id)
+  ));
+}
+
 function renderTaskCard(task, mode) {
   const displayStatus = task.displayStatus || getDisplayStatus(task);
   const deadlineDate = timestampToDate(task.deadlineAt);
@@ -1904,7 +1967,7 @@ function renderTaskCard(task, mode) {
       <div class="task-meta">
         <div class="meta-box">
           <span>Nhân viên</span>
-          <strong>${escapeHtml(task.assignedToName || "--")}</strong>
+          ${renderAssignedEmployeeMeta(task, mode, displayStatus)}
         </div>
         <div class="meta-box">
           <span>Ngày giao</span>
@@ -1923,7 +1986,7 @@ function renderTaskCard(task, mode) {
       <div class="task-meta">
         <div class="meta-box">
           <span>Giao lúc</span>
-          <strong>${formatDateTime(task.createdAt)}</strong>
+          <strong>${formatDateTime(task.dispatchedAt || task.createdAt)}</strong>
         </div>
         <div class="meta-box">
           <span>Hạn lúc</span>
@@ -2073,6 +2136,10 @@ document.addEventListener("click", async (event) => {
     openExtendTimeModal(taskId);
   }
 
+  if (action === "open-reassign-employee") {
+    openReassignEmployeeModal(taskId);
+  }
+
   if (action === "submit-task") {
     await submitTask(taskId, button);
   }
@@ -2099,6 +2166,155 @@ document.addEventListener("click", async (event) => {
 
   if (action === "delete-work-order") {
     await deleteWorkOrder(button.dataset.workOrderId, button);
+  }
+});
+
+
+// =========================
+// Đổi nhân viên phụ trách task
+// =========================
+function renderReassignEmployeeOptions(taskId) {
+  if (!els.reassignEmployeeSelect || !els.confirmReassignEmployeeBtn) return;
+
+  const task = state.tasks.find((item) => item.id === taskId);
+
+  if (!task) {
+    els.reassignEmployeeSelect.innerHTML = `<option value="">Không tìm thấy công việc</option>`;
+    els.confirmReassignEmployeeBtn.disabled = true;
+    return;
+  }
+
+  const candidates = getAvailableReplacementEmployees(task);
+
+  if (!candidates.length) {
+    els.reassignEmployeeSelect.innerHTML = `<option value="">Không có nhân viên chưa được giao việc</option>`;
+    els.confirmReassignEmployeeBtn.disabled = true;
+    return;
+  }
+
+  els.reassignEmployeeSelect.innerHTML = `
+    <option value="">Chọn nhân viên thay thế</option>
+    ${candidates.map((employee) => `
+      <option value="${escapeHtml(employee.uid)}">${escapeHtml(employee.name)} - ${escapeHtml(employee.email || "")}</option>
+    `).join("")}
+  `;
+  els.confirmReassignEmployeeBtn.disabled = false;
+}
+
+function openReassignEmployeeModal(taskId) {
+  if (state.profile?.role !== "admin") return;
+
+  const task = state.tasks.find((item) => item.id === taskId);
+
+  if (!task) {
+    toast("Không tìm thấy công việc cần đổi nhân viên.", "error");
+    return;
+  }
+
+  const displayStatus = getDisplayStatus(task);
+
+  if (!canAdminReassignTask(task, "admin", displayStatus)) {
+    toast("Chỉ đổi nhân viên cho công việc đang làm, đang chờ đến lượt, gần hết giờ, quá hạn hoặc yêu cầu làm lại.", "error");
+    return;
+  }
+
+  state.reassignTaskId = taskId;
+  els.reassignTaskTitle.textContent = task.title || "Công việc";
+  els.reassignCurrentEmployee.textContent = task.assignedToName || "--";
+  renderReassignEmployeeOptions(taskId);
+  els.reassignEmployeeModal?.classList.remove("hidden");
+}
+
+function closeReassignEmployeeModal() {
+  state.reassignTaskId = null;
+  els.reassignEmployeeForm?.reset();
+  els.reassignEmployeeModal?.classList.add("hidden");
+}
+
+$$('[data-close-reassign-modal]').forEach((button) => {
+  button.addEventListener("click", closeReassignEmployeeModal);
+});
+
+els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (state.profile?.role !== "admin") return;
+
+  const taskId = state.reassignTaskId;
+  const task = state.tasks.find((item) => item.id === taskId);
+  const newEmployeeUid = els.reassignEmployeeSelect?.value || "";
+  const newEmployee = state.employees.find((employee) => employee.uid === newEmployeeUid);
+
+  try {
+    if (!task) throw new Error("Không tìm thấy công việc cần đổi nhân viên.");
+    if (!newEmployee) throw new Error("Vui lòng chọn nhân viên thay thế hợp lệ.");
+    if (employeeHasUnfinishedTask(newEmployee.uid, task.id)) {
+      throw new Error("Nhân viên này đang có công việc chưa hoàn thành. Vui lòng chọn nhân viên chưa được giao việc.");
+    }
+
+    setButtonLoading(els.confirmReassignEmployeeBtn, true, "Đang đổi...");
+
+    const displayStatus = getDisplayStatus(task);
+    const wasQueued = displayStatus === "queued";
+    const oldEmployeeUid = task.assignedToUid;
+    const oldEmployeeName = task.assignedToName || "Nhân viên cũ";
+    const newEmployeeName = newEmployee.name || newEmployee.email || "Nhân viên mới";
+
+    const updateData = {
+      assignedToUid: newEmployee.uid,
+      assignedToName: newEmployeeName
+    };
+
+    if (wasQueued) {
+      const now = new Date();
+      const deadlineMinutes = Number(task.deadlineMinutes || 0);
+
+      updateData.status = "doing";
+      updateData.dispatchedAt = serverTimestamp();
+      updateData.queueStartAt = Timestamp.fromDate(now);
+      updateData.deadlineAt = Timestamp.fromDate(new Date(now.getTime() + deadlineMinutes * 60 * 1000));
+    }
+
+    await updateDoc(doc(db, "tasks", task.id), updateData);
+
+    const startMessage = wasQueued
+      ? "Công việc này đã được bắt đầu lại thời gian như một công việc mới."
+      : "Thời gian đếm ngược, hạn hoàn thành và các lần thêm giờ trước đó được giữ nguyên.";
+
+    await createNotifications([
+      {
+        recipientUid: newEmployee.uid,
+        type: "task_reassigned",
+        title: "Bạn được chuyển giao công việc",
+        message: `${state.profile.name || "Admin"} đã chuyển công việc “${task.title}” từ ${oldEmployeeName} sang bạn. ${startMessage}`,
+        taskId: task.id,
+        taskTitle: task.title
+      },
+      {
+        recipientUid: oldEmployeeUid,
+        type: "task_reassigned_removed",
+        title: "Công việc đã được chuyển sang nhân viên khác",
+        message: `Công việc “${task.title}” đã được Admin chuyển sang ${newEmployeeName}.`,
+        taskId: task.id,
+        taskTitle: task.title
+      },
+      {
+        recipientUid: state.user.uid,
+        type: "task_reassigned_admin",
+        title: "Đã đổi nhân viên phụ trách",
+        message: `Bạn đã đổi công việc “${task.title}” từ ${oldEmployeeName} sang ${newEmployeeName}.`,
+        taskId: task.id,
+        taskTitle: task.title
+      }
+    ]);
+
+    closeReassignEmployeeModal();
+    toast(`Đã đổi nhân viên phụ trách sang ${newEmployeeName}.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không đổi được nhân viên phụ trách.", "error");
+  } finally {
+    setButtonLoading(els.confirmReassignEmployeeBtn, false);
   }
 });
 

@@ -232,6 +232,46 @@
   </div>
 
 
+  <!-- REASSIGN TASK EMPLOYEE MODAL -->
+  <div id="reassignEmployeeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reassignEmployeeModalTitle">
+    <div class="modal-backdrop" data-close-reassign-modal></div>
+    <div class="modal-card small-modal">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Đổi nhân viên</p>
+          <h3 id="reassignEmployeeModalTitle">Đổi nhân viên phụ trách</h3>
+          <p id="reassignTaskTitle" class="muted">Công việc</p>
+        </div>
+        <button class="icon-btn" data-close-reassign-modal aria-label="Đóng">×</button>
+      </div>
+
+      <form id="reassignEmployeeForm" class="form-stack">
+        <label>
+          Nhân viên hiện tại
+          <input id="reassignCurrentEmployee" type="text" readonly />
+        </label>
+
+        <label>
+          Chọn nhân viên thay thế
+          <select id="reassignEmployeeSelect" required>
+            <option value="">Chọn nhân viên chưa được giao việc</option>
+          </select>
+        </label>
+
+        <p class="small-note">
+          Nếu công việc đang làm, hệ thống chỉ đổi người và giữ nguyên đồng hồ đếm ngược, hạn hoàn thành, các lần thêm giờ trước đó.
+          Nếu công việc đang chờ đến lượt, hệ thống sẽ bắt đầu lại thời gian như một công việc mới cho nhân viên thay thế.
+        </p>
+
+        <div class="modal-footer-actions">
+          <button class="btn ghost" data-close-reassign-modal type="button">Huỷ</button>
+          <button id="confirmReassignEmployeeBtn" class="btn primary" type="submit">OK - Đổi nhân viên</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
   <!-- EXTEND TASK TIME MODAL -->
   <div id="extendTimeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="extendTimeModalTitle">
     <div class="modal-backdrop" data-close-extend-modal></div>
