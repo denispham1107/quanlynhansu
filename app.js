@@ -247,7 +247,6 @@ function formatCountdown(ms) {
 function statusLabel(status) {
   const labels = {
     draft: "Chưa giao việc",
-    queued: "Đang chờ đến lượt",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
@@ -263,11 +262,6 @@ function getDisplayStatus(task) {
   if (task.status === "draft") return "draft";
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
-
-  // Công việc đã giao nhưng nhân viên chưa tới lượt (vẫn còn đang trong thời gian
-  // quy định của (các) công việc được giao trước đó cho chính người này).
-  const queueStart = timestampToDate(task.queueStartAt);
-  if (queueStart && Date.now() < queueStart.getTime()) return "queued";
 
   if (task.status === "redo") {
     const deadline = timestampToDate(task.deadlineAt);
@@ -295,7 +289,6 @@ function getDisplayStatus(task) {
 function taskCardClass(displayStatus) {
   return {
     draft: "is-draft",
-    queued: "is-queued",
     doing: "",
     near_due: "is-near-due",
     overdue: "is-overdue",
@@ -1098,9 +1091,7 @@ els.openTaskModalBtn.addEventListener("click", () => {
 });
 
 function openEditWorkOrderModal(workOrderId) {
-  const tasksInGroup = state.tasks
-    .filter((task) => (task.workOrderId || "legacy") === workOrderId)
-    .sort((a, b) => Number(a.rowIndex ?? 0) - Number(b.rowIndex ?? 0));
+  const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
   const workOrder = state.workOrders.find((wo) => wo.id === workOrderId);
 
   if (!tasksInGroup.length && !workOrder) {
@@ -1195,57 +1186,6 @@ function validateTaskRowsForDraft(rows) {
   return null;
 }
 
-// =========================
-// Xếp hàng thời gian theo từng nhân viên
-// =========================
-// Một nhân viên chỉ "chạy" đếm ngược 1 công việc tại 1 thời điểm. Nếu được giao thêm
-// công việc trong khi đang còn công việc khác (theo THỜI GIAN QUY ĐỊNH, không phải theo
-// việc họ đã bấm hoàn thành hay chưa), công việc mới phải xếp hàng, chỉ thực sự bắt đầu
-// đếm giờ khi công việc trước đó (của chính người này) hết thời gian quy định.
-//
-// Trả về map { uid: mốc thời gian (ms) mà nhân viên đó RẢNH để bắt đầu việc tiếp theo }
-// dựa trên các công việc ĐÃ GIAO (khác "draft") hiện có trong state.tasks.
-function getEmployeeQueueEndMap(assignedToUids) {
-  const map = {};
-
-  assignedToUids.forEach((uid) => {
-    if (!uid || map[uid] !== undefined) return;
-
-    let latestEnd = 0;
-
-    state.tasks.forEach((task) => {
-      if (task.assignedToUid !== uid) return;
-      if (task.status === "draft") return;
-
-      const start = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt);
-      if (!start) return;
-
-      const end = start.getTime() + Number(task.deadlineMinutes || 0) * 60 * 1000;
-      if (end > latestEnd) latestEnd = end;
-    });
-
-    map[uid] = latestEnd;
-  });
-
-  return map;
-}
-
-// Tính mốc bắt đầu đếm giờ thực sự cho 1 công việc mới của 1 nhân viên, đồng thời
-// cập nhật luôn map hàng đợi để công việc TIẾP THEO của cùng người này (nếu có,
-// trong cùng 1 lượt giao việc) được xếp nối tiếp theo đúng thứ tự.
-function reserveQueueSlot(employeeQueueEnd, uid, deadlineMinutes, now) {
-  const prevEnd = employeeQueueEnd[uid] || 0;
-  const queueStartMs = Math.max(now.getTime(), prevEnd);
-  const queueEndMs = queueStartMs + Number(deadlineMinutes || 0) * 60 * 1000;
-
-  employeeQueueEnd[uid] = queueEndMs;
-
-  return {
-    queueStartDate: new Date(queueStartMs),
-    deadlineDate: new Date(queueEndMs)
-  };
-}
-
 // Dùng chung cho cả 3 luồng: Lưu nháp mới, Sửa & lưu lại nháp, Sửa & giao việc luôn,
 // và Tạo phiếu & giao việc ngay (trường hợp không sửa phiếu có sẵn).
 async function persistWorkOrder(dispatch, button) {
@@ -1294,12 +1234,6 @@ async function persistWorkOrder(dispatch, button) {
     const notificationItems = [];
     const createdTaskRefs = [];
 
-    // Chuẩn bị hàng đợi thời gian cho từng nhân viên xuất hiện trong phiếu này,
-    // dựa trên các công việc HỌ đã được giao trước đó (ở bất kỳ phiếu nào khác).
-    const employeeQueueEnd = dispatch
-      ? getEmployeeQueueEndMap(rows.map((row) => row.assignedToUid))
-      : {};
-
     rows.forEach((row) => {
       const taskRef = doc(collection(db, "tasks"));
       createdTaskRefs.push(taskRef);
@@ -1321,12 +1255,10 @@ async function persistWorkOrder(dispatch, button) {
         workOrderName,
         // Lưu tổng số công việc của phiếu vào từng task để các màn hình có thể hiển thị thống nhất.
         workOrderTaskCount: rows.length,
-        rowIndex: row.index,
         createdAt: serverTimestamp(),
         deadlineMinutes,
         deadlineAt: null,
         dispatchedAt: null,
-        queueStartAt: null,
         submittedAt: null,
         approvedAt: null,
         status: "draft",
@@ -1337,23 +1269,16 @@ async function persistWorkOrder(dispatch, button) {
       };
 
       if (dispatch) {
-        const { queueStartDate, deadlineDate } = reserveQueueSlot(employeeQueueEnd, assignedToUid, deadlineMinutes, now);
-
+        const deadlineAt = new Date(now.getTime() + deadlineMinutes * 60 * 1000);
         taskData.status = "doing";
         taskData.dispatchedAt = serverTimestamp();
-        taskData.queueStartAt = Timestamp.fromDate(queueStartDate);
-        taskData.deadlineAt = Timestamp.fromDate(deadlineDate);
-
-        const isQueued = queueStartDate.getTime() > now.getTime();
-        const startNote = isQueued
-          ? ` Do bạn còn công việc khác chưa hết thời gian quy định, công việc này sẽ tự bắt đầu tính giờ lúc ${formatDateTime(taskData.queueStartAt)}.`
-          : "";
+        taskData.deadlineAt = Timestamp.fromDate(deadlineAt);
 
         notificationItems.push({
           recipientUid: assignedToUid,
           type: "task_assigned",
           title: "Bạn có công việc mới",
-          message: `${state.profile.name || "Admin"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.${startNote}`,
+          message: `${state.profile.name || "Admin"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.`,
           taskId: taskRef.id,
           taskTitle: row.title
         });
@@ -1413,11 +1338,7 @@ els.saveDraftBtn.addEventListener("click", async () => {
 });
 
 async function dispatchWorkOrder(workOrderId, button) {
-  const tasksInGroup = state.tasks
-    .filter((task) => (task.workOrderId || "legacy") === workOrderId)
-    // Sắp theo đúng thứ tự công việc trong phiếu (rowIndex) để hàng đợi theo nhân viên
-    // được tính đúng thứ tự đã nhập, vì createdAt của các task tạo cùng lúc có thể trùng nhau.
-    .sort((a, b) => Number(a.rowIndex ?? 0) - Number(b.rowIndex ?? 0));
+  const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
   if (!tasksInGroup.length) {
     toast("Phiếu này chưa có công việc nào. Bấm “Sửa phiếu” để thêm công việc trước khi giao.", "error");
@@ -1444,35 +1365,20 @@ async function dispatchWorkOrder(workOrderId, button) {
     const batch = writeBatch(db);
     const notificationItems = [];
 
-    // Hàng đợi seed từ các công việc ĐÃ GIAO khác (ngoài chính phiếu này, vì các task
-    // trong tasksInGroup hiện vẫn đang ở trạng thái "draft" nên tự động bị loại khỏi map).
-    const employeeQueueEnd = getEmployeeQueueEndMap(tasksInGroup.map((task) => task.assignedToUid));
-
     tasksInGroup.forEach((task) => {
-      const { queueStartDate, deadlineDate } = reserveQueueSlot(
-        employeeQueueEnd,
-        task.assignedToUid,
-        Number(task.deadlineMinutes),
-        now
-      );
+      const deadlineAt = new Date(now.getTime() + Number(task.deadlineMinutes) * 60 * 1000);
 
       batch.update(doc(db, "tasks", task.id), {
         status: "doing",
         dispatchedAt: serverTimestamp(),
-        queueStartAt: Timestamp.fromDate(queueStartDate),
-        deadlineAt: Timestamp.fromDate(deadlineDate)
+        deadlineAt: Timestamp.fromDate(deadlineAt)
       });
-
-      const isQueued = queueStartDate.getTime() > now.getTime();
-      const startNote = isQueued
-        ? ` Do bạn còn công việc khác chưa hết thời gian quy định, công việc này sẽ tự bắt đầu tính giờ lúc ${formatDateTime(Timestamp.fromDate(queueStartDate))}.`
-        : "";
 
       notificationItems.push({
         recipientUid: task.assignedToUid,
         type: "task_assigned",
         title: "Bạn có công việc mới",
-        message: `${state.profile.name || "Admin"} đã giao cho bạn: ${task.title} (phiếu “${task.workOrderName}”). Hạn hoàn thành: ${formatMinutes(task.deadlineMinutes)}.${startNote}`,
+        message: `${state.profile.name || "Admin"} đã giao cho bạn: ${task.title} (phiếu “${task.workOrderName}”). Hạn hoàn thành: ${formatMinutes(task.deadlineMinutes)}.`,
         taskId: task.id,
         taskTitle: task.title
       });
@@ -1782,10 +1688,6 @@ function groupTasksByWorkOrder(tasks) {
     group.totalTaskCount = getWorkOrderTotalTaskCount(key, group.tasks);
   });
 
-  groups.forEach((group) => {
-    group.tasks.sort((a, b) => Number(a.rowIndex ?? 0) - Number(b.rowIndex ?? 0));
-  });
-
   return groups;
 }
 
@@ -1876,22 +1778,19 @@ function renderTaskCard(task, mode) {
   const displayStatus = task.displayStatus || getDisplayStatus(task);
   const deadlineDate = timestampToDate(task.deadlineAt);
   const deadlineMs = deadlineDate?.getTime() || 0;
-  const queueStartDate = timestampToDate(task.queueStartAt);
-  const queueStartMs = queueStartDate?.getTime() || 0;
 
   const canEmployeeSubmit =
     mode === "employee" &&
     ["doing", "redo", "overdue"].includes(task.status) &&
     task.status !== "completed" &&
-    task.status !== "submitted" &&
-    displayStatus !== "queued";
+    task.status !== "submitted";
 
   const canAdminReview =
     mode === "admin" &&
     task.status === "submitted";
 
   return `
-    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-raw-status="${escapeHtml(task.status)}">
+    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-raw-status="${escapeHtml(task.status)}">
       <div class="task-top">
         <div>
           <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
@@ -1949,11 +1848,6 @@ function getInitialCountdownText(task) {
   if (task.status === "draft") return "Chưa giao việc";
   if (task.status === "completed") return "Đã hoàn thành";
   if (task.status === "submitted") return "Chờ Admin duyệt";
-
-  const queueStart = timestampToDate(task.queueStartAt);
-  if (queueStart && Date.now() < queueStart.getTime()) {
-    return `Chờ đến lượt (bắt đầu ${formatDateTime(task.queueStartAt)})`;
-  }
 
   const deadline = timestampToDate(task.deadlineAt);
 
@@ -2581,17 +2475,6 @@ function updateCountdowns() {
       countdown.textContent = "Chờ Admin duyệt";
       return;
     }
-
-    const queueStartMs = Number(card.dataset.queueStartMs || 0);
-
-    if (queueStartMs && Date.now() < queueStartMs) {
-      countdown.textContent = `Chờ đến lượt (bắt đầu ${formatDateTime(new Date(queueStartMs))})`;
-      card.classList.add("is-queued");
-      card.classList.remove("is-overdue", "is-near-due");
-      return;
-    }
-
-    card.classList.remove("is-queued");
 
     const deadlineMs = Number(card.dataset.deadlineMs || 0);
 
