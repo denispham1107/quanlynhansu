@@ -22,6 +22,7 @@ import {
   onSnapshot,
   serverTimestamp,
   Timestamp,
+  arrayUnion,
   writeBatch,
   runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -196,6 +197,19 @@ function formatDateTime(value) {
     dateStyle: "short",
     timeStyle: "short"
   }).format(date);
+}
+
+function formatFullDateTime(value) {
+  const date = timestampToDate(value);
+  if (!date) return "--";
+
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
 function formatDateOnly(value) {
@@ -1896,23 +1910,35 @@ function canAdminReassignTask(task, mode, displayStatus = null) {
   );
 }
 
-function renderAssignedEmployeeMeta(task, mode, displayStatus) {
-  const employeeName = task.assignedToName || "--";
+function getEmployeeDisplayNameByUid(uid, fallbackName = "") {
+  const employee = state.employees.find((item) => item.uid === uid);
+  return fallbackName || employee?.name || employee?.email || "--";
+}
+
+function renderAssignedEmployeeMetaBox(task, mode, displayStatus) {
+  const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
 
   if (!canAdminReassignTask(task, mode, displayStatus)) {
-    return `<strong>${escapeHtml(employeeName)}</strong>`;
+    return `
+      <div class="meta-box">
+        <span>Nhân viên</span>
+        <strong>${escapeHtml(employeeName)}</strong>
+      </div>
+    `;
   }
 
   return `
-    <button
-      class="link-btn assignee-change-btn"
+    <div
+      class="meta-box assignee-change-box"
       data-action="open-reassign-employee"
       data-task-id="${escapeHtml(task.id)}"
-      type="button"
-      title="Đổi nhân viên phụ trách"
+      role="button"
+      tabindex="0"
+      title="Bấm vào ô này để đổi nhân viên phụ trách"
     >
-      ${escapeHtml(employeeName)}
-    </button>
+      <span>Nhân viên</span>
+      <strong>${escapeHtml(employeeName)}</strong>
+    </div>
   `;
 }
 
@@ -1965,10 +1991,7 @@ function renderTaskCard(task, mode) {
       </div>
 
       <div class="task-meta">
-        <div class="meta-box">
-          <span>Nhân viên</span>
-          ${renderAssignedEmployeeMeta(task, mode, displayStatus)}
-        </div>
+        ${renderAssignedEmployeeMetaBox(task, mode, displayStatus)}
         <div class="meta-box">
           <span>Ngày giao</span>
           <strong>${escapeHtml(formatDateOnly(getTaskDateValue(task)))}</strong>
@@ -2003,6 +2026,7 @@ function renderTaskCard(task, mode) {
       </div>
 
       ${renderTimeExtensionBox(task)}
+      ${renderAssigneeHistoryBox(task)}
       ${renderResultBox(task)}
       ${renderTaskActions(task, { canEmployeeSubmit, canAdminReview, canAdminExtendTime: canAdminExtendTaskTime(task, mode) })}
     </article>
@@ -2028,6 +2052,45 @@ function getInitialCountdownText(task) {
   return ms >= 0
     ? `Còn ${formatCountdown(ms)}`
     : `Quá hạn ${formatCountdown(ms)}`;
+}
+
+function renderAssigneeHistoryBox(task) {
+  const history = Array.isArray(task.assigneeChangeHistory)
+    ? task.assigneeChangeHistory
+    : [];
+
+  if (!history.length) return "";
+
+  const rows = history
+    .slice()
+    .sort((a, b) => (timestampToDate(b.changedAt)?.getTime() || 0) - (timestampToDate(a.changedAt)?.getTime() || 0))
+    .map((item, index) => {
+      const fromName = item.fromName || "Nhân viên cũ";
+      const toName = item.toName || "Nhân viên mới";
+      const changedBy = item.changedByName || "Admin";
+      const changedAt = formatFullDateTime(item.changedAt);
+      const modeText = item.restartedFromQueue
+        ? "Bắt đầu lại thời gian như công việc mới"
+        : "Giữ nguyên thời gian đang chạy";
+
+      return `
+        <li>
+          <strong>Lần ${history.length - index}: ${escapeHtml(fromName)} → ${escapeHtml(toName)}</strong>
+          <span>${escapeHtml(changedAt)} • ${escapeHtml(changedBy)} • ${escapeHtml(modeText)}</span>
+        </li>
+      `;
+    })
+    .join("");
+
+  return `
+    <div class="extension-box assignee-history-box">
+      <div class="extension-box-head">
+        <strong>Lịch sử thay đổi nhân viên</strong>
+        <span>${history.length} lần thay đổi</span>
+      </div>
+      <ul class="extension-list">${rows}</ul>
+    </div>
+  `;
 }
 
 function renderResultBox(task) {
@@ -2169,6 +2232,16 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+document.addEventListener("keydown", (event) => {
+  if (!['Enter', ' '].includes(event.key)) return;
+
+  const target = event.target.closest('[data-action="open-reassign-employee"]');
+  if (!target) return;
+
+  event.preventDefault();
+  openReassignEmployeeModal(target.dataset.taskId);
+});
+
 
 // =========================
 // Đổi nhân viên phụ trách task
@@ -2220,7 +2293,11 @@ function openReassignEmployeeModal(taskId) {
 
   state.reassignTaskId = taskId;
   els.reassignTaskTitle.textContent = task.title || "Công việc";
-  els.reassignCurrentEmployee.textContent = task.assignedToName || "--";
+
+  if (els.reassignCurrentEmployee) {
+    els.reassignCurrentEmployee.value = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+  }
+
   renderReassignEmployeeOptions(taskId);
   els.reassignEmployeeModal?.classList.remove("hidden");
 }
@@ -2257,12 +2334,23 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
     const displayStatus = getDisplayStatus(task);
     const wasQueued = displayStatus === "queued";
     const oldEmployeeUid = task.assignedToUid;
-    const oldEmployeeName = task.assignedToName || "Nhân viên cũ";
+    const oldEmployeeName = getEmployeeDisplayNameByUid(oldEmployeeUid, task.assignedToName) || "Nhân viên cũ";
     const newEmployeeName = newEmployee.name || newEmployee.email || "Nhân viên mới";
+    const changedAt = new Date();
 
     const updateData = {
       assignedToUid: newEmployee.uid,
-      assignedToName: newEmployeeName
+      assignedToName: newEmployeeName,
+      assigneeChangeHistory: arrayUnion({
+        fromUid: oldEmployeeUid || "",
+        fromName: oldEmployeeName,
+        toUid: newEmployee.uid,
+        toName: newEmployeeName,
+        changedAt: Timestamp.fromDate(changedAt),
+        changedByUid: state.user.uid,
+        changedByName: state.profile.name || state.profile.email || "Admin",
+        restartedFromQueue: wasQueued
+      })
     };
 
     if (wasQueued) {
