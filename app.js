@@ -247,7 +247,6 @@ function formatCountdown(ms) {
 function statusLabel(status) {
   const labels = {
     draft: "Chưa giao việc",
-    waiting: "Chờ bắt đầu",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
@@ -259,269 +258,25 @@ function statusLabel(status) {
   return labels[status] || status;
 }
 
-function isValidSequenceIndex(value) {
-  const number = Number(value);
-  return Number.isInteger(number) && number >= 0;
-}
-
-function getWorkOrderSortIndex(task) {
-  const candidates = [
-    task?.workOrderSortIndex,
-    task?.originalOrderIndex,
-    task?.rowIndex,
-    task?.sortIndex
-  ];
-
-  for (const value of candidates) {
-    if (isValidSequenceIndex(value)) return Number(value);
-  }
-
-  return null;
-}
-
-function getTaskCreatedOrDispatchedMs(task) {
-  return timestampToDate(task?.createdAt)?.getTime()
-    || timestampToDate(task?.dispatchedAt)?.getTime()
-    || 0;
-}
-
-function compareTasksForEmployeeQueue(a, b) {
-  // Thứ tự thật trong phiếu được lưu riêng để không nhầm với sequenceIndex
-  // (sequenceIndex là thứ tự nối tiếp RIÊNG của từng nhân viên trong phiếu).
-  const aOrder = getWorkOrderSortIndex(a);
-  const bOrder = getWorkOrderSortIndex(b);
-
-  if (aOrder !== null && bOrder !== null && aOrder !== bOrder) {
-    return aOrder - bOrder;
-  }
-
-  if (aOrder !== null && bOrder === null) return -1;
-  if (aOrder === null && bOrder !== null) return 1;
-
-  const aSequence = isValidSequenceIndex(a?.sequenceIndex) ? Number(a.sequenceIndex) : null;
-  const bSequence = isValidSequenceIndex(b?.sequenceIndex) ? Number(b.sequenceIndex) : null;
-
-  if (aSequence !== null && bSequence !== null && aSequence !== bSequence) {
-    return aSequence - bSequence;
-  }
-
-  if (aSequence !== null && bSequence === null) return -1;
-  if (aSequence === null && bSequence !== null) return 1;
-
-  const aTime = getTaskCreatedOrDispatchedMs(a);
-  const bTime = getTaskCreatedOrDispatchedMs(b);
-
-  if (aTime !== bTime) return aTime - bTime;
-
-  return String(a?.id || "").localeCompare(String(b?.id || ""));
-}
-
-function compareTasksForWorkOrderOrder(a, b) {
-  const aOrder = getWorkOrderSortIndex(a);
-  const bOrder = getWorkOrderSortIndex(b);
-
-  if (aOrder !== null && bOrder !== null && aOrder !== bOrder) {
-    return aOrder - bOrder;
-  }
-
-  if (aOrder !== null && bOrder === null) return -1;
-  if (aOrder === null && bOrder !== null) return 1;
-
-  const aSequence = isValidSequenceIndex(a?.sequenceIndex) ? Number(a.sequenceIndex) : null;
-  const bSequence = isValidSequenceIndex(b?.sequenceIndex) ? Number(b.sequenceIndex) : null;
-
-  if (aSequence !== null && bSequence !== null && aSequence !== bSequence) {
-    return aSequence - bSequence;
-  }
-
-  const aTime = getTaskCreatedOrDispatchedMs(a);
-  const bTime = getTaskCreatedOrDispatchedMs(b);
-
-  if (aTime !== bTime) return aTime - bTime;
-
-  return String(a?.id || "").localeCompare(String(b?.id || ""));
-}
-
-function normalizeWorkOrderSortIndexes(tasks) {
-  return tasks
-    .slice()
-    .sort(compareTasksForWorkOrderOrder)
-    .map((task, index) => ({
-      ...task,
-      workOrderSortIndex: getWorkOrderSortIndex(task) ?? index
-    }));
-}
-
-function getTaskScheduledStartDate(task) {
-  return timestampToDate(task.scheduledStartAt)
-    || timestampToDate(task.dispatchedAt)
-    || timestampToDate(task.createdAt);
-}
-
-function getTaskDeadlineDate(task) {
-  const savedDeadline = timestampToDate(task.deadlineAt);
-  if (savedDeadline) return savedDeadline;
-
-  const scheduledStart = getTaskScheduledStartDate(task);
-  const deadlineMinutes = Number(task.deadlineMinutes || 0);
-
-  if (!scheduledStart || deadlineMinutes <= 0) return null;
-
-  return new Date(scheduledStart.getTime() + deadlineMinutes * 60 * 1000);
-}
-
-function hasTaskStarted(task, now = new Date()) {
-  const scheduledStart = getTaskScheduledStartDate(task);
-  return !scheduledStart || scheduledStart.getTime() <= now.getTime();
-}
-
-function compareTasksForSequentialSchedule(a, b) {
-  return compareTasksForEmployeeQueue(a, b);
-}
-function compareTasksForDisplay(a, b) {
-  const aStart = getTaskScheduledStartDate(a)?.getTime() || 0;
-  const bStart = getTaskScheduledStartDate(b)?.getTime() || 0;
-
-  if (aStart !== bStart) return aStart - bStart;
-
-  const employeeCompare = String(a.assignedToName || "").localeCompare(String(b.assignedToName || ""), "vi");
-  if (employeeCompare) return employeeCompare;
-
-  return compareTasksForSequentialSchedule(a, b);
-}
-
-function getEmployeeScheduleBaseStart(tasks, fallbackStartDate = new Date()) {
-  const candidates = tasks
-    .map((task) => getTaskScheduledStartDate(task))
-    .filter(Boolean)
-    .map((date) => date.getTime());
-
-  if (!candidates.length) return fallbackStartDate;
-
-  return new Date(Math.min(...candidates));
-}
-
-function buildSequentialRowSchedule(rows, baseStartDate = new Date()) {
-  // Quan trọng: không nối tiếp theo toàn bộ phiếu.
-  // Phải nhóm theo nhân viên trước, rồi mỗi nhân viên có một hàng đợi thời gian riêng.
-  const plan = new Map();
-  const rowsByEmployee = new Map();
-
-  rows.forEach((row) => {
-    const employeeKey = row.assignedToUid || "__unassigned__";
-
-    if (!rowsByEmployee.has(employeeKey)) {
-      rowsByEmployee.set(employeeKey, []);
-    }
-
-    rowsByEmployee.get(employeeKey).push(row);
-  });
-
-  rowsByEmployee.forEach((employeeRows) => {
-    const orderedRows = employeeRows
-      .slice()
-      .sort((a, b) => Number(a.index || 0) - Number(b.index || 0));
-
-    let cursor = baseStartDate;
-
-    orderedRows.forEach((row, sequenceIndex) => {
-      const deadlineMinutes = Number(row.deadlineMinutes || 0);
-      const scheduledStartAt = cursor;
-      const deadlineAt = new Date(scheduledStartAt.getTime() + deadlineMinutes * 60 * 1000);
-
-      plan.set(row.index, {
-        scheduledStartAt,
-        deadlineAt,
-        sequenceIndex,
-        workOrderSortIndex: Number(row.index || 0)
-      });
-
-      cursor = deadlineAt;
-    });
-  });
-
-  return plan;
-}
-function buildSequentialTaskSchedule(tasks, baseStartDate = new Date(), options = {}) {
-  const { forceBaseStart = false } = options;
-  const plan = new Map();
-  const groupsByEmployee = new Map();
-
-  tasks.forEach((task) => {
-    if (!task.assignedToUid) return;
-
-    if (!groupsByEmployee.has(task.assignedToUid)) {
-      groupsByEmployee.set(task.assignedToUid, []);
-    }
-
-    groupsByEmployee.get(task.assignedToUid).push(task);
-  });
-
-  groupsByEmployee.forEach((employeeTasks) => {
-    const orderedTasks = employeeTasks.slice().sort(compareTasksForEmployeeQueue);
-    let cursor = forceBaseStart
-      ? baseStartDate
-      : getEmployeeScheduleBaseStart(orderedTasks, baseStartDate);
-
-    orderedTasks.forEach((task, sequenceIndex) => {
-      const deadlineMinutes = Number(task.deadlineMinutes || 0);
-      const scheduledStartAt = cursor;
-      const deadlineAt = new Date(scheduledStartAt.getTime() + deadlineMinutes * 60 * 1000);
-      const existingWorkOrderSortIndex = getWorkOrderSortIndex(task);
-
-      plan.set(task.id, {
-        scheduledStartAt,
-        deadlineAt,
-        sequenceIndex,
-        workOrderSortIndex: existingWorkOrderSortIndex
-      });
-
-      cursor = deadlineAt;
-    });
-  });
-
-  return plan;
-}
-function getFallbackSequenceIndex(task, taskList = state.tasks) {
-  if (isValidSequenceIndex(task.sequenceIndex)) return Number(task.sequenceIndex);
-
-  const relatedTasks = taskList
-    .filter((item) =>
-      (item.workOrderId || "legacy") === (task.workOrderId || "legacy") &&
-      item.assignedToUid === task.assignedToUid &&
-      item.status !== "draft"
-    )
-    .slice()
-    .sort(compareTasksForEmployeeQueue);
-
-  const index = relatedTasks.findIndex((item) => item.id === task.id);
-  return index >= 0 ? index : 0;
-}
-
-function shouldUseWaitingStatus(task, now = new Date()) {
-  if (["draft", "submitted", "completed"].includes(task.status)) return false;
-
-  const scheduledStart = getTaskScheduledStartDate(task);
-  return Boolean(scheduledStart && scheduledStart.getTime() > now.getTime());
-}
-
 function getDisplayStatus(task) {
   if (task.status === "draft") return "draft";
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
 
-  const now = new Date();
+  if (task.status === "redo") {
+    const deadline = timestampToDate(task.deadlineAt);
+    if (deadline && Date.now() > deadline.getTime()) return "overdue";
+    return "redo";
+  }
 
-  if (shouldUseWaitingStatus(task, now)) return "waiting";
+  if (task.status === "overdue") return "overdue";
 
-  const deadline = getTaskDeadlineDate(task);
+  const deadline = timestampToDate(task.deadlineAt);
   if (!deadline) return task.status || "doing";
 
-  const remainingMs = deadline.getTime() - now.getTime();
+  const remainingMs = deadline.getTime() - Date.now();
 
   if (remainingMs <= 0) return "overdue";
-
-  if (task.status === "redo") return "redo";
 
   const totalMs = Math.max(1, Number(task.deadlineMinutes || 1) * 60 * 1000);
   const nearThreshold = Math.min(15 * 60 * 1000, totalMs * 0.2);
@@ -534,7 +289,6 @@ function getDisplayStatus(task) {
 function taskCardClass(displayStatus) {
   return {
     draft: "is-draft",
-    waiting: "is-waiting",
     doing: "",
     near_due: "is-near-due",
     overdue: "is-overdue",
@@ -1079,9 +833,7 @@ function setupAdminDashboard() {
       state.tasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       renderAdminTasks();
 
-      // Admin mở dashboard thì hệ thống tự đồng bộ lịch nối tiếp cho dữ liệu cũ
-      // và tự đánh dấu quá hạn để trạng thái được lưu vào database.
-      await syncSequentialScheduleByAdmin();
+      // Admin mở dashboard thì hệ thống tự đánh dấu quá hạn để trạng thái được lưu vào database.
       await syncOverdueTasksByAdmin();
     },
     handleSnapshotError
@@ -1352,10 +1104,7 @@ function openEditWorkOrderModal(workOrderId) {
   els.taskRowsContainer.innerHTML = "";
 
   if (tasksInGroup.length) {
-    tasksInGroup
-      .slice()
-      .sort(compareTasksForWorkOrderOrder)
-      .forEach((task) => {
+    tasksInGroup.forEach((task) => {
       const deadlineMinutes = Number(task.deadlineMinutes || 0);
 
       els.taskRowsContainer.appendChild(createTaskRowElement({
@@ -1458,7 +1207,6 @@ async function persistWorkOrder(dispatch, button) {
 
     const now = new Date();
     const batch = writeBatch(db);
-    const rowSchedulePlan = buildSequentialRowSchedule(rows, now);
 
     // Nếu đang sửa 1 phiếu nháp có sẵn: xoá phiếu + công việc cũ, sau đó tạo lại từ đầu.
     const previousWorkOrderId = state.editingWorkOrderId;
@@ -1493,7 +1241,6 @@ async function persistWorkOrder(dispatch, button) {
       const assignedToUid = row.assignedToUid || "";
       const assignedToName = row.assignedEmployee?.name || "";
       const deadlineMinutes = Number(row.deadlineMinutes) || 0;
-      const schedulePlan = rowSchedulePlan.get(row.index);
 
       const taskData = {
         id: taskRef.id,
@@ -1508,12 +1255,7 @@ async function persistWorkOrder(dispatch, button) {
         workOrderName,
         // Lưu tổng số công việc của phiếu vào từng task để các màn hình có thể hiển thị thống nhất.
         workOrderTaskCount: rows.length,
-        // workOrderSortIndex giữ thứ tự thật của task trong toàn phiếu để render/sửa/migrate ổn định.
-        workOrderSortIndex: schedulePlan?.workOrderSortIndex ?? row.index,
-        // sequenceIndex là thứ tự riêng của nhân viên trong phiếu, dùng để xếp lịch nối tiếp.
-        sequenceIndex: schedulePlan?.sequenceIndex ?? 0,
         createdAt: serverTimestamp(),
-        scheduledStartAt: null,
         deadlineMinutes,
         deadlineAt: null,
         dispatchedAt: null,
@@ -1523,20 +1265,14 @@ async function persistWorkOrder(dispatch, button) {
         actualMinutes: null,
         resultType: null,
         differenceMinutes: null,
-        differencePercent: null,
-        timeExtensionCount: 0,
-        timeExtensionTotalMinutes: 0,
-        timeExtensions: [],
-        lastTimeExtendedAt: null,
-        lastTimeExtendedByUid: null,
-        lastTimeExtendedByName: null
+        differencePercent: null
       };
 
       if (dispatch) {
+        const deadlineAt = new Date(now.getTime() + deadlineMinutes * 60 * 1000);
         taskData.status = "doing";
         taskData.dispatchedAt = serverTimestamp();
-        taskData.scheduledStartAt = Timestamp.fromDate(schedulePlan.scheduledStartAt);
-        taskData.deadlineAt = Timestamp.fromDate(schedulePlan.deadlineAt);
+        taskData.deadlineAt = Timestamp.fromDate(deadlineAt);
 
         notificationItems.push({
           recipientUid: assignedToUid,
@@ -1628,19 +1364,14 @@ async function dispatchWorkOrder(workOrderId, button) {
     const now = new Date();
     const batch = writeBatch(db);
     const notificationItems = [];
-    const normalizedTasksInGroup = normalizeWorkOrderSortIndexes(tasksInGroup);
-    const schedulePlan = buildSequentialTaskSchedule(normalizedTasksInGroup, now, { forceBaseStart: true });
 
-    normalizedTasksInGroup.forEach((task) => {
-      const plan = schedulePlan.get(task.id);
+    tasksInGroup.forEach((task) => {
+      const deadlineAt = new Date(now.getTime() + Number(task.deadlineMinutes) * 60 * 1000);
 
       batch.update(doc(db, "tasks", task.id), {
         status: "doing",
         dispatchedAt: serverTimestamp(),
-        scheduledStartAt: Timestamp.fromDate(plan.scheduledStartAt),
-        deadlineAt: Timestamp.fromDate(plan.deadlineAt),
-        sequenceIndex: plan.sequenceIndex,
-        workOrderSortIndex: plan.workOrderSortIndex ?? getWorkOrderSortIndex(task) ?? 0
+        deadlineAt: Timestamp.fromDate(deadlineAt)
       });
 
       notificationItems.push({
@@ -1769,90 +1500,13 @@ els.adminEmployeeFilter.addEventListener("change", (event) => {
   renderAdminTasks();
 });
 
-async function syncSequentialScheduleByAdmin() {
-  if (state.profile?.role !== "admin") return;
-
-  const activeTasks = state.tasks.filter((task) => (
-    task.status &&
-    task.status !== "draft" &&
-    (task.workOrderId || "legacy") !== "legacy" &&
-    task.assignedToUid &&
-    Number(task.deadlineMinutes || 0) > 0
-  ));
-
-  if (!activeTasks.length) return;
-
-  const tasksByWorkOrder = new Map();
-
-  activeTasks.forEach((task) => {
-    const workOrderId = task.workOrderId || "legacy";
-
-    if (!tasksByWorkOrder.has(workOrderId)) {
-      tasksByWorkOrder.set(workOrderId, []);
-    }
-
-    tasksByWorkOrder.get(workOrderId).push(task);
-  });
-
-  const operations = [];
-  const now = new Date();
-
-  tasksByWorkOrder.forEach((tasksInGroup) => {
-    const normalizedTasksInGroup = normalizeWorkOrderSortIndexes(tasksInGroup);
-    const plan = buildSequentialTaskSchedule(normalizedTasksInGroup, now);
-
-    normalizedTasksInGroup.forEach((task) => {
-      const item = plan.get(task.id);
-      if (!item) return;
-
-      const updates = {};
-      const currentStart = timestampToDate(task.scheduledStartAt);
-      const currentDeadline = timestampToDate(task.deadlineAt);
-      const currentSequence = isValidSequenceIndex(task.sequenceIndex) ? Number(task.sequenceIndex) : null;
-      const canAdjustDeadline = ["doing", "redo", "overdue"].includes(task.status) || !currentDeadline;
-
-      if (!currentStart || Math.abs(currentStart.getTime() - item.scheduledStartAt.getTime()) > 1000) {
-        updates.scheduledStartAt = Timestamp.fromDate(item.scheduledStartAt);
-      }
-
-      if (currentSequence !== item.sequenceIndex) {
-        updates.sequenceIndex = item.sequenceIndex;
-      }
-
-      if (getWorkOrderSortIndex(task) === null && item.workOrderSortIndex !== null) {
-        updates.workOrderSortIndex = item.workOrderSortIndex;
-      }
-
-      if (canAdjustDeadline && (!currentDeadline || Math.abs(currentDeadline.getTime() - item.deadlineAt.getTime()) > 1000)) {
-        updates.deadlineAt = Timestamp.fromDate(item.deadlineAt);
-      }
-
-      if (task.status === "overdue" && item.deadlineAt.getTime() > now.getTime()) {
-        updates.status = "doing";
-      }
-
-      if (Object.keys(updates).length) {
-        operations.push((batch) => batch.update(doc(db, "tasks", task.id), updates));
-      }
-    });
-  });
-
-  if (!operations.length) return;
-
-  try {
-    await commitInChunks(operations, 450);
-  } catch (error) {
-    console.warn("Không thể tự đồng bộ lịch nối tiếp:", error);
-  }
-}
-
 async function syncOverdueTasksByAdmin() {
   if (state.profile?.role !== "admin") return;
 
   const updates = state.tasks
     .filter((task) => ["doing", "redo"].includes(task.status))
     .filter((task) => {
-      const deadline = getTaskDeadlineDate(task);
+      const deadline = timestampToDate(task.deadlineAt);
       return deadline && deadline.getTime() < Date.now();
     })
     .slice(0, 10)
@@ -2034,8 +1688,6 @@ function groupTasksByWorkOrder(tasks) {
     group.totalTaskCount = getWorkOrderTotalTaskCount(key, group.tasks);
   });
 
-  groups.forEach((group) => group.tasks.sort(compareTasksForDisplay));
-
   return groups;
 }
 
@@ -2124,30 +1776,27 @@ function renderEmployeeTasks() {
 
 function renderTaskCard(task, mode) {
   const displayStatus = task.displayStatus || getDisplayStatus(task);
-  const scheduledStartDate = getTaskScheduledStartDate(task);
-  const deadlineDate = getTaskDeadlineDate(task);
-  const scheduledStartMs = scheduledStartDate?.getTime() || 0;
+  const deadlineDate = timestampToDate(task.deadlineAt);
   const deadlineMs = deadlineDate?.getTime() || 0;
 
   const canEmployeeSubmit =
     mode === "employee" &&
     ["doing", "redo", "overdue"].includes(task.status) &&
     task.status !== "completed" &&
-    task.status !== "submitted" &&
-    hasTaskStarted(task);
+    task.status !== "submitted";
 
   const canAdminReview =
     mode === "admin" &&
     task.status === "submitted";
 
   return `
-    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-scheduled-start-ms="${scheduledStartMs}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-raw-status="${escapeHtml(task.status)}">
+    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-raw-status="${escapeHtml(task.status)}">
       <div class="task-top">
         <div>
           <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
           <p class="task-desc">${escapeHtml(task.description)}</p>
         </div>
-        <span class="status-pill status-${displayStatus}" data-status-pill>${statusLabel(displayStatus)}</span>
+        <span class="status-pill status-${displayStatus}">${statusLabel(displayStatus)}</span>
       </div>
 
       <div class="task-meta">
@@ -2172,11 +1821,11 @@ function renderTaskCard(task, mode) {
       <div class="task-meta">
         <div class="meta-box">
           <span>Giao lúc</span>
-          <strong>${formatDateTime(task.scheduledStartAt || task.dispatchedAt || task.createdAt)}</strong>
+          <strong>${formatDateTime(task.createdAt)}</strong>
         </div>
         <div class="meta-box">
           <span>Hạn lúc</span>
-          <strong>${formatDateTime(deadlineDate)}</strong>
+          <strong>${formatDateTime(task.deadlineAt)}</strong>
         </div>
         <div class="meta-box">
           <span>Báo hoàn thành</span>
@@ -2198,19 +1847,13 @@ function renderTaskCard(task, mode) {
 function getInitialCountdownText(task) {
   if (task.status === "draft") return "Chưa giao việc";
   if (task.status === "completed") return "Đã hoàn thành";
-  if (task.status === "submitted") return "Chờ Admin xác nhận";
+  if (task.status === "submitted") return "Chờ Admin duyệt";
 
-  const now = Date.now();
-  const scheduledStart = getTaskScheduledStartDate(task);
-  const deadline = getTaskDeadlineDate(task);
-
-  if (scheduledStart && scheduledStart.getTime() > now) {
-    return `Bắt đầu sau ${formatCountdown(scheduledStart.getTime() - now)}`;
-  }
+  const deadline = timestampToDate(task.deadlineAt);
 
   if (!deadline) return "--";
 
-  const ms = deadline.getTime() - now;
+  const ms = deadline.getTime() - Date.now();
 
   return ms >= 0
     ? `Còn ${formatCountdown(ms)}`
@@ -2524,73 +2167,6 @@ async function ensureCustomTimeExtensionReason(name) {
   });
 }
 
-async function shiftFollowingTasksAfterExtension(baseTask, addedMinutes) {
-  if (!baseTask?.workOrderId || !baseTask.assignedToUid || addedMinutes <= 0) return 0;
-
-  // Sau khi cộng giờ cho task hiện tại, tính lại toàn bộ hàng đợi phía sau
-  // của CHÍNH nhân viên đó trong CHÍNH phiếu đó. Không đụng task nhân viên khác.
-  const employeeTasks = state.tasks
-    .map((task) => (task.id === baseTask.id ? { ...task, ...baseTask } : task))
-    .filter((task) => (
-      task.status !== "draft" &&
-      task.workOrderId === baseTask.workOrderId &&
-      task.assignedToUid === baseTask.assignedToUid
-    ))
-    .slice()
-    .sort(compareTasksForEmployeeQueue);
-
-  const baseIndex = employeeTasks.findIndex((task) => task.id === baseTask.id);
-  if (baseIndex < 0 || baseIndex >= employeeTasks.length - 1) return 0;
-
-  let cursor = getTaskDeadlineDate(baseTask);
-  if (!cursor) return 0;
-
-  const batch = writeBatch(db);
-  const now = Date.now();
-  let affectedCount = 0;
-
-  employeeTasks.forEach((task, sequenceIndex) => {
-    if (task.id === baseTask.id) {
-      return;
-    }
-
-    if (sequenceIndex <= baseIndex) {
-      return;
-    }
-
-    const deadlineMinutes = Number(task.deadlineMinutes || 0);
-    if (deadlineMinutes <= 0) return;
-
-    const newStart = cursor;
-    const newDeadline = new Date(newStart.getTime() + deadlineMinutes * 60 * 1000);
-    const updates = {
-      scheduledStartAt: Timestamp.fromDate(newStart),
-      deadlineAt: Timestamp.fromDate(newDeadline),
-      sequenceIndex
-    };
-
-    if (getWorkOrderSortIndex(task) === null) {
-      const fullWorkOrderTasks = normalizeWorkOrderSortIndexes(
-        state.tasks.filter((item) => item.workOrderId === baseTask.workOrderId)
-      );
-      const fallbackOrderIndex = fullWorkOrderTasks.findIndex((item) => item.id === task.id);
-      if (fallbackOrderIndex >= 0) updates.workOrderSortIndex = fallbackOrderIndex;
-    }
-
-    if (task.status === "overdue" && newDeadline.getTime() > now) {
-      updates.status = "doing";
-    }
-
-    batch.update(doc(db, "tasks", task.id), updates);
-    affectedCount += 1;
-    cursor = newDeadline;
-  });
-
-  if (!affectedCount) return 0;
-
-  await batch.commit();
-  return affectedCount;
-}
 els.extendTimeForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -2639,11 +2215,9 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
       }
 
       const oldDeadlineMinutes = Number(task.deadlineMinutes || 0);
-      const oldScheduledStartDate = getTaskScheduledStartDate(task) || new Date();
-      const oldDeadlineDate = getTaskDeadlineDate(task) || new Date(oldScheduledStartDate.getTime() + oldDeadlineMinutes * 60 * 1000);
+      const oldDeadlineDate = timestampToDate(task.deadlineAt) || new Date();
       const newDeadlineMinutes = oldDeadlineMinutes + minutes;
       const newDeadlineDate = new Date(oldDeadlineDate.getTime() + minutes * 60 * 1000);
-      const normalizedSequenceIndex = getFallbackSequenceIndex(task);
       const now = new Date();
       const oldExtensions = Array.isArray(task.timeExtensions) ? task.timeExtensions : [];
       const extensionRecord = {
@@ -2658,8 +2232,6 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
         : task.status;
 
       transaction.update(taskRef, {
-        scheduledStartAt: Timestamp.fromDate(oldScheduledStartDate),
-        sequenceIndex: normalizedSequenceIndex,
         deadlineMinutes: newDeadlineMinutes,
         deadlineAt: Timestamp.fromDate(newDeadlineDate),
         status: newStatus,
@@ -2673,15 +2245,11 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
 
       updatedTask = {
         ...task,
-        scheduledStartAt: Timestamp.fromDate(oldScheduledStartDate),
-        sequenceIndex: normalizedSequenceIndex,
         deadlineMinutes: newDeadlineMinutes,
         deadlineAt: Timestamp.fromDate(newDeadlineDate),
         status: newStatus
       };
     });
-
-    const shiftedCount = await shiftFollowingTasksAfterExtension(updatedTask, minutes);
 
     if (updatedTask?.assignedToUid) {
       await createNotifications([
@@ -2705,12 +2273,7 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     }
 
     closeExtendTimeModal();
-    toast(
-      shiftedCount
-        ? `Đã cộng thêm ${minutes} phút và tự dời ${shiftedCount} công việc phía sau.`
-        : `Đã cộng thêm ${minutes} phút vào công việc.`,
-      "success"
-    );
+    toast(`Đã cộng thêm ${minutes} phút vào công việc.`, "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không thêm giờ được cho công việc.", "error");
@@ -2727,10 +2290,6 @@ async function submitTask(taskId, button) {
 
     if (!task || task.assignedToUid !== state.user.uid) {
       throw new Error("Bạn không có quyền hoàn thành công việc này.");
-    }
-
-    if (!hasTaskStarted(task)) {
-      throw new Error("Công việc này chưa tới giờ bắt đầu, chưa thể báo hoàn thành.");
     }
 
     await updateDoc(doc(db, "tasks", taskId), {
@@ -2858,16 +2417,16 @@ async function requestRedo(taskId, button) {
 }
 
 function calculateResult(task) {
-  const scheduledStartAt = getTaskScheduledStartDate(task);
+  const createdAt = timestampToDate(task.createdAt);
   const submittedAt = timestampToDate(task.submittedAt);
 
-  if (!scheduledStartAt || !submittedAt) {
-    throw new Error("Thiếu thời gian bắt đầu theo lịch hoặc thời gian nhân viên báo hoàn thành.");
+  if (!createdAt || !submittedAt) {
+    throw new Error("Thiếu thời gian giao việc hoặc thời gian nhân viên báo hoàn thành.");
   }
 
   const actualMinutes = Math.max(
     0,
-    Math.ceil((submittedAt.getTime() - scheduledStartAt.getTime()) / 60000)
+    Math.ceil((submittedAt.getTime() - createdAt.getTime()) / 60000)
   );
 
   const deadlineMinutes = Number(task.deadlineMinutes || 0);
@@ -2895,14 +2454,6 @@ function calculateResult(task) {
 // Cập nhật đồng hồ đếm ngược mỗi giây mà không cần đọc lại database.
 setInterval(updateCountdowns, 1000);
 
-function updateCardStatusPill(card, displayStatus) {
-  const pill = card.querySelector("[data-status-pill]");
-  if (!pill) return;
-
-  pill.className = `status-pill status-${displayStatus}`;
-  pill.textContent = statusLabel(displayStatus);
-}
-
 function updateCountdowns() {
   $$("[data-task-card]").forEach((card) => {
     const rawStatus = card.dataset.rawStatus;
@@ -2912,53 +2463,32 @@ function updateCountdowns() {
 
     if (rawStatus === "draft") {
       countdown.textContent = "Chưa giao việc";
-      updateCardStatusPill(card, "draft");
       return;
     }
 
     if (rawStatus === "completed") {
       countdown.textContent = "Đã hoàn thành";
-      updateCardStatusPill(card, "completed");
       return;
     }
 
     if (rawStatus === "submitted") {
-      countdown.textContent = "Chờ Admin xác nhận";
-      updateCardStatusPill(card, "submitted");
+      countdown.textContent = "Chờ Admin duyệt";
       return;
     }
 
-    const now = Date.now();
-    const scheduledStartMs = Number(card.dataset.scheduledStartMs || 0);
     const deadlineMs = Number(card.dataset.deadlineMs || 0);
-
-    card.classList.remove("is-waiting", "is-overdue", "is-near-due");
-
-    if (scheduledStartMs && now < scheduledStartMs) {
-      countdown.textContent = `Bắt đầu sau ${formatCountdown(scheduledStartMs - now)}`;
-      card.classList.add("is-waiting");
-      updateCardStatusPill(card, "waiting");
-      return;
-    }
 
     if (!deadlineMs) {
       countdown.textContent = "--";
       return;
     }
 
-    const remainingMs = deadlineMs - now;
+    const remainingMs = deadlineMs - Date.now();
 
     countdown.textContent = remainingMs >= 0
       ? `Còn ${formatCountdown(remainingMs)}`
       : `Quá hạn ${formatCountdown(remainingMs)}`;
 
-    const displayStatus = remainingMs <= 0
-      ? "overdue"
-      : rawStatus === "redo"
-        ? "redo"
-        : "doing";
-
-    updateCardStatusPill(card, displayStatus);
     card.classList.toggle("is-overdue", remainingMs <= 0 && rawStatus !== "completed");
 
     const deadlineMinutes = Number(card.dataset.deadlineMinutes || 0);
@@ -2967,13 +2497,10 @@ function updateCountdowns() {
       Math.max(1, deadlineMinutes) * 60 * 1000 * 0.2
     );
 
-    const isNearDue = remainingMs > 0 && remainingMs <= nearThreshold;
-
-    card.classList.toggle("is-near-due", isNearDue);
-
-    if (isNearDue && rawStatus !== "redo") {
-      updateCardStatusPill(card, "near_due");
-    }
+    card.classList.toggle(
+      "is-near-due",
+      remainingMs > 0 && remainingMs <= nearThreshold
+    );
   });
 }
 
