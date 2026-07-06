@@ -21,7 +21,7 @@ service cloud.firestore {
     }
 
     function isValidTaskStatus(status) {
-      return status in ["doing", "submitted", "completed", "redo", "overdue"];
+      return status in ["waiting_assignee", "doing", "submitted", "completed", "redo", "overdue"];
     }
 
     function taskDoc(taskId) {
@@ -30,6 +30,15 @@ service cloud.firestore {
 
     function workOrderDoc(workOrderId) {
       return /databases/$(database)/documents/workOrders/$(workOrderId);
+    }
+
+    // Client tạo queueStartAt bằng thời gian trên máy người dùng, còn request.time
+    // là thời gian server Firestore khi commit. Hai mốc này có thể lệch vài giây,
+    // nếu bắt queueStartAt >= request.time tuyệt đối sẽ dễ bị lỗi
+    // "Missing or insufficient permissions" khi tạo/giao việc ngay lập tức.
+    function isValidQueueStartAt(value) {
+      return value is timestamp
+        && value >= request.time - duration.value(2, "m");
     }
 
     function isValidNotificationType(type) {
@@ -41,7 +50,10 @@ service cloud.firestore {
         "task_approved_admin",
         "task_redo",
         "task_time_extended",
-        "task_time_extended_admin"
+        "task_time_extended_admin",
+        "task_reassigned",
+        "task_reassigned_removed",
+        "task_reassigned_admin"
       ];
     }
 
@@ -132,13 +144,21 @@ service cloud.firestore {
           "deadlineAt",
           "dispatchedAt",
           "queueStartAt",
+          "pauseStartedAt",
+          "remainingMsAtPause",
+          "accumulatedWorkedMs",
           "submittedAt",
           "approvedAt",
           "status",
           "actualMinutes",
           "resultType",
           "differenceMinutes",
-          "differencePercent"
+          "differencePercent",
+          "photoRequired",
+          "requiredPhotoCount",
+          "photos",
+          "photoCount",
+          "lastPhotoUploadedAt"
         ])
         && request.resource.data.id == taskId
         && request.resource.data.title is string
@@ -168,31 +188,83 @@ service cloud.firestore {
         && request.resource.data.deadlineMinutes is int
         && request.resource.data.deadlineMinutes >= 0
         && request.resource.data.deadlineMinutes <= 10080
+        && request.resource.data.accumulatedWorkedMs is int
+        && request.resource.data.accumulatedWorkedMs >= 0
+        && (
+          request.resource.data.remainingMsAtPause == null
+          || (request.resource.data.remainingMsAtPause is int && request.resource.data.remainingMsAtPause >= 0)
+        )
+        && (
+          request.resource.data.pauseStartedAt == null
+          || request.resource.data.pauseStartedAt == request.time
+        )
         && request.resource.data.submittedAt == null
         && request.resource.data.approvedAt == null
         && request.resource.data.actualMinutes == null
         && request.resource.data.resultType == null
         && request.resource.data.differenceMinutes == null
         && request.resource.data.differencePercent == null
+        && request.resource.data.photoRequired is bool
+        && request.resource.data.requiredPhotoCount is int
+        && request.resource.data.requiredPhotoCount >= 0
+        && request.resource.data.requiredPhotoCount <= 100
+        && (
+          !request.resource.data.photoRequired
+          || request.resource.data.requiredPhotoCount > 0
+        )
+        && request.resource.data.photos is list
+        && request.resource.data.photos.size() == 0
+        && request.resource.data.photoCount is int
+        && request.resource.data.photoCount == 0
+        && request.resource.data.lastPhotoUploadedAt == null
         && (
           (
             request.resource.data.status == "draft"
             && request.resource.data.deadlineAt == null
             && request.resource.data.dispatchedAt == null
             && request.resource.data.queueStartAt == null
+            && request.resource.data.pauseStartedAt == null
+            && request.resource.data.remainingMsAtPause == null
+          )
+          || (
+            request.resource.data.status == "waiting_assignee"
+            && request.resource.data.title.size() > 0
+            && request.resource.data.assignedToUid == ""
+            && request.resource.data.assignedToName == ""
+            && request.resource.data.deadlineMinutes > 0
+            && request.resource.data.deadlineAt == null
+            && request.resource.data.dispatchedAt == null
+            && request.resource.data.queueStartAt == null
+            && request.resource.data.pauseStartedAt == request.time
+            && request.resource.data.remainingMsAtPause == null
           )
           || (
             request.resource.data.status == "doing"
             && request.resource.data.title.size() > 0
             && request.resource.data.assignedToUid != ""
             && request.resource.data.deadlineMinutes > 0
-            && request.resource.data.queueStartAt is timestamp
-            && request.resource.data.queueStartAt >= request.time
+            && isValidQueueStartAt(request.resource.data.queueStartAt)
             && request.resource.data.deadlineAt is timestamp
-            && request.resource.data.deadlineAt > request.resource.data.queueStartAt
+            && request.resource.data.deadlineAt >= request.resource.data.queueStartAt
             && request.resource.data.dispatchedAt == request.time
+            && request.resource.data.pauseStartedAt == null
+            && request.resource.data.remainingMsAtPause == null
           )
         );
+
+      // Nhân viên được đăng hình báo cáo cho task đang làm của chính mình.
+      // Ảnh thật lưu ở Firebase Storage; Firestore chỉ lưu metadata + số lượng.
+      allow update: if signedIn()
+        && resource.data.assignedToUid == request.auth.uid
+        && resource.data.status in ["doing", "redo", "overdue"]
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["photos", "photoCount", "lastPhotoUploadedAt"])
+        && request.resource.data.photos is list
+        && request.resource.data.photos.size() <= 200
+        && request.resource.data.photoCount is int
+        && request.resource.data.photoCount == request.resource.data.photos.size()
+        && (!resource.data.keys().hasAny(["photos"]) || request.resource.data.photos.size() >= resource.data.photos.size())
+        && (!resource.data.keys().hasAny(["photoCount"]) || request.resource.data.photoCount >= resource.data.photoCount)
+        && request.resource.data.lastPhotoUploadedAt == request.time;
 
       // Nhân viên chỉ được bấm Hoàn thành task của chính mình.
       // Không được tự chuyển sang completed, không được sửa nội dung/deadline/người nhận.
@@ -201,7 +273,15 @@ service cloud.firestore {
         && resource.data.status in ["doing", "redo", "overdue"]
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "submittedAt"])
         && request.resource.data.status == "submitted"
-        && request.resource.data.submittedAt == request.time;
+        && request.resource.data.submittedAt == request.time
+        && (
+          !resource.data.photoRequired
+          || (
+            resource.data.photoCount is int
+            && resource.data.requiredPhotoCount is int
+            && resource.data.photoCount >= resource.data.requiredPhotoCount
+          )
+        );
 
       // Admin bấm "Giao việc" cho 1 phiếu đang ở trạng thái nháp: chuyển task draft -> doing,
       // bắt đầu tính hạn hoàn thành từ thời điểm này (có thể xếp hàng nếu nhân viên còn việc khác).
@@ -212,10 +292,77 @@ service cloud.firestore {
         && request.resource.data.assignedToUid != ""
         && request.resource.data.deadlineMinutes > 0
         && request.resource.data.dispatchedAt == request.time
-        && request.resource.data.queueStartAt is timestamp
-        && request.resource.data.queueStartAt >= request.time
+        && isValidQueueStartAt(request.resource.data.queueStartAt)
         && request.resource.data.deadlineAt is timestamp
         && request.resource.data.deadlineAt > request.resource.data.queueStartAt;
+
+      // Admin đổi nhân viên phụ trách task đang làm/đang chờ đến lượt/quá hạn/yêu cầu làm lại.
+      // - Nếu task đang chạy: chỉ đổi assignedToUid/assignedToName, giữ nguyên toàn bộ mốc thời gian.
+      // - Nếu task đang chờ đến lượt (queueStartAt > request.time): đổi người và cho task bắt đầu ngay như mới giao.
+      allow update: if isAdmin()
+        && resource.data.status in ["doing", "redo", "overdue"]
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.assignedByUid == resource.data.assignedByUid
+        && request.resource.data.assignedToUid != resource.data.assignedToUid
+        && exists(userDoc(request.resource.data.assignedToUid))
+        && get(userDoc(request.resource.data.assignedToUid)).data.role == "employee"
+        && request.resource.data.assignedToName is string
+        && request.resource.data.assignedToName.size() > 0
+        && request.resource.data.deadlineMinutes == resource.data.deadlineMinutes
+        && request.resource.data.assigneeChangeHistory is list
+        && request.resource.data.assigneeChangeHistory.size() <= 200
+        && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(["assignedToUid", "assignedToName", "assigneeChangeHistory"])
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.dispatchedAt == resource.data.dispatchedAt
+            && request.resource.data.queueStartAt == resource.data.queueStartAt
+            && request.resource.data.deadlineAt == resource.data.deadlineAt
+          )
+          ||
+          (
+            resource.data.queueStartAt is timestamp
+            && resource.data.queueStartAt > request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              "assignedToUid",
+              "assignedToName",
+              "assigneeChangeHistory",
+              "status",
+              "dispatchedAt",
+              "queueStartAt",
+              "deadlineAt"
+            ])
+            && request.resource.data.status == "doing"
+            && request.resource.data.dispatchedAt == request.time
+            && isValidQueueStartAt(request.resource.data.queueStartAt)
+            && request.resource.data.deadlineAt is timestamp
+            && request.resource.data.deadlineAt > request.resource.data.queueStartAt
+          )
+        );
+
+      // Admin được cập nhật nhân viên phụ trách, chuyển về Chờ chọn người,
+      // tiếp tục giao lại task đang tạm dừng, thêm giờ, duyệt, yêu cầu làm lại
+      // và đồng bộ trạng thái. Các ràng buộc cơ bản bên dưới giữ nguyên id/người giao
+      // và chỉ cho assignedToUid rỗng hoặc trỏ tới user nhân viên hợp lệ.
+      allow update: if isAdmin()
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.assignedByUid == resource.data.assignedByUid
+        && request.resource.data.workOrderId == resource.data.workOrderId
+        && request.resource.data.workOrderName == resource.data.workOrderName
+        && request.resource.data.assignedToUid is string
+        && (
+          request.resource.data.assignedToUid == ""
+          || (
+            exists(userDoc(request.resource.data.assignedToUid))
+            && get(userDoc(request.resource.data.assignedToUid)).data.role == "employee"
+          )
+        )
+        && request.resource.data.assignedToName is string
+        && request.resource.data.deadlineMinutes is int
+        && request.resource.data.deadlineMinutes >= 0
+        && request.resource.data.deadlineMinutes <= 10080
+        && isValidTaskStatus(request.resource.data.status);
 
       // Admin được duyệt hoàn thành, yêu cầu làm lại, hoặc đánh dấu quá hạn.
       allow update: if isAdmin()
