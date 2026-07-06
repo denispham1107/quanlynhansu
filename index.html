@@ -14,6 +14,108 @@
   <link rel="stylesheet" href="styles.css" />
 
   <style>
+
+
+    /* Fix hiển thị bảng Thông báo trên mobile: không bị tràn ra ngoài màn hình */
+    .notification-wrap {
+      position: relative;
+    }
+
+    .notification-panel {
+      box-sizing: border-box;
+      max-width: min(420px, calc(100vw - 24px));
+      max-height: min(70vh, 620px);
+      overflow: auto;
+      overscroll-behavior: contain;
+      z-index: 1000;
+    }
+
+    .notification-list,
+    .notification-item,
+    .notification-item p,
+    .notification-item strong {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    @media (max-width: 768px) {
+      html,
+      body {
+        overflow-x: hidden;
+      }
+
+      .topbar {
+        gap: 10px;
+      }
+
+      .topbar-actions {
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .notify-permission-btn {
+        max-width: 150px;
+        padding: 10px 12px;
+        font-size: 12px;
+        line-height: 1.25;
+        white-space: normal;
+      }
+
+      .notification-wrap {
+        position: static;
+      }
+
+      .notification-btn {
+        flex: 0 0 auto;
+      }
+
+      .notification-panel {
+        position: fixed !important;
+        top: calc(env(safe-area-inset-top, 0px) + 78px) !important;
+        left: max(10px, env(safe-area-inset-left, 0px)) !important;
+        right: max(10px, env(safe-area-inset-right, 0px)) !important;
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        max-height: calc(100dvh - 104px) !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        transform: none !important;
+        margin: 0 !important;
+        border-radius: 20px;
+        z-index: 9999;
+      }
+
+      .notification-panel-head {
+        gap: 10px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+
+      .notification-list {
+        max-height: none !important;
+        overflow: visible !important;
+      }
+
+      .notification-item {
+        padding: 14px;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .notification-panel {
+        top: calc(env(safe-area-inset-top, 0px) + 72px) !important;
+        left: max(8px, env(safe-area-inset-left, 0px)) !important;
+        right: max(8px, env(safe-area-inset-right, 0px)) !important;
+        max-height: calc(100dvh - 92px) !important;
+        border-radius: 18px;
+      }
+
+      .notify-permission-btn {
+        max-width: 132px;
+        font-size: 11px;
+      }
+    }
     .photo-requirement-box {
       display: grid;
       gap: 12px;
