@@ -135,6 +135,7 @@
             <select id="adminStatusFilter" aria-label="Lọc trạng thái">
               <option value="all">Tất cả trạng thái</option>
               <option value="draft">Chưa giao việc</option>
+              <option value="waiting_assignee">Chờ chọn người</option>
               <option value="doing">Đang làm</option>
               <option value="near_due">Gần hết giờ</option>
               <option value="overdue">Quá hạn</option>
@@ -252,20 +253,20 @@
         </label>
 
         <label>
-          Chọn nhân viên thay thế
+          Chọn nhân viên thay thế / Chờ chọn người
           <select id="reassignEmployeeSelect" required>
-            <option value="">Chọn nhân viên chưa được giao việc</option>
+            <option value="">Chọn thao tác</option>
           </select>
         </label>
 
         <p class="small-note">
-          Nếu công việc đang làm, hệ thống chỉ đổi người và giữ nguyên đồng hồ đếm ngược, hạn hoàn thành, các lần thêm giờ trước đó.
-          Nếu công việc đang chờ đến lượt, hệ thống sẽ bắt đầu lại thời gian như một công việc mới cho nhân viên thay thế.
+          Có thể chọn nhân viên thay thế hoặc chọn “Chờ chọn người” để cho nhân viên hiện tại nghỉ khỏi task.
+          Khi task chờ chọn người, đồng hồ thời gian sẽ tạm dừng và chỉ chạy tiếp khi Admin chọn lại nhân viên.
         </p>
 
         <div class="modal-footer-actions">
           <button class="btn ghost" data-close-reassign-modal type="button">Huỷ</button>
-          <button id="confirmReassignEmployeeBtn" class="btn primary" type="submit">OK - Đổi nhân viên</button>
+          <button id="confirmReassignEmployeeBtn" class="btn primary" type="submit">OK - Cập nhật nhân viên</button>
         </div>
       </form>
     </div>

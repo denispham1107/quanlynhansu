@@ -268,6 +268,7 @@ function formatCountdown(ms) {
 function statusLabel(status) {
   const labels = {
     draft: "Chưa giao việc",
+    waiting_assignee: "Chờ chọn người",
     queued: "Đang chờ đến lượt",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
@@ -282,6 +283,7 @@ function statusLabel(status) {
 
 function getDisplayStatus(task) {
   if (task.status === "draft") return "draft";
+  if (task.status === "waiting_assignee" || !task.assignedToUid) return "waiting_assignee";
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
 
@@ -316,6 +318,7 @@ function getDisplayStatus(task) {
 function taskCardClass(displayStatus) {
   return {
     draft: "is-draft",
+    waiting_assignee: "is-waiting-assignee",
     queued: "is-queued",
     doing: "",
     near_due: "is-near-due",
@@ -1028,9 +1031,9 @@ function createTaskRowElement(prefill = null) {
         <input type="date" class="row-date" required />
       </label>
       <label>
-        Người được giao
-        <select class="row-assignee" required>
-          <option value="">Chọn nhân viên</option>
+        Người được giao <span class="optional-label">(có thể chọn sau)</span>
+        <select class="row-assignee">
+          <option value="">Chờ chọn người</option>
           ${employeeOptionsHtml()}
         </select>
       </label>
@@ -1111,11 +1114,6 @@ els.taskRowsContainer.addEventListener("click", (event) => {
 });
 
 els.openTaskModalBtn.addEventListener("click", () => {
-  if (!state.employees.length) {
-    toast("Bạn cần tạo ít nhất 1 tài khoản nhân viên trước khi giao việc.", "error");
-    return;
-  }
-
   state.editingWorkOrderId = null;
   $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
   els.workOrderName.value = "";
@@ -1203,7 +1201,7 @@ function validateTaskRows(rows) {
     const rowLabel = `Công việc #${row.index + 1}`;
 
     if (!row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
-    if (!row.assignedEmployee) return `${rowLabel}: vui lòng chọn nhân viên hợp lệ.`;
+    if (row.assignedToUid && !row.assignedEmployee) return `${rowLabel}: nhân viên được chọn không hợp lệ.`;
     if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
     if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
   }
@@ -1241,7 +1239,7 @@ function getEmployeeQueueEndMap(assignedToUids) {
 
     state.tasks.forEach((task) => {
       if (task.assignedToUid !== uid) return;
-      if (task.status === "draft") return;
+      if (["draft", "waiting_assignee"].includes(task.status)) return;
 
       const start = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt);
       if (!start) return;
@@ -1353,6 +1351,9 @@ async function persistWorkOrder(dispatch, button) {
         deadlineAt: null,
         dispatchedAt: null,
         queueStartAt: null,
+        pauseStartedAt: null,
+        remainingMsAtPause: null,
+        accumulatedWorkedMs: 0,
         submittedAt: null,
         approvedAt: null,
         status: "draft",
@@ -1363,26 +1364,31 @@ async function persistWorkOrder(dispatch, button) {
       };
 
       if (dispatch) {
-        const { queueStartDate, deadlineDate } = reserveQueueSlot(employeeQueueEnd, assignedToUid, deadlineMinutes, now);
+        if (assignedToUid) {
+          const { queueStartDate, deadlineDate } = reserveQueueSlot(employeeQueueEnd, assignedToUid, deadlineMinutes, now);
 
-        taskData.status = "doing";
-        taskData.dispatchedAt = serverTimestamp();
-        taskData.queueStartAt = Timestamp.fromDate(queueStartDate);
-        taskData.deadlineAt = Timestamp.fromDate(deadlineDate);
+          taskData.status = "doing";
+          taskData.dispatchedAt = serverTimestamp();
+          taskData.queueStartAt = Timestamp.fromDate(queueStartDate);
+          taskData.deadlineAt = Timestamp.fromDate(deadlineDate);
 
-        const isQueued = queueStartDate.getTime() > now.getTime();
-        const startNote = isQueued
-          ? ` Do bạn còn công việc khác chưa hết thời gian quy định, công việc này sẽ tự bắt đầu tính giờ lúc ${formatDateTime(taskData.queueStartAt)}.`
-          : "";
+          const isQueued = queueStartDate.getTime() > now.getTime();
+          const startNote = isQueued
+            ? ` Do bạn còn công việc khác chưa hết thời gian quy định, công việc này sẽ tự bắt đầu tính giờ lúc ${formatDateTime(taskData.queueStartAt)}.`
+            : "";
 
-        notificationItems.push({
-          recipientUid: assignedToUid,
-          type: "task_assigned",
-          title: "Bạn có công việc mới",
-          message: `${state.profile.name || "Admin"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.${startNote}`,
-          taskId: taskRef.id,
-          taskTitle: row.title
-        });
+          notificationItems.push({
+            recipientUid: assignedToUid,
+            type: "task_assigned",
+            title: "Bạn có công việc mới",
+            message: `${state.profile.name || "Admin"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.${startNote}`,
+            taskId: taskRef.id,
+            taskTitle: row.title
+          });
+        } else {
+          taskData.status = "waiting_assignee";
+          taskData.pauseStartedAt = serverTimestamp();
+        }
       }
 
       batch.set(taskRef, taskData);
@@ -1452,14 +1458,13 @@ async function dispatchWorkOrder(workOrderId, button) {
 
   const missingInfo = tasksInGroup.find((task) => (
     !task.title ||
-    !task.assignedToUid ||
     !task.taskDate ||
     !Number(task.deadlineMinutes) ||
     Number(task.deadlineMinutes) <= 0
   ));
 
   if (missingInfo) {
-    toast("Phiếu còn thiếu thông tin (tên công việc/nhân viên/ngày giao/thời gian). Bấm “Sửa phiếu” để hoàn thiện trước khi giao việc.", "error");
+    toast("Phiếu còn thiếu thông tin (tên công việc/ngày giao/thời gian). Bấm “Sửa phiếu” để hoàn thiện trước khi giao việc.", "error");
     return;
   }
 
@@ -1475,6 +1480,19 @@ async function dispatchWorkOrder(workOrderId, button) {
     const employeeQueueEnd = getEmployeeQueueEndMap(tasksInGroup.map((task) => task.assignedToUid));
 
     tasksInGroup.forEach((task) => {
+      if (!task.assignedToUid) {
+        batch.update(doc(db, "tasks", task.id), {
+          status: "waiting_assignee",
+          pauseStartedAt: serverTimestamp(),
+          remainingMsAtPause: null,
+          accumulatedWorkedMs: Number(task.accumulatedWorkedMs || 0),
+          dispatchedAt: null,
+          queueStartAt: null,
+          deadlineAt: null
+        });
+        return;
+      }
+
       const { queueStartDate, deadlineDate } = reserveQueueSlot(
         employeeQueueEnd,
         task.assignedToUid,
@@ -1486,7 +1504,10 @@ async function dispatchWorkOrder(workOrderId, button) {
         status: "doing",
         dispatchedAt: serverTimestamp(),
         queueStartAt: Timestamp.fromDate(queueStartDate),
-        deadlineAt: Timestamp.fromDate(deadlineDate)
+        deadlineAt: Timestamp.fromDate(deadlineDate),
+        pauseStartedAt: null,
+        remainingMsAtPause: null,
+        accumulatedWorkedMs: Number(task.accumulatedWorkedMs || 0)
       });
 
       const isQueued = queueStartDate.getTime() > now.getTime();
@@ -1900,17 +1921,18 @@ function renderEmployeeTasks() {
 
 function canAdminReassignTask(task, mode, displayStatus = null) {
   if (mode !== "admin" || state.profile?.role !== "admin") return false;
-  if (!task?.id || !task.assignedToUid) return false;
+  if (!task?.id) return false;
 
   const visibleStatus = displayStatus || getDisplayStatus(task);
 
   return (
-    ["doing", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
-    && ["doing", "redo", "overdue"].includes(task.status)
+    ["waiting_assignee", "doing", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
+    && ["waiting_assignee", "doing", "redo", "overdue"].includes(task.status)
   );
 }
 
 function getEmployeeDisplayNameByUid(uid, fallbackName = "") {
+  if (!uid) return fallbackName || "Chờ chọn người";
   const employee = state.employees.find((item) => item.uid === uid);
   return fallbackName || employee?.name || employee?.email || "--";
 }
@@ -1943,7 +1965,7 @@ function renderAssignedEmployeeMetaBox(task, mode, displayStatus) {
 }
 
 function isUnfinishedAssignedTask(task) {
-  return Boolean(task?.assignedToUid) && !["draft", "completed"].includes(task.status);
+  return Boolean(task?.assignedToUid) && !["draft", "waiting_assignee", "completed"].includes(task.status);
 }
 
 function employeeHasUnfinishedTask(employeeUid, ignoredTaskId = "") {
@@ -1968,6 +1990,10 @@ function renderTaskCard(task, mode) {
   const deadlineMs = deadlineDate?.getTime() || 0;
   const queueStartDate = timestampToDate(task.queueStartAt);
   const queueStartMs = queueStartDate?.getTime() || 0;
+  const remainingPauseMs = Number(task.remainingMsAtPause || 0);
+  const dispatchedText = task.status === "waiting_assignee" && !task.dispatchedAt
+    ? "--"
+    : formatDateTime(task.dispatchedAt || task.createdAt);
 
   const canEmployeeSubmit =
     mode === "employee" &&
@@ -1981,7 +2007,7 @@ function renderTaskCard(task, mode) {
     task.status === "submitted";
 
   return `
-    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-raw-status="${escapeHtml(task.status)}">
+    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}">
       <div class="task-top">
         <div>
           <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
@@ -2009,7 +2035,7 @@ function renderTaskCard(task, mode) {
       <div class="task-meta">
         <div class="meta-box">
           <span>Giao lúc</span>
-          <strong>${formatDateTime(task.dispatchedAt || task.createdAt)}</strong>
+          <strong>${dispatchedText}</strong>
         </div>
         <div class="meta-box">
           <span>Hạn lúc</span>
@@ -2035,6 +2061,12 @@ function renderTaskCard(task, mode) {
 
 function getInitialCountdownText(task) {
   if (task.status === "draft") return "Chưa giao việc";
+  if (task.status === "waiting_assignee") {
+    const remainingMs = Number(task.remainingMsAtPause || 0);
+    return remainingMs > 0
+      ? `Tạm dừng - còn ${formatCountdown(remainingMs)}`
+      : `Chờ chọn người - chưa bắt đầu`;
+  }
   if (task.status === "completed") return "Đã hoàn thành";
   if (task.status === "submitted") return "Chờ Admin duyệt";
 
@@ -2069,9 +2101,21 @@ function renderAssigneeHistoryBox(task) {
       const toName = item.toName || "Nhân viên mới";
       const changedBy = item.changedByName || "Admin";
       const changedAt = formatFullDateTime(item.changedAt);
-      const modeText = item.restartedFromQueue
+      let modeText = item.restartedFromQueue
         ? "Bắt đầu lại thời gian như công việc mới"
         : "Giữ nguyên thời gian đang chạy";
+
+      if (item.action === "wait_assignee") {
+        modeText = item.remainingMsAtPause
+          ? `Tạm dừng thời gian, còn ${formatCountdown(Number(item.remainingMsAtPause || 0))}`
+          : "Chuyển về Chờ chọn người";
+      }
+
+      if (item.action === "assign_from_waiting") {
+        modeText = item.remainingMsAtPause
+          ? `Tiếp tục tính giờ từ ${formatCountdown(Number(item.remainingMsAtPause || 0))}`
+          : "Bắt đầu tính giờ đủ thời gian quy định";
+      }
 
       return `
         <li>
@@ -2258,15 +2302,19 @@ function renderReassignEmployeeOptions(taskId) {
   }
 
   const candidates = getAvailableReplacementEmployees(task);
+  const releaseOption = task.assignedToUid
+    ? `<option value="__WAITING_ASSIGNEE__">Chờ chọn người (cho nhân viên hiện tại nghỉ)</option>`
+    : "";
 
-  if (!candidates.length) {
+  if (!candidates.length && !releaseOption) {
     els.reassignEmployeeSelect.innerHTML = `<option value="">Không có nhân viên chưa được giao việc</option>`;
     els.confirmReassignEmployeeBtn.disabled = true;
     return;
   }
 
   els.reassignEmployeeSelect.innerHTML = `
-    <option value="">Chọn nhân viên thay thế</option>
+    <option value="">Chọn thao tác</option>
+    ${releaseOption}
     ${candidates.map((employee) => `
       <option value="${escapeHtml(employee.uid)}">${escapeHtml(employee.name)} - ${escapeHtml(employee.email || "")}</option>
     `).join("")}
@@ -2287,7 +2335,7 @@ function openReassignEmployeeModal(taskId) {
   const displayStatus = getDisplayStatus(task);
 
   if (!canAdminReassignTask(task, "admin", displayStatus)) {
-    toast("Chỉ đổi nhân viên cho công việc đang làm, đang chờ đến lượt, gần hết giờ, quá hạn hoặc yêu cầu làm lại.", "error");
+    toast("Chỉ đổi nhân viên cho công việc đang làm, đang chờ đến lượt, quá hạn, yêu cầu làm lại hoặc đang chờ chọn người.", "error");
     return;
   }
 
@@ -2319,88 +2367,178 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
 
   const taskId = state.reassignTaskId;
   const task = state.tasks.find((item) => item.id === taskId);
-  const newEmployeeUid = els.reassignEmployeeSelect?.value || "";
-  const newEmployee = state.employees.find((employee) => employee.uid === newEmployeeUid);
+  const selectedValue = els.reassignEmployeeSelect?.value || "";
+  const releaseToWaiting = selectedValue === "__WAITING_ASSIGNEE__";
+  const newEmployee = releaseToWaiting
+    ? null
+    : state.employees.find((employee) => employee.uid === selectedValue);
 
   try {
-    if (!task) throw new Error("Không tìm thấy công việc cần đổi nhân viên.");
-    if (!newEmployee) throw new Error("Vui lòng chọn nhân viên thay thế hợp lệ.");
-    if (employeeHasUnfinishedTask(newEmployee.uid, task.id)) {
-      throw new Error("Nhân viên này đang có công việc chưa hoàn thành. Vui lòng chọn nhân viên chưa được giao việc.");
-    }
-
-    setButtonLoading(els.confirmReassignEmployeeBtn, true, "Đang đổi...");
+    if (!task) throw new Error("Không tìm thấy công việc cần cập nhật nhân viên.");
+    if (!selectedValue) throw new Error("Vui lòng chọn nhân viên thay thế hoặc chọn Chờ chọn người.");
 
     const displayStatus = getDisplayStatus(task);
-    const wasQueued = displayStatus === "queued";
-    const oldEmployeeUid = task.assignedToUid;
-    const oldEmployeeName = getEmployeeDisplayNameByUid(oldEmployeeUid, task.assignedToName) || "Nhân viên cũ";
+    const isWaitingAssignee = task.status === "waiting_assignee" || displayStatus === "waiting_assignee";
+
+    if (releaseToWaiting) {
+      if (!task.assignedToUid) {
+        throw new Error("Công việc này đang ở trạng thái Chờ chọn người.");
+      }
+    } else {
+      if (!newEmployee) throw new Error("Vui lòng chọn nhân viên thay thế hợp lệ.");
+      if (employeeHasUnfinishedTask(newEmployee.uid, task.id)) {
+        throw new Error("Nhân viên này đang có công việc chưa hoàn thành. Vui lòng chọn nhân viên chưa được giao việc.");
+      }
+    }
+
+    setButtonLoading(els.confirmReassignEmployeeBtn, true, releaseToWaiting ? "Đang tạm dừng..." : "Đang đổi...");
+
+    const now = new Date();
+    const oldEmployeeUid = task.assignedToUid || "";
+    const oldEmployeeName = getEmployeeDisplayNameByUid(oldEmployeeUid, task.assignedToName);
+    const accumulatedWorkedMs = Number(task.accumulatedWorkedMs || 0);
+    const queueStartDate = timestampToDate(task.queueStartAt);
+    const deadlineDate = timestampToDate(task.deadlineAt);
+    const deadlineMs = Math.max(0, Number(task.deadlineMinutes || 0) * 60 * 1000);
+
+    if (releaseToWaiting) {
+      const hasStarted = queueStartDate && now.getTime() >= queueStartDate.getTime();
+      const workedThisRunMs = hasStarted
+        ? Math.max(0, now.getTime() - queueStartDate.getTime())
+        : 0;
+      const nextAccumulatedWorkedMs = accumulatedWorkedMs + workedThisRunMs;
+      const remainingMsAtPause = hasStarted && deadlineDate
+        ? Math.max(0, deadlineDate.getTime() - now.getTime())
+        : Math.max(0, deadlineMs - nextAccumulatedWorkedMs);
+
+      await updateDoc(doc(db, "tasks", task.id), {
+        assignedToUid: "",
+        assignedToName: "",
+        status: "waiting_assignee",
+        pauseStartedAt: serverTimestamp(),
+        remainingMsAtPause,
+        accumulatedWorkedMs: nextAccumulatedWorkedMs,
+        queueStartAt: null,
+        deadlineAt: null,
+        assigneeChangeHistory: arrayUnion({
+          action: "wait_assignee",
+          fromUid: oldEmployeeUid,
+          fromName: oldEmployeeName,
+          toUid: "",
+          toName: "Chờ chọn người",
+          changedAt: Timestamp.fromDate(now),
+          changedByUid: state.user.uid,
+          changedByName: state.profile.name || state.profile.email || "Admin",
+          remainingMsAtPause,
+          accumulatedWorkedMs: nextAccumulatedWorkedMs
+        })
+      });
+
+      await createNotifications([
+        {
+          recipientUid: oldEmployeeUid,
+          type: "task_reassigned_removed",
+          title: "Công việc đã tạm chuyển về Chờ chọn người",
+          message: `Công việc “${task.title}” đã được Admin cho tạm dừng để chờ chọn nhân viên. Thời gian còn lại được giữ nguyên.`,
+          taskId: task.id,
+          taskTitle: task.title
+        },
+        {
+          recipientUid: state.user.uid,
+          type: "task_reassigned_admin",
+          title: "Đã cho nhân viên nghỉ khỏi công việc",
+          message: `Bạn đã chuyển công việc “${task.title}” từ ${oldEmployeeName} về trạng thái Chờ chọn người.`,
+          taskId: task.id,
+          taskTitle: task.title
+        }
+      ]);
+
+      closeReassignEmployeeModal();
+      toast(`Đã chuyển công việc về trạng thái Chờ chọn người. ${oldEmployeeName} có thể nhận việc khác.`, "success");
+      return;
+    }
+
     const newEmployeeName = newEmployee.name || newEmployee.email || "Nhân viên mới";
-    const changedAt = new Date();
+    const wasQueued = displayStatus === "queued";
+    const hasPausedRemainingValue = task.remainingMsAtPause !== null && task.remainingMsAtPause !== undefined;
+    const remainingFromPauseMs = Number(task.remainingMsAtPause || 0);
+    const resumeMs = isWaitingAssignee
+      ? (hasPausedRemainingValue ? remainingFromPauseMs : deadlineMs)
+      : deadlineMs;
 
     const updateData = {
       assignedToUid: newEmployee.uid,
       assignedToName: newEmployeeName,
       assigneeChangeHistory: arrayUnion({
-        fromUid: oldEmployeeUid || "",
+        action: isWaitingAssignee ? "assign_from_waiting" : "reassign",
+        fromUid: oldEmployeeUid,
         fromName: oldEmployeeName,
         toUid: newEmployee.uid,
         toName: newEmployeeName,
-        changedAt: Timestamp.fromDate(changedAt),
+        changedAt: Timestamp.fromDate(now),
         changedByUid: state.user.uid,
         changedByName: state.profile.name || state.profile.email || "Admin",
-        restartedFromQueue: wasQueued
+        restartedFromQueue: wasQueued,
+        remainingMsAtPause: isWaitingAssignee ? resumeMs : null,
+        accumulatedWorkedMs
       })
     };
 
-    if (wasQueued) {
-      const now = new Date();
-      const deadlineMinutes = Number(task.deadlineMinutes || 0);
-
+    if (isWaitingAssignee || wasQueued) {
       updateData.status = "doing";
       updateData.dispatchedAt = serverTimestamp();
       updateData.queueStartAt = Timestamp.fromDate(now);
-      updateData.deadlineAt = Timestamp.fromDate(new Date(now.getTime() + deadlineMinutes * 60 * 1000));
+      updateData.deadlineAt = Timestamp.fromDate(new Date(now.getTime() + resumeMs));
+      updateData.pauseStartedAt = null;
+      updateData.remainingMsAtPause = null;
+      updateData.accumulatedWorkedMs = accumulatedWorkedMs;
     }
 
     await updateDoc(doc(db, "tasks", task.id), updateData);
 
-    const startMessage = wasQueued
-      ? "Công việc này đã được bắt đầu lại thời gian như một công việc mới."
-      : "Thời gian đếm ngược, hạn hoàn thành và các lần thêm giờ trước đó được giữ nguyên.";
+    const startMessage = isWaitingAssignee
+      ? `Công việc bắt đầu tính giờ từ bây giờ với thời gian còn lại ${formatMinutes(Math.ceil(resumeMs / 60000))}.`
+      : wasQueued
+        ? "Công việc này đã được bắt đầu lại thời gian như một công việc mới."
+        : "Thời gian đếm ngược, hạn hoàn thành và các lần thêm giờ trước đó được giữ nguyên.";
 
-    await createNotifications([
+    const notifications = [
       {
         recipientUid: newEmployee.uid,
         type: "task_reassigned",
         title: "Bạn được chuyển giao công việc",
-        message: `${state.profile.name || "Admin"} đã chuyển công việc “${task.title}” từ ${oldEmployeeName} sang bạn. ${startMessage}`,
-        taskId: task.id,
-        taskTitle: task.title
-      },
-      {
-        recipientUid: oldEmployeeUid,
-        type: "task_reassigned_removed",
-        title: "Công việc đã được chuyển sang nhân viên khác",
-        message: `Công việc “${task.title}” đã được Admin chuyển sang ${newEmployeeName}.`,
+        message: `${state.profile.name || "Admin"} đã giao công việc “${task.title}” cho bạn. ${startMessage}`,
         taskId: task.id,
         taskTitle: task.title
       },
       {
         recipientUid: state.user.uid,
         type: "task_reassigned_admin",
-        title: "Đã đổi nhân viên phụ trách",
-        message: `Bạn đã đổi công việc “${task.title}” từ ${oldEmployeeName} sang ${newEmployeeName}.`,
+        title: "Đã cập nhật nhân viên phụ trách",
+        message: `Bạn đã cập nhật công việc “${task.title}” từ ${oldEmployeeName} sang ${newEmployeeName}.`,
         taskId: task.id,
         taskTitle: task.title
       }
-    ]);
+    ];
+
+    if (oldEmployeeUid) {
+      notifications.splice(1, 0, {
+        recipientUid: oldEmployeeUid,
+        type: "task_reassigned_removed",
+        title: "Công việc đã được chuyển sang nhân viên khác",
+        message: `Công việc “${task.title}” đã được Admin chuyển sang ${newEmployeeName}.`,
+        taskId: task.id,
+        taskTitle: task.title
+      });
+    }
+
+    await createNotifications(notifications);
 
     closeReassignEmployeeModal();
-    toast(`Đã đổi nhân viên phụ trách sang ${newEmployeeName}.`, "success");
+    toast(`Đã cập nhật nhân viên phụ trách sang ${newEmployeeName}.`, "success");
   } catch (error) {
     console.error(error);
-    toast(error.message || "Không đổi được nhân viên phụ trách.", "error");
+    toast(error.message || "Không cập nhật được nhân viên phụ trách.", "error");
   } finally {
     setButtonLoading(els.confirmReassignEmployeeBtn, false);
   }
@@ -2828,17 +2966,16 @@ async function requestRedo(taskId, button) {
 }
 
 function calculateResult(task) {
-  const createdAt = timestampToDate(task.createdAt);
   const submittedAt = timestampToDate(task.submittedAt);
+  const activeStartAt = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt) || timestampToDate(task.createdAt);
 
-  if (!createdAt || !submittedAt) {
-    throw new Error("Thiếu thời gian giao việc hoặc thời gian nhân viên báo hoàn thành.");
+  if (!activeStartAt || !submittedAt) {
+    throw new Error("Thiếu thời gian bắt đầu hoặc thời gian nhân viên báo hoàn thành.");
   }
 
-  const actualMinutes = Math.max(
-    0,
-    Math.ceil((submittedAt.getTime() - createdAt.getTime()) / 60000)
-  );
+  const accumulatedWorkedMs = Number(task.accumulatedWorkedMs || 0);
+  const actualMs = accumulatedWorkedMs + Math.max(0, submittedAt.getTime() - activeStartAt.getTime());
+  const actualMinutes = Math.max(0, Math.ceil(actualMs / 60000));
 
   const deadlineMinutes = Number(task.deadlineMinutes || 0);
 
@@ -2874,6 +3011,15 @@ function updateCountdowns() {
 
     if (rawStatus === "draft") {
       countdown.textContent = "Chưa giao việc";
+      return;
+    }
+
+    if (rawStatus === "waiting_assignee") {
+      const remainingPauseMs = Number(card.dataset.remainingPauseMs || 0);
+      countdown.textContent = remainingPauseMs > 0
+        ? `Tạm dừng - còn ${formatCountdown(remainingPauseMs)}`
+        : "Chờ chọn người - chưa bắt đầu";
+      card.classList.remove("is-overdue", "is-near-due", "is-queued");
       return;
     }
 
