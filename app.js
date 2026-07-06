@@ -56,6 +56,7 @@ const state = {
   profile: null,
   employees: [],
   tasks: [],
+  workOrders: [],
   notifications: [],
   knownNotificationIds: new Set(),
   notificationsReady: false,
@@ -100,6 +101,7 @@ const els = {
   addTaskRowBtn: $("#addTaskRowBtn"),
   taskRowsContainer: $("#taskRowsContainer"),
   saveDraftBtn: $("#saveDraftBtn"),
+  deleteAllWorkOrdersBtn: $("#deleteAllWorkOrdersBtn"),
   adminEmployeeFilter: $("#adminEmployeeFilter"),
   adminStatusFilter: $("#adminStatusFilter"),
   adminDateMode: $("#adminDateMode"),
@@ -810,7 +812,20 @@ function setupAdminDashboard() {
     handleSnapshotError
   );
 
-  state.unsubs.push(unsubUsers, unsubTasks);
+  // Theo dõi riêng collection workOrders để những phiếu nháp CHƯA có công việc nào
+  // (0 dòng) vẫn hiển thị được trên danh sách (nếu chỉ dựa vào tasks sẽ không thấy được).
+  const workOrdersQuery = query(collection(db, "workOrders"), orderBy("createdAt", "desc"));
+
+  const unsubWorkOrders = onSnapshot(
+    workOrdersQuery,
+    (snapshot) => {
+      state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderAdminTasks();
+    },
+    handleSnapshotError
+  );
+
+  state.unsubs.push(unsubUsers, unsubTasks, unsubWorkOrders);
 }
 
 function handleSnapshotError(error) {
@@ -1034,28 +1049,34 @@ els.openTaskModalBtn.addEventListener("click", () => {
 
 function openEditWorkOrderModal(workOrderId) {
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
+  const workOrder = state.workOrders.find((wo) => wo.id === workOrderId);
 
-  if (!tasksInGroup.length) {
-    toast("Không tìm thấy công việc của phiếu này.", "error");
+  if (!tasksInGroup.length && !workOrder) {
+    toast("Không tìm thấy phiếu này.", "error");
     return;
   }
 
   state.editingWorkOrderId = workOrderId;
-  els.workOrderName.value = tasksInGroup[0].workOrderName || "";
+  els.workOrderName.value = tasksInGroup[0]?.workOrderName || workOrder?.name || "";
   els.taskRowsContainer.innerHTML = "";
 
-  tasksInGroup.forEach((task) => {
-    const deadlineMinutes = Number(task.deadlineMinutes || 0);
+  if (tasksInGroup.length) {
+    tasksInGroup.forEach((task) => {
+      const deadlineMinutes = Number(task.deadlineMinutes || 0);
 
-    els.taskRowsContainer.appendChild(createTaskRowElement({
-      title: task.title,
-      description: task.description,
-      taskDate: task.taskDate,
-      assignedToUid: task.assignedToUid,
-      hours: Math.floor(deadlineMinutes / 60),
-      minutes: deadlineMinutes % 60
-    }));
-  });
+      els.taskRowsContainer.appendChild(createTaskRowElement({
+        title: task.title,
+        description: task.description,
+        taskDate: task.taskDate,
+        assignedToUid: task.assignedToUid,
+        hours: Math.floor(deadlineMinutes / 60),
+        minutes: deadlineMinutes % 60
+      }));
+    });
+  } else {
+    // Phiếu nháp chưa có công việc nào: bắt đầu với 1 dòng trống để admin điền thêm.
+    addTaskRow();
+  }
 
   updateTaskRowHeadings();
 
@@ -1112,14 +1133,11 @@ function validateTaskRows(rows) {
   return null;
 }
 
-// Lưu nháp chỉ bắt buộc có tên công việc, các trường khác có thể điền sau.
+// Lưu nháp chỉ bắt buộc có tên phiếu (kiểm tra riêng ở persistWorkOrder),
+// không yêu cầu bất kỳ thông tin nào trong từng dòng công việc.
 function validateTaskRowsForDraft(rows) {
   if (!rows.length) {
-    return "Phiếu cần có ít nhất 1 công việc.";
-  }
-
-  for (const row of rows) {
-    if (!row.title) return `Công việc #${row.index + 1}: vui lòng nhập tên công việc.`;
+    return "Phiếu cần có ít nhất 1 công việc (có thể để trống thông tin, điền sau).";
   }
 
   return null;
@@ -1278,11 +1296,12 @@ async function dispatchWorkOrder(workOrderId, button) {
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
   if (!tasksInGroup.length) {
-    toast("Không tìm thấy công việc của phiếu này.", "error");
+    toast("Phiếu này chưa có công việc nào. Bấm “Sửa phiếu” để thêm công việc trước khi giao.", "error");
     return;
   }
 
   const missingInfo = tasksInGroup.find((task) => (
+    !task.title ||
     !task.assignedToUid ||
     !task.taskDate ||
     !Number(task.deadlineMinutes) ||
@@ -1290,7 +1309,7 @@ async function dispatchWorkOrder(workOrderId, button) {
   ));
 
   if (missingInfo) {
-    toast("Phiếu còn thiếu thông tin (nhân viên/ngày giao/thời gian). Bấm “Sửa phiếu” để hoàn thiện trước khi giao việc.", "error");
+    toast("Phiếu còn thiếu thông tin (tên công việc/nhân viên/ngày giao/thời gian). Bấm “Sửa phiếu” để hoàn thiện trước khi giao việc.", "error");
     return;
   }
 
@@ -1349,7 +1368,7 @@ async function dispatchWorkOrder(workOrderId, button) {
 async function deleteWorkOrder(workOrderId, button) {
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
-  if (!window.confirm(`Xoá phiếu này cùng ${tasksInGroup.length} công việc chưa giao? Không thể hoàn tác.`)) {
+  if (!window.confirm(`Xoá phiếu này cùng ${tasksInGroup.length} công việc bên trong? Không thể hoàn tác.`)) {
     return;
   }
 
@@ -1365,7 +1384,7 @@ async function deleteWorkOrder(workOrderId, button) {
 
     await batch.commit();
 
-    toast("Đã xoá phiếu nháp.", "success");
+    toast("Đã xoá phiếu.", "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không xoá được phiếu.", "error");
@@ -1373,6 +1392,58 @@ async function deleteWorkOrder(workOrderId, button) {
     setButtonLoading(button, false);
   }
 }
+
+// Firestore giới hạn tối đa 500 thao tác/batch, chia nhỏ để xoá an toàn số lượng lớn.
+async function commitInChunks(operations, chunkSize = 450) {
+  for (let i = 0; i < operations.length; i += chunkSize) {
+    const batch = writeBatch(db);
+    operations.slice(i, i + chunkSize).forEach((addToBatch) => addToBatch(batch));
+    await batch.commit();
+  }
+}
+
+async function deleteAllWorkOrders(button) {
+  if (!state.tasks.length && !state.workOrders.length) {
+    toast("Không có phiếu công việc nào để xoá.", "info");
+    return;
+  }
+
+  const ticketCount = new Set([
+    ...state.tasks.map((task) => task.workOrderId || "legacy"),
+    ...state.workOrders.map((wo) => wo.id)
+  ]).size;
+
+  if (!window.confirm(`Xoá TOÀN BỘ ${ticketCount} phiếu công việc (mọi trạng thái: chưa giao việc, đang làm, đã hoàn thành...) cùng ${state.tasks.length} công việc bên trong? Hành động này không thể hoàn tác.`)) {
+    return;
+  }
+
+  setButtonLoading(button, true, "Đang xoá toàn bộ...");
+
+  try {
+    const operations = [];
+
+    state.tasks.forEach((task) => {
+      operations.push((batch) => batch.delete(doc(db, "tasks", task.id)));
+    });
+
+    // Xoá theo state.workOrders (thay vì suy từ tasks) để không bỏ sót các phiếu
+    // nháp chưa có công việc nào bên trong.
+    state.workOrders.forEach((workOrder) => {
+      operations.push((batch) => batch.delete(doc(db, "workOrders", workOrder.id)));
+    });
+
+    await commitInChunks(operations);
+
+    toast("Đã xoá toàn bộ phiếu công việc.", "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không xoá được toàn bộ phiếu.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+els.deleteAllWorkOrdersBtn?.addEventListener("click", () => deleteAllWorkOrders(els.deleteAllWorkOrdersBtn));
 
 els.adminStatusFilter.addEventListener("change", (event) => {
   state.adminStatusFilter = event.target.value;
@@ -1486,7 +1557,16 @@ function renderAdminTasks() {
 
   refreshDateFilterVisibility("admin");
 
-  if (!filtered.length) {
+  // Chỉ chèn thêm phiếu nháp trống (0 công việc) khi không có bộ lọc nào khác đang áp dụng,
+  // vì các phiếu này chưa có nhân viên/ngày để so khớp với bộ lọc.
+  const showEmptyDrafts =
+    (state.adminStatusFilter === "all" || state.adminStatusFilter === "draft") &&
+    state.adminEmployeeFilter === "all" &&
+    state.adminDateFilter.mode === "all";
+
+  const groups = withEmptyDraftGroups(groupTasksByWorkOrder(filtered), showEmptyDrafts);
+
+  if (!groups.length) {
     els.adminTaskList.innerHTML = "Không có công việc phù hợp bộ lọc.";
     els.adminTaskList.classList.add("empty");
     return;
@@ -1494,15 +1574,14 @@ function renderAdminTasks() {
 
   els.adminTaskList.classList.remove("empty");
 
-  els.adminTaskList.innerHTML = groupTasksByWorkOrder(filtered)
+  els.adminTaskList.innerHTML = groups
     .map((group) => renderTicketGroup(group))
     .join("");
 
   updateCountdowns();
 }
 
-// Gom các công việc thuộc cùng 1 phiếu (workOrder) lại với nhau, giữ nguyên thứ tự
-// xuất hiện đầu tiên của mỗi phiếu (task mới nhất trước, vì state.tasks đã sort desc).
+// Gom các công việc thuộc cùng 1 phiếu (workOrder) lại với nhau.
 function groupTasksByWorkOrder(tasks) {
   const groups = [];
   const groupByKey = new Map();
@@ -1514,7 +1593,8 @@ function groupTasksByWorkOrder(tasks) {
       const group = {
         key,
         name: task.workOrderName || "Công việc lẻ (giao trước khi có Phiếu)",
-        tasks: []
+        tasks: [],
+        createdAtMs: timestampToDate(task.createdAt)?.getTime() || 0
       };
       groupByKey.set(key, group);
       groups.push(group);
@@ -1526,16 +1606,42 @@ function groupTasksByWorkOrder(tasks) {
   return groups;
 }
 
-function renderTicketGroup(group, mode = "admin") {
-  const isDraft = group.tasks.every((task) => task.status === "draft");
+// Thêm các phiếu nháp CHƯA có công việc nào (0 dòng) vào danh sách hiển thị — nếu chỉ dựa
+// vào tasks thì những phiếu này sẽ không xuất hiện ở đâu cả (vì chưa có task nào tham chiếu tới).
+function withEmptyDraftGroups(groups, showEmptyDrafts) {
+  if (!showEmptyDrafts) return groups.sort((a, b) => b.createdAtMs - a.createdAtMs);
 
-  const headerActions = (mode === "admin" && isDraft) ? `
-    <div class="ticket-actions">
-      <button class="btn ghost small" data-action="edit-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Sửa phiếu</button>
-      <button class="btn secondary small" data-action="dispatch-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">🚀 Giao việc</button>
-      <button class="btn danger small" data-action="delete-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">Xoá phiếu</button>
-    </div>
-  ` : "";
+  const coveredWorkOrderIds = new Set(state.tasks.map((task) => task.workOrderId).filter(Boolean));
+
+  const emptyDraftGroups = state.workOrders
+    .filter((wo) => wo.status === "draft" && !coveredWorkOrderIds.has(wo.id))
+    .map((wo) => ({
+      key: wo.id,
+      name: wo.name,
+      tasks: [],
+      createdAtMs: timestampToDate(wo.createdAt)?.getTime() || 0
+    }));
+
+  return [...groups, ...emptyDraftGroups].sort((a, b) => b.createdAtMs - a.createdAtMs);
+}
+
+function renderTicketGroup(group, mode = "admin") {
+  const isDraft = !group.tasks.length || group.tasks.every((task) => task.status === "draft");
+  const actionButtons = [];
+
+  if (mode === "admin" && isDraft) {
+    actionButtons.push(`<button class="btn ghost small" data-action="edit-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Sửa phiếu</button>`);
+
+    if (group.tasks.length) {
+      actionButtons.push(`<button class="btn secondary small" data-action="dispatch-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">🚀 Giao việc</button>`);
+    }
+  }
+
+  if (mode === "admin") {
+    actionButtons.push(`<button class="btn danger small" data-action="delete-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">🗑 Xoá phiếu</button>`);
+  }
+
+  const headerActions = actionButtons.length ? `<div class="ticket-actions">${actionButtons.join("")}</div>` : "";
 
   return `
     <section class="ticket-group ${isDraft ? "is-draft-ticket" : ""}">
@@ -1598,7 +1704,7 @@ function renderTaskCard(task, mode) {
     <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-raw-status="${escapeHtml(task.status)}">
       <div class="task-top">
         <div>
-          <h4 class="task-title">${escapeHtml(task.title)}</h4>
+          <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
           <p class="task-desc">${escapeHtml(task.description)}</p>
         </div>
         <span class="status-pill status-${displayStatus}">${statusLabel(displayStatus)}</span>

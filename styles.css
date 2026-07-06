@@ -324,6 +324,10 @@ textarea:focus {
   font-size: 20px;
 }
 
+.task-filter-row-secondary {
+  margin-top: 12px;
+}
+
 .task-filter-row {
   align-items: center;
 }
