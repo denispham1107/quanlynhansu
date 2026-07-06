@@ -994,8 +994,8 @@ function createTaskRowElement(prefill = null) {
       <input type="text" class="row-title" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
     </label>
     <label>
-      Mô tả công việc
-      <textarea class="row-description" rows="3" placeholder="Ghi rõ yêu cầu, tiêu chuẩn hoàn thành..." required></textarea>
+      Mô tả công việc <span class="optional-label">(không bắt buộc)</span>
+      <textarea class="row-description" rows="3" placeholder="Có thể bỏ trống hoặc ghi rõ yêu cầu, tiêu chuẩn hoàn thành..."></textarea>
     </label>
     <div class="two-col">
       <label>
@@ -1023,7 +1023,9 @@ function createTaskRowElement(prefill = null) {
   `;
 
   const dateInput = wrapper.querySelector(".row-date");
-  dateInput.valueAsDate = prefill?.taskDate ? new Date(`${prefill.taskDate}T00:00:00`) : new Date();
+  // Không dùng valueAsDate vì input date đọc ngày theo UTC, dễ bị lùi 1 ngày
+  // khi máy người dùng ở múi giờ Việt Nam và mở form sau nửa đêm.
+  dateInput.value = prefill?.taskDate || todayInputValue();
 
   if (prefill) {
     wrapper.querySelector(".row-title").value = prefill.title || "";
@@ -1176,7 +1178,6 @@ function validateTaskRows(rows) {
     const rowLabel = `Công việc #${row.index + 1}`;
 
     if (!row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
-    if (!row.description) return `${rowLabel}: vui lòng nhập mô tả công việc.`;
     if (!row.assignedEmployee) return `${rowLabel}: vui lòng chọn nhân viên hợp lệ.`;
     if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
     if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
