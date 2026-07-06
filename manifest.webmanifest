@@ -1,24 +1,12 @@
 {
-  "name": "Shop Task - Quản lý giao việc",
+  "name": "Phần mềm giao việc nhân viên",
   "short_name": "Shop Task",
-  "description": "Website giao việc, theo dõi deadline và duyệt hoàn thành cho nhân viên shop.",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#f4f7fb",
+  "background_color": "#eef5ff",
   "theme_color": "#2563eb",
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }
