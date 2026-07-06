@@ -628,6 +628,7 @@ textarea:focus {
   text-transform: uppercase;
 }
 
+/* .ticket-count giữ lại để tương thích nếu còn markup cũ, nhưng tiêu đề phiếu hiện đã hiển thị dạng: Spa1 - 3 công việc. */
 .ticket-count {
   color: var(--muted);
   font-size: 13px;
@@ -919,7 +920,7 @@ textarea:focus {
   }
 }
 
-/* ===== V6: Thêm giờ cho công việc ===== */
+/* ===== V6/V8: Thêm giờ cho công việc ===== */
 .modal-card.small-modal {
   width: min(520px, 100%);
 }
@@ -929,6 +930,49 @@ textarea:focus {
   grid-template-columns: 1fr auto;
   gap: 10px;
   align-items: end;
+}
+
+.reason-tools {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+
+.reason-tools .small-note {
+  margin: 0;
+}
+
+.reason-list {
+  display: grid;
+  gap: 8px;
+}
+
+.reason-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.reason-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.btn.tiny {
+  min-height: 34px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 10px;
 }
 
 .extension-box {
@@ -980,6 +1024,14 @@ textarea:focus {
   }
 
   .inline-add-box .btn {
+    width: 100%;
+  }
+
+  .reason-item {
+    grid-template-columns: 1fr;
+  }
+
+  .reason-item .btn {
     width: 100%;
   }
 }

@@ -15,6 +15,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -138,6 +139,7 @@ const els = {
   extendReasonSelect: $("#extendReasonSelect"),
   newExtendReason: $("#newExtendReason"),
   addExtendReasonBtn: $("#addExtendReasonBtn"),
+  extendReasonList: $("#extendReasonList"),
   confirmExtendTimeBtn: $("#confirmExtendTimeBtn")
 };
 
@@ -1668,6 +1670,8 @@ function withEmptyDraftGroups(groups, showEmptyDrafts) {
 
 function renderTicketGroup(group, mode = "admin") {
   const isDraft = !group.tasks.length || group.tasks.every((task) => task.status === "draft");
+  const taskCount = group.tasks.length;
+  const ticketTitle = `${group.name} - ${taskCount} công việc`;
   const actionButtons = [];
 
   if (mode === "admin" && isDraft) {
@@ -1689,9 +1693,8 @@ function renderTicketGroup(group, mode = "admin") {
       <div class="ticket-group-header">
         <div>
           <span class="ticket-badge ${isDraft ? "is-draft-badge" : ""}">${isDraft ? "Chưa giao việc" : "Phiếu công việc"}</span>
-          <h4>${escapeHtml(group.name)}</h4>
+          <h4>${escapeHtml(ticketTitle)}</h4>
         </div>
-        <span class="ticket-count">${group.tasks.length} công việc</span>
       </div>
       ${headerActions}
       <div class="ticket-tasks">
@@ -1970,6 +1973,29 @@ function renderExtendReasonOptions(selectedValue = "") {
     .join("");
 
   els.extendReasonSelect.innerHTML = `<option value="">Chọn mục đích thêm giờ</option>${options}`;
+  renderCustomExtendReasonList();
+}
+
+function renderCustomExtendReasonList() {
+  if (!els.extendReasonList) return;
+
+  const customReasons = state.timeExtensionReasons || [];
+
+  if (!customReasons.length) {
+    els.extendReasonList.innerHTML = `<p class="small-note">Chưa có mục đích nào do Admin tự tạo.</p>`;
+    return;
+  }
+
+  els.extendReasonList.innerHTML = customReasons
+    .map((reason) => `
+      <div class="reason-item">
+        <span>${escapeHtml(reason.name || "Không tên")}</span>
+        <button class="btn danger tiny" type="button" data-delete-extend-reason-id="${escapeHtml(reason.id)}" data-delete-extend-reason-name="${escapeHtml(reason.name || "")}">
+          Xoá
+        </button>
+      </div>
+    `)
+    .join("");
 }
 
 function openExtendTimeModal(taskId) {
@@ -2045,6 +2071,38 @@ els.addExtendReasonBtn?.addEventListener("click", async () => {
     toast("Không thêm được mục đích. Kiểm tra Firestore Rules timeExtensionReasons.", "error");
   } finally {
     setButtonLoading(els.addExtendReasonBtn, false);
+  }
+});
+
+els.extendReasonList?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-delete-extend-reason-id]");
+
+  if (!button || state.profile?.role !== "admin") return;
+
+  const reasonId = button.dataset.deleteExtendReasonId;
+  const reasonName = button.dataset.deleteExtendReasonName || "mục đích này";
+
+  if (!reasonId) return;
+
+  const confirmed = confirm(`Bạn có chắc muốn xoá mục đích thêm giờ “${reasonName}” không?`);
+
+  if (!confirmed) return;
+
+  setButtonLoading(button, true, "Đang xoá...");
+
+  try {
+    await deleteDoc(doc(db, "timeExtensionReasons", reasonId));
+
+    if (els.extendReasonSelect.value === reasonName) {
+      els.extendReasonSelect.value = "";
+    }
+
+    toast(`Đã xoá mục đích thêm giờ “${reasonName}”.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast("Không xoá được mục đích thêm giờ. Kiểm tra Firestore Rules timeExtensionReasons.", "error");
+  } finally {
+    setButtonLoading(button, false);
   }
 });
 
