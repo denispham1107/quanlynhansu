@@ -21,7 +21,8 @@ import {
   onSnapshot,
   serverTimestamp,
   Timestamp,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 // =========================
@@ -57,6 +58,7 @@ const state = {
   employees: [],
   tasks: [],
   workOrders: [],
+  timeExtensionReasons: [],
   notifications: [],
   knownNotificationIds: new Set(),
   notificationsReady: false,
@@ -65,17 +67,18 @@ const state = {
   adminStatusFilter: "all",
   adminEmployeeFilter: "all",
   adminDateFilter: {
-    mode: "all",
+    mode: "today",
     single: "",
     from: "",
     to: ""
   },
   employeeDateFilter: {
-    mode: "all",
+    mode: "today",
     single: "",
     from: "",
     to: ""
-  }
+  },
+  extendTimeTaskId: null
 };
 
 // =========================
@@ -127,7 +130,15 @@ const els = {
   notificationPanel: $("#notificationPanel"),
   notificationList: $("#notificationList"),
   notificationBadge: $("#notificationBadge"),
-  markAllNotificationsReadBtn: $("#markAllNotificationsReadBtn")
+  markAllNotificationsReadBtn: $("#markAllNotificationsReadBtn"),
+  extendTimeModal: $("#extendTimeModal"),
+  extendTimeForm: $("#extendTimeForm"),
+  extendTimeTaskTitle: $("#extendTimeTaskTitle"),
+  extendMinutes: $("#extendMinutes"),
+  extendReasonSelect: $("#extendReasonSelect"),
+  newExtendReason: $("#newExtendReason"),
+  addExtendReasonBtn: $("#addExtendReasonBtn"),
+  confirmExtendTimeBtn: $("#confirmExtendTimeBtn")
 };
 
 function escapeHtml(value = "") {
@@ -576,10 +587,24 @@ function bindDateFilterControls(scope) {
 
   if (!modeEl) return;
 
+  const currentFilter = state[`${prefix}DateFilter`];
+  modeEl.value = currentFilter.mode || "today";
+  if ((currentFilter.mode || "today") === "today" && singleEl && !currentFilter.single) {
+    singleEl.value = todayInputValue();
+  } else if (singleEl) {
+    singleEl.value = currentFilter.single || "";
+  }
+  if (fromEl) fromEl.value = currentFilter.from || "";
+  if (toEl) toEl.value = currentFilter.to || "";
+
   const onChange = () => {
+    if (modeEl.value === "today" && singleEl && !singleEl.value) {
+      singleEl.value = todayInputValue();
+    }
+
     state[`${prefix}DateFilter`] = {
       mode: modeEl.value,
-      single: singleEl?.value || "",
+      single: modeEl.value === "today" ? todayInputValue() : (singleEl?.value || ""),
       from: fromEl?.value || "",
       to: toEl?.value || ""
     };
@@ -825,7 +850,23 @@ function setupAdminDashboard() {
     handleSnapshotError
   );
 
-  state.unsubs.push(unsubUsers, unsubTasks, unsubWorkOrders);
+  const reasonsQuery = query(collection(db, "timeExtensionReasons"), orderBy("createdAt", "asc"));
+
+  const unsubTimeExtensionReasons = onSnapshot(
+    reasonsQuery,
+    (snapshot) => {
+      state.timeExtensionReasons = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .filter((reason) => reason.active !== false);
+      renderExtendReasonOptions();
+    },
+    (error) => {
+      console.error(error);
+      toast("Không đọc được danh sách mục đích thêm giờ. Kiểm tra Firestore Rules timeExtensionReasons.", "error");
+    }
+  );
+
+  state.unsubs.push(unsubUsers, unsubTasks, unsubWorkOrders, unsubTimeExtensionReasons);
 }
 
 function handleSnapshotError(error) {
@@ -1748,8 +1789,9 @@ function renderTaskCard(task, mode) {
         </div>
       </div>
 
+      ${renderTimeExtensionBox(task)}
       ${renderResultBox(task)}
-      ${renderTaskActions(task, { canEmployeeSubmit, canAdminReview })}
+      ${renderTaskActions(task, { canEmployeeSubmit, canAdminReview, canAdminExtendTime: canAdminExtendTaskTime(task, mode) })}
     </article>
   `;
 }
@@ -1791,8 +1833,50 @@ function renderResultBox(task) {
   `;
 }
 
+function canAdminExtendTaskTime(task, mode) {
+  return mode === "admin" && ["doing", "redo", "overdue"].includes(task.status);
+}
+
+function renderTimeExtensionBox(task) {
+  const extensions = Array.isArray(task.timeExtensions) ? task.timeExtensions : [];
+  const count = Number(task.timeExtensionCount || extensions.length || 0);
+
+  if (!count && !extensions.length) return "";
+
+  const totalMinutes = Number(task.timeExtensionTotalMinutes || extensions.reduce((sum, item) => sum + Number(item.minutes || 0), 0));
+
+  const rows = extensions
+    .slice()
+    .sort((a, b) => (timestampToDate(b.addedAt)?.getTime() || 0) - (timestampToDate(a.addedAt)?.getTime() || 0))
+    .map((item, index) => `
+      <li>
+        <strong>Lần ${extensions.length - index}: +${Number(item.minutes || 0)} phút</strong>
+        <span>${escapeHtml(item.reason || "Không ghi mục đích")} • ${formatDateTime(item.addedAt)} • ${escapeHtml(item.addedByName || "Admin")}</span>
+      </li>
+    `)
+    .join("");
+
+  return `
+    <div class="extension-box">
+      <div class="extension-box-head">
+        <strong>Đã thêm giờ ${count} lần</strong>
+        <span>Tổng cộng +${totalMinutes} phút</span>
+      </div>
+      ${rows ? `<ul class="extension-list">${rows}</ul>` : ""}
+    </div>
+  `;
+}
+
 function renderTaskActions(task, permissions) {
   const buttons = [];
+
+  if (permissions.canAdminExtendTime) {
+    buttons.push(`
+      <button class="btn ghost" data-action="open-extend-time" data-task-id="${escapeHtml(task.id)}">
+        + Thêm giờ
+      </button>
+    `);
+  }
 
   if (permissions.canEmployeeSubmit) {
     buttons.push(`
@@ -1830,6 +1914,10 @@ document.addEventListener("click", async (event) => {
   const action = button.dataset.action;
   const taskId = button.dataset.taskId;
 
+  if (action === "open-extend-time") {
+    openExtendTimeModal(taskId);
+  }
+
   if (action === "submit-task") {
     await submitTask(taskId, button);
   }
@@ -1856,6 +1944,218 @@ document.addEventListener("click", async (event) => {
 
   if (action === "delete-work-order") {
     await deleteWorkOrder(button.dataset.workOrderId, button);
+  }
+});
+
+
+const DEFAULT_TIME_EXTENSION_REASONS = [
+  "Khách/việc phát sinh thêm",
+  "Công việc khó hơn dự kiến",
+  "Chờ vật tư/dụng cụ",
+  "Chờ khách phản hồi",
+  "Ưu tiên việc gấp khác",
+  "Lý do khác"
+];
+
+function getAllTimeExtensionReasons() {
+  const customReasons = state.timeExtensionReasons.map((reason) => reason.name).filter(Boolean);
+  return Array.from(new Set([...DEFAULT_TIME_EXTENSION_REASONS, ...customReasons]));
+}
+
+function renderExtendReasonOptions(selectedValue = "") {
+  if (!els.extendReasonSelect) return;
+
+  const options = getAllTimeExtensionReasons()
+    .map((reason) => `<option value="${escapeHtml(reason)}" ${reason === selectedValue ? "selected" : ""}>${escapeHtml(reason)}</option>`)
+    .join("");
+
+  els.extendReasonSelect.innerHTML = `<option value="">Chọn mục đích thêm giờ</option>${options}`;
+}
+
+function openExtendTimeModal(taskId) {
+  if (state.profile?.role !== "admin") return;
+
+  const task = state.tasks.find((item) => item.id === taskId);
+
+  if (!task) {
+    toast("Không tìm thấy công việc cần thêm giờ.", "error");
+    return;
+  }
+
+  if (!canAdminExtendTaskTime(task, "admin")) {
+    toast("Chỉ thêm giờ cho công việc đang làm, yêu cầu làm lại hoặc quá hạn.", "error");
+    return;
+  }
+
+  state.extendTimeTaskId = taskId;
+  els.extendTimeTaskTitle.textContent = task.title || "Công việc";
+  els.extendMinutes.value = 15;
+  els.newExtendReason.value = "";
+  renderExtendReasonOptions();
+  els.extendTimeModal.classList.remove("hidden");
+}
+
+function closeExtendTimeModal() {
+  state.extendTimeTaskId = null;
+  els.extendTimeModal?.classList.add("hidden");
+}
+
+$$("[data-close-extend-modal]").forEach((button) => {
+  button.addEventListener("click", closeExtendTimeModal);
+});
+
+els.addExtendReasonBtn?.addEventListener("click", async () => {
+  if (state.profile?.role !== "admin") return;
+
+  const name = els.newExtendReason.value.trim();
+
+  if (!name) {
+    toast("Vui lòng nhập mục đích thêm giờ.", "error");
+    return;
+  }
+
+  const existing = getAllTimeExtensionReasons().some((reason) => reason.toLowerCase() === name.toLowerCase());
+
+  if (existing) {
+    els.extendReasonSelect.value = getAllTimeExtensionReasons().find((reason) => reason.toLowerCase() === name.toLowerCase()) || name;
+    els.newExtendReason.value = "";
+    toast("Mục đích này đã có trong danh sách.", "info");
+    return;
+  }
+
+  setButtonLoading(els.addExtendReasonBtn, true, "Đang thêm...");
+
+  try {
+    const reasonRef = doc(collection(db, "timeExtensionReasons"));
+    await setDoc(reasonRef, {
+      id: reasonRef.id,
+      name,
+      active: true,
+      createdByUid: state.user.uid,
+      createdByName: state.profile.name || state.user.email,
+      createdAt: serverTimestamp()
+    });
+
+    els.newExtendReason.value = "";
+    renderExtendReasonOptions(name);
+    els.extendReasonSelect.value = name;
+    toast("Đã thêm mục đích thêm giờ vào danh sách.", "success");
+  } catch (error) {
+    console.error(error);
+    toast("Không thêm được mục đích. Kiểm tra Firestore Rules timeExtensionReasons.", "error");
+  } finally {
+    setButtonLoading(els.addExtendReasonBtn, false);
+  }
+});
+
+els.extendTimeForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (state.profile?.role !== "admin") return;
+
+  const taskId = state.extendTimeTaskId;
+  const minutes = Number(els.extendMinutes.value || 0);
+  const reason = els.extendReasonSelect.value || els.newExtendReason.value.trim();
+
+  if (!taskId) {
+    toast("Không xác định được công việc cần thêm giờ.", "error");
+    return;
+  }
+
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    toast("Số phút thêm phải lớn hơn 0.", "error");
+    return;
+  }
+
+  if (!reason) {
+    toast("Vui lòng chọn hoặc nhập mục đích thêm giờ.", "error");
+    return;
+  }
+
+  setButtonLoading(els.confirmExtendTimeBtn, true, "Đang cộng giờ...");
+
+  try {
+    const taskRef = doc(db, "tasks", taskId);
+    let updatedTask = null;
+
+    await runTransaction(db, async (transaction) => {
+      const taskSnap = await transaction.get(taskRef);
+
+      if (!taskSnap.exists()) {
+        throw new Error("Không tìm thấy công việc.");
+      }
+
+      const task = { id: taskSnap.id, ...taskSnap.data() };
+
+      if (!canAdminExtendTaskTime(task, "admin")) {
+        throw new Error("Chỉ thêm giờ cho công việc đang làm, yêu cầu làm lại hoặc quá hạn.");
+      }
+
+      const oldDeadlineMinutes = Number(task.deadlineMinutes || 0);
+      const oldDeadlineDate = timestampToDate(task.deadlineAt) || new Date();
+      const newDeadlineMinutes = oldDeadlineMinutes + minutes;
+      const newDeadlineDate = new Date(oldDeadlineDate.getTime() + minutes * 60 * 1000);
+      const now = new Date();
+      const oldExtensions = Array.isArray(task.timeExtensions) ? task.timeExtensions : [];
+      const extensionRecord = {
+        minutes,
+        reason,
+        addedByUid: state.user.uid,
+        addedByName: state.profile.name || state.user.email || "Admin",
+        addedAt: Timestamp.fromDate(now)
+      };
+      const newStatus = task.status === "overdue" && newDeadlineDate.getTime() > now.getTime()
+        ? "doing"
+        : task.status;
+
+      transaction.update(taskRef, {
+        deadlineMinutes: newDeadlineMinutes,
+        deadlineAt: Timestamp.fromDate(newDeadlineDate),
+        status: newStatus,
+        timeExtensionCount: oldExtensions.length + 1,
+        timeExtensionTotalMinutes: Number(task.timeExtensionTotalMinutes || 0) + minutes,
+        timeExtensions: [...oldExtensions, extensionRecord],
+        lastTimeExtendedAt: Timestamp.fromDate(now),
+        lastTimeExtendedByUid: state.user.uid,
+        lastTimeExtendedByName: state.profile.name || state.user.email || "Admin"
+      });
+
+      updatedTask = {
+        ...task,
+        deadlineMinutes: newDeadlineMinutes,
+        deadlineAt: Timestamp.fromDate(newDeadlineDate),
+        status: newStatus
+      };
+    });
+
+    if (updatedTask?.assignedToUid) {
+      await createNotifications([
+        {
+          recipientUid: updatedTask.assignedToUid,
+          type: "task_time_extended",
+          title: "Công việc được thêm giờ",
+          message: `Admin đã thêm ${minutes} phút cho “${updatedTask.title}”. Mục đích: ${reason}.`,
+          taskId,
+          taskTitle: updatedTask.title
+        },
+        {
+          recipientUid: state.user.uid,
+          type: "task_time_extended_admin",
+          title: "Đã thêm giờ công việc",
+          message: `Bạn đã thêm ${minutes} phút cho “${updatedTask.title}”. Mục đích: ${reason}.`,
+          taskId,
+          taskTitle: updatedTask.title
+        }
+      ]);
+    }
+
+    closeExtendTimeModal();
+    toast(`Đã cộng thêm ${minutes} phút vào công việc.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không thêm giờ được cho công việc.", "error");
+  } finally {
+    setButtonLoading(els.confirmExtendTimeBtn, false);
   }
 });
 

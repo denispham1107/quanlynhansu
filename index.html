@@ -230,6 +230,49 @@
     </div>
   </div>
 
+
+  <!-- EXTEND TASK TIME MODAL -->
+  <div id="extendTimeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="extendTimeModalTitle">
+    <div class="modal-backdrop" data-close-extend-modal></div>
+    <div class="modal-card small-modal">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Thêm giờ</p>
+          <h3 id="extendTimeModalTitle">+ Thêm giờ cho công việc</h3>
+          <p id="extendTimeTaskTitle" class="muted">Công việc</p>
+        </div>
+        <button class="icon-btn" data-close-extend-modal aria-label="Đóng">×</button>
+      </div>
+
+      <form id="extendTimeForm" class="form-stack">
+        <label>
+          Số phút cần thêm
+          <input id="extendMinutes" type="number" min="1" max="1440" step="1" value="15" required />
+        </label>
+
+        <label>
+          Mục đích thêm giờ
+          <select id="extendReasonSelect">
+            <option value="">Chọn mục đích thêm giờ</option>
+          </select>
+        </label>
+
+        <div class="inline-add-box">
+          <label>
+            Thêm mục đích mới
+            <input id="newExtendReason" type="text" placeholder="Ví dụ: Khách đổi yêu cầu" />
+          </label>
+          <button id="addExtendReasonBtn" class="btn ghost" type="button">+ Thêm mục đích</button>
+        </div>
+
+        <div class="modal-footer-actions">
+          <button class="btn ghost" data-close-extend-modal type="button">Huỷ</button>
+          <button id="confirmExtendTimeBtn" class="btn primary" type="submit">OK - Cộng thêm giờ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

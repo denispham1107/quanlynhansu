@@ -918,3 +918,68 @@ textarea:focus {
     width: 100%;
   }
 }
+
+/* ===== V6: Thêm giờ cho công việc ===== */
+.modal-card.small-modal {
+  width: min(520px, 100%);
+}
+
+.inline-add-box {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.extension-box {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.extension-box-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.extension-box-head strong,
+.extension-box-head span {
+  font-size: 13px;
+}
+
+.extension-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.extension-list li strong {
+  display: block;
+  font-size: 13px;
+}
+
+.extension-list li span {
+  display: block;
+  margin-top: 2px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+@media (max-width: 680px) {
+  .inline-add-box {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-add-box .btn {
+    width: 100%;
+  }
+}
