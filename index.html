@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Phần mềm giao việc nhân viên</title>
   <meta name="theme-color" content="#2563eb" />
-  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Shop Task" />
   <link rel="manifest" href="manifest.webmanifest" />
@@ -16,24 +16,32 @@
 <body>
   <div id="toastHost" class="toast-host"></div>
 
+  <!-- LOGIN -->
   <section id="loginView" class="login-view">
     <div class="login-card">
       <div class="brand-badge">SHOP TASK</div>
       <h1>Đăng nhập quản lý giao việc</h1>
       <p class="muted">Admin giao việc, nhân viên nhận việc, theo dõi deadline và kết quả hoàn thành.</p>
+
       <form id="loginForm" class="form-stack">
-        <label>Email
+        <label>
+          Email
           <input id="loginEmail" type="email" autocomplete="email" placeholder="admin@shop.com" required />
         </label>
-        <label>Mật khẩu
+        <label>
+          Mật khẩu
           <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" required />
         </label>
         <button id="loginBtn" class="btn primary" type="submit">Đăng nhập</button>
       </form>
-      <p class="small-note">Nếu chưa có Admin, hãy tạo tài khoản Admin đầu tiên trong Firebase Authentication và document users/{uid}.</p>
+
+      <p class="small-note">
+        Chưa có Admin? Hãy tạo tài khoản Admin đầu tiên theo hướng dẫn ở cuối câu trả lời.
+      </p>
     </div>
   </section>
 
+  <!-- APP -->
   <section id="appView" class="app-view hidden">
     <header class="topbar">
       <div>
@@ -43,7 +51,10 @@
       <div class="topbar-actions">
         <button id="enableNotificationsBtn" class="btn ghost notify-permission-btn" type="button">Bật thông báo</button>
         <div class="notification-wrap">
-          <button id="notificationBellBtn" class="notification-btn" type="button" aria-label="Thông báo">🔔<span id="notificationBadge" class="notification-badge hidden">0</span></button>
+          <button id="notificationBellBtn" class="notification-btn" type="button" aria-label="Thông báo">
+            🔔
+            <span id="notificationBadge" class="notification-badge hidden">0</span>
+          </button>
           <div id="notificationPanel" class="notification-panel hidden">
             <div class="notification-panel-head">
               <strong>Thông báo</strong>
@@ -52,18 +63,19 @@
             <div id="notificationList" class="notification-list empty-box">Chưa có thông báo.</div>
           </div>
         </div>
-        <button id="logoutBtn" class="btn ghost" type="button">Đăng xuất</button>
+        <button id="logoutBtn" class="btn ghost">Đăng xuất</button>
       </div>
     </header>
 
+    <!-- ADMIN DASHBOARD -->
     <main id="adminView" class="page hidden">
       <section class="hero-panel">
         <div>
           <p class="eyebrow">Admin Dashboard</p>
           <h2>Giao việc và duyệt kết quả nhân viên</h2>
-          <p class="muted">Theo dõi realtime: chưa bắt đầu, đang làm, quá hạn, chờ xác nhận và hoàn thành.</p>
+          <p class="muted">Theo dõi realtime: đang làm, gần hết giờ, quá hạn, chờ xác nhận và đã hoàn thành.</p>
         </div>
-        <button id="openTaskModalBtn" class="btn primary large" type="button">+ Tạo phiếu công việc</button>
+        <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
       </section>
 
       <section class="stats-grid">
@@ -81,14 +93,18 @@
               <p class="muted">Admin tạo email/mật khẩu cho nhân viên đăng nhập.</p>
             </div>
           </div>
+
           <form id="createEmployeeForm" class="form-stack compact">
-            <label>Tên nhân viên
+            <label>
+              Tên nhân viên
               <input id="employeeName" type="text" placeholder="Ví dụ: Phúc" required />
             </label>
-            <label>Email đăng nhập
+            <label>
+              Email đăng nhập
               <input id="employeeEmail" type="email" placeholder="phuc@shop.com" required />
             </label>
-            <label>Mật khẩu
+            <label>
+              Mật khẩu
               <input id="employeePassword" type="password" placeholder="Tối thiểu 6 ký tự" minlength="6" required />
             </label>
             <button id="createEmployeeBtn" class="btn secondary" type="submit">Tạo nhân viên</button>
@@ -114,34 +130,39 @@
           </div>
           <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
         </div>
-        <div class="filters enhanced-filters">
-          <select id="adminStatusFilter" aria-label="Lọc trạng thái">
-            <option value="all">Tất cả trạng thái</option>
-            <option value="scheduled">Chưa bắt đầu</option>
-            <option value="doing">Đang làm</option>
-            <option value="near_due">Gần hết giờ</option>
-            <option value="overdue">Quá hạn</option>
-            <option value="submitted">Chờ xác nhận</option>
-            <option value="completed">Đã hoàn thành</option>
-            <option value="redo">Yêu cầu làm lại</option>
-          </select>
-          <select id="adminEmployeeFilter" aria-label="Lọc nhân viên"><option value="all">Tất cả nhân viên</option></select>
-          <select id="adminDateMode" aria-label="Lọc thời gian">
-            <option value="all">Tất cả ngày</option>
-            <option value="today" selected>Hôm nay</option>
-            <option value="single">Chọn 1 ngày</option>
-            <option value="range">Khoảng ngày</option>
-          </select>
-          <input id="adminSingleDate" class="date-filter-control hidden" type="date" aria-label="Chọn ngày giao việc" />
-          <input id="adminDateFrom" class="date-filter-control hidden" type="date" aria-label="Từ ngày" />
-          <input id="adminDateTo" class="date-filter-control hidden" type="date" aria-label="Đến ngày" />
-          <button id="adminClearDateFilter" class="btn ghost small" type="button">Xóa lọc ngày</button>
+        <div class="task-filter-row-secondary">
+          <div class="filters enhanced-filters">
+            <select id="adminStatusFilter" aria-label="Lọc trạng thái">
+              <option value="all">Tất cả trạng thái</option>
+              <option value="draft">Chưa giao việc</option>
+              <option value="doing">Đang làm</option>
+              <option value="near_due">Gần hết giờ</option>
+              <option value="overdue">Quá hạn</option>
+              <option value="submitted">Chờ xác nhận</option>
+              <option value="completed">Đã hoàn thành</option>
+              <option value="redo">Yêu cầu làm lại</option>
+            </select>
+            <select id="adminEmployeeFilter" aria-label="Lọc nhân viên">
+              <option value="all">Tất cả nhân viên</option>
+            </select>
+            <select id="adminDateMode" aria-label="Lọc thời gian">
+              <option value="all">Tất cả ngày</option>
+              <option value="today">Hôm nay</option>
+              <option value="single">Chọn 1 ngày</option>
+              <option value="range">Khoảng ngày</option>
+            </select>
+            <input id="adminSingleDate" class="date-filter-control hidden" type="date" aria-label="Chọn ngày giao việc" />
+            <input id="adminDateFrom" class="date-filter-control hidden" type="date" aria-label="Từ ngày" />
+            <input id="adminDateTo" class="date-filter-control hidden" type="date" aria-label="Đến ngày" />
+            <button id="adminClearDateFilter" class="btn ghost small" type="button">Xóa lọc ngày</button>
+          </div>
         </div>
-        <p id="adminDateSummary" class="filter-summary muted">Đang hiển thị công việc giao hôm nay.</p>
+        <p id="adminDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
         <div id="adminTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>
     </main>
 
+    <!-- EMPLOYEE DASHBOARD -->
     <main id="employeeView" class="page hidden">
       <section class="hero-panel employee-hero">
         <div>
@@ -150,6 +171,7 @@
           <p class="muted">Bạn chỉ thấy các công việc được giao cho tài khoản của mình.</p>
         </div>
       </section>
+
       <section class="panel task-panel">
         <div class="panel-header task-filter-row">
           <div>
@@ -159,7 +181,7 @@
           <div class="filters enhanced-filters employee-date-filters">
             <select id="employeeDateMode" aria-label="Lọc thời gian công việc của tôi">
               <option value="all">Tất cả ngày</option>
-              <option value="today" selected>Hôm nay</option>
+              <option value="today">Hôm nay</option>
               <option value="single">Chọn 1 ngày</option>
               <option value="range">Khoảng ngày</option>
             </select>
@@ -169,26 +191,30 @@
             <button id="employeeClearDateFilter" class="btn ghost small" type="button">Xóa lọc ngày</button>
           </div>
         </div>
-        <p id="employeeDateSummary" class="filter-summary muted">Đang hiển thị công việc giao hôm nay.</p>
+        <p id="employeeDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
         <div id="employeeTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>
     </main>
   </section>
 
+  <!-- CREATE WORK ORDER (PHIẾU CÔNG VIỆC) MODAL -->
   <div id="taskModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
     <div class="modal-backdrop" data-close-modal></div>
-    <div class="modal-card large-modal">
+    <div class="modal-card">
       <div class="modal-header">
         <div>
-          <p class="eyebrow">Phiếu công việc</p>
+          <p class="eyebrow">Giao việc mới</p>
           <h3 id="taskModalTitle">+ Tạo phiếu công việc</h3>
         </div>
-        <button class="icon-btn" data-close-modal aria-label="Đóng" type="button">×</button>
+        <button class="icon-btn" data-close-modal aria-label="Đóng">×</button>
       </div>
+
       <form id="createTaskForm" class="form-stack">
-        <label>Tên phiếu công việc
-          <input id="workOrderName" type="text" placeholder="Ví dụ: Spa5" required />
+        <label>
+          Tên phiếu công việc
+          <input id="workOrderName" type="text" placeholder="Ví dụ: Dọn dẹp cửa hàng cuối tuần" required />
         </label>
+
         <div class="task-rows-block">
           <div class="task-rows-header">
             <h4>Danh sách công việc trong phiếu</h4>
@@ -196,48 +222,58 @@
           </div>
           <div id="taskRowsContainer" class="task-rows-container"></div>
         </div>
-        <div class="modal-actions two-actions">
-          <button class="btn ghost" type="button" data-close-modal>Huỷ</button>
-          <button id="createTaskBtn" class="btn primary" type="submit">Giao phiếu công việc</button>
+
+        <div class="modal-footer-actions">
+          <button id="saveDraftBtn" class="btn ghost" type="button">💾 Lưu (chưa giao việc)</button>
+          <button id="createTaskBtn" class="btn primary" type="submit">Tạo phiếu &amp; giao việc</button>
         </div>
       </form>
     </div>
   </div>
 
-  <div id="timeExtensionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="timeExtensionTitle">
-    <div class="modal-backdrop" data-close-time-extension></div>
-    <div class="modal-card">
+
+  <!-- EXTEND TASK TIME MODAL -->
+  <div id="extendTimeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="extendTimeModalTitle">
+    <div class="modal-backdrop" data-close-extend-modal></div>
+    <div class="modal-card small-modal">
       <div class="modal-header">
         <div>
           <p class="eyebrow">Thêm giờ</p>
-          <h3 id="timeExtensionTitle">+ Thêm giờ cho công việc</h3>
-          <p id="timeExtensionTaskName" class="muted"></p>
+          <h3 id="extendTimeModalTitle">+ Thêm giờ cho công việc</h3>
+          <p id="extendTimeTaskTitle" class="muted">Công việc</p>
         </div>
-        <button class="icon-btn" data-close-time-extension aria-label="Đóng" type="button">×</button>
+        <button class="icon-btn" data-close-extend-modal aria-label="Đóng">×</button>
       </div>
-      <form id="timeExtensionForm" class="form-stack compact">
-        <label>Số phút cần thêm
-          <input id="timeExtensionMinutes" type="number" min="1" step="1" value="15" required />
+
+      <form id="extendTimeForm" class="form-stack">
+        <label>
+          Số phút cần thêm
+          <input id="extendMinutes" type="number" min="1" max="1440" step="1" value="15" required />
         </label>
-        <label>Mục đích thêm giờ
-          <select id="timeExtensionReasonSelect" required>
+
+        <label>
+          Mục đích thêm giờ
+          <select id="extendReasonSelect">
             <option value="">Chọn mục đích thêm giờ</option>
           </select>
         </label>
-        <div>
-          <label>Thêm mục đích mới</label>
-          <div class="inline-form-row">
-            <input id="newTimeExtensionReason" type="text" placeholder="Ví dụ: Khách đổi yêu cầu" />
-            <button id="addTimeExtensionReasonBtn" class="btn ghost" type="button">+ Thêm mục đích</button>
-          </div>
+
+        <div class="inline-add-box">
+          <label>
+            Thêm mục đích mới
+            <input id="newExtendReason" type="text" placeholder="Ví dụ: Khách đổi yêu cầu" />
+          </label>
+          <button id="addExtendReasonBtn" class="btn ghost" type="button">+ Thêm mục đích</button>
         </div>
-        <div class="reason-manager-box">
-          <p class="small-note">Danh sách bên dưới chỉ gồm các mục đích Admin tự tạo.</p>
-          <div id="timeExtensionReasonList" class="reason-list empty-box">Chưa có mục đích nào do Admin tự tạo.</div>
+
+        <div class="reason-tools">
+          <p class="small-note">Danh sách mục đích thêm giờ chỉ gồm các mục do Admin tự tạo. Hệ thống không tự tạo sẵn mục đích mặc định.</p>
+          <div id="extendReasonList" class="reason-list" aria-live="polite"></div>
         </div>
-        <div class="modal-actions two-actions">
-          <button class="btn ghost" type="button" data-close-time-extension>Huỷ</button>
-          <button id="confirmTimeExtensionBtn" class="btn primary" type="submit">OK - Cộng thêm giờ</button>
+
+        <div class="modal-footer-actions">
+          <button class="btn ghost" data-close-extend-modal type="button">Huỷ</button>
+          <button id="confirmExtendTimeBtn" class="btn primary" type="submit">OK - Cộng thêm giờ</button>
         </div>
       </form>
     </div>
