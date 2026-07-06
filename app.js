@@ -1951,10 +1951,10 @@ document.addEventListener("click", async (event) => {
 });
 
 
+// Không dùng mục đích mặc định của hệ thống.
+// Danh sách mục đích thêm giờ chỉ gồm các mục do Admin tự tạo trong Firestore.
 function getAllTimeExtensionReasons() {
-  // Không dùng mục đích mặc định của hệ thống.
-  // Danh sách mục đích thêm giờ chỉ lấy từ các mục do Admin tự tạo trong Firestore.
-  const customReasons = state.timeExtensionReasons.map((reason) => reason.name).filter(Boolean);
+  const customReasons = (state.timeExtensionReasons || []).map((reason) => reason.name).filter(Boolean);
   return Array.from(new Set(customReasons));
 }
 
@@ -2099,6 +2099,29 @@ els.extendReasonList?.addEventListener("click", async (event) => {
   }
 });
 
+async function ensureCustomTimeExtensionReason(name) {
+  const cleanName = String(name || "").trim();
+
+  if (!cleanName || state.profile?.role !== "admin") return;
+
+  const existed = (state.timeExtensionReasons || []).some((reason) =>
+    String(reason.name || "").trim().toLowerCase() === cleanName.toLowerCase()
+  );
+
+  if (existed) return;
+
+  const reasonRef = doc(collection(db, "timeExtensionReasons"));
+
+  await setDoc(reasonRef, {
+    id: reasonRef.id,
+    name: cleanName,
+    active: true,
+    createdByUid: state.user.uid,
+    createdByName: state.profile.name || state.user.email,
+    createdAt: serverTimestamp()
+  });
+}
+
 els.extendTimeForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -2107,7 +2130,8 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
   const taskId = state.extendTimeTaskId;
   const minutes = Number(els.extendMinutes.value || 0);
   const typedReason = els.newExtendReason.value.trim();
-  const reason = els.extendReasonSelect.value;
+  const selectedReason = els.extendReasonSelect.value;
+  const reason = selectedReason || typedReason;
 
   if (!taskId) {
     toast("Không xác định được công việc cần thêm giờ.", "error");
@@ -2120,17 +2144,15 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
   }
 
   if (!reason) {
-    if (typedReason) {
-      toast("Vui lòng bấm + Thêm mục đích trước, sau đó chọn mục đích vừa tạo để cộng giờ.", "error");
-    } else {
-      toast("Vui lòng chọn mục đích thêm giờ. Nếu chưa có mục đích, hãy tạo mới trước.", "error");
-    }
+    toast("Vui lòng chọn hoặc nhập mục đích thêm giờ. Nếu chưa có mục đích, Admin có thể tự tạo trong ô bên trên.", "error");
     return;
   }
 
   setButtonLoading(els.confirmExtendTimeBtn, true, "Đang cộng giờ...");
 
   try {
+    // Nếu Admin nhập mục đích mới rồi bấm OK, tự lưu mục đích đó vào danh sách để lần sau chọn lại được.
+    await ensureCustomTimeExtensionReason(reason);
     const taskRef = doc(db, "tasks", taskId);
     let updatedTask = null;
 
