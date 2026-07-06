@@ -248,6 +248,7 @@ function statusLabel(status) {
   const labels = {
     draft: "Chưa giao việc",
     doing: "Đang làm",
+    waiting: "Chưa tới giờ",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
     submitted: "Chờ Admin xác nhận",
@@ -258,10 +259,51 @@ function statusLabel(status) {
   return labels[status] || status;
 }
 
+function getTaskStartDate(task) {
+  return timestampToDate(task.dispatchedAt) || timestampToDate(task.createdAt);
+}
+
+function getTaskStartMs(task) {
+  const start = getTaskStartDate(task);
+  return start ? start.getTime() : 0;
+}
+
+function taskHasStarted(task) {
+  const startMs = getTaskStartMs(task);
+  return !startMs || startMs <= Date.now();
+}
+
+function getTaskSequenceValue(task, fallbackIndex = 0) {
+  const value = Number(task.sequenceIndex);
+  return Number.isFinite(value) ? value : fallbackIndex;
+}
+
+function sortTasksBySequence(tasks) {
+  return [...tasks].sort((a, b) => {
+    const aSeq = getTaskSequenceValue(a, 999999);
+    const bSeq = getTaskSequenceValue(b, 999999);
+
+    if (aSeq !== bSeq) return aSeq - bSeq;
+
+    const aStart = getTaskStartMs(a) || timestampToDate(a.createdAt)?.getTime() || 0;
+    const bStart = getTaskStartMs(b) || timestampToDate(b.createdAt)?.getTime() || 0;
+
+    return aStart - bStart;
+  });
+}
+
 function getDisplayStatus(task) {
   if (task.status === "draft") return "draft";
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
+
+  const start = getTaskStartDate(task);
+
+  // Các công việc trong cùng 1 phiếu và cùng 1 nhân viên được xếp chạy nối tiếp.
+  // Nếu chưa tới giờ bắt đầu dự kiến, chưa đếm thời gian làm mà hiển thị “Chưa tới giờ”.
+  if (["doing", "redo", "overdue"].includes(task.status) && start && start.getTime() > Date.now()) {
+    return "waiting";
+  }
 
   if (task.status === "redo") {
     const deadline = timestampToDate(task.deadlineAt);
@@ -290,6 +332,7 @@ function taskCardClass(displayStatus) {
   return {
     draft: "is-draft",
     doing: "",
+    waiting: "is-waiting",
     near_due: "is-near-due",
     overdue: "is-overdue",
     submitted: "is-submitted",
@@ -833,7 +876,8 @@ function setupAdminDashboard() {
       state.tasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       renderAdminTasks();
 
-      // Admin mở dashboard thì hệ thống tự đánh dấu quá hạn để trạng thái được lưu vào database.
+      // Admin mở dashboard thì hệ thống tự đánh dấu quá hạn và căn lại lịch nối tiếp theo nhân viên.
+      await syncSequentialSchedulesByAdmin();
       await syncOverdueTasksByAdmin();
     },
     handleSnapshotError
@@ -1104,7 +1148,7 @@ function openEditWorkOrderModal(workOrderId) {
   els.taskRowsContainer.innerHTML = "";
 
   if (tasksInGroup.length) {
-    tasksInGroup.forEach((task) => {
+    sortTasksBySequence(tasksInGroup).forEach((task) => {
       const deadlineMinutes = Number(task.deadlineMinutes || 0);
 
       els.taskRowsContainer.appendChild(createTaskRowElement({
@@ -1234,6 +1278,8 @@ async function persistWorkOrder(dispatch, button) {
     const notificationItems = [];
     const createdTaskRefs = [];
 
+    const employeeScheduleCursors = new Map();
+
     rows.forEach((row) => {
       const taskRef = doc(collection(db, "tasks"));
       createdTaskRefs.push(taskRef);
@@ -1253,6 +1299,8 @@ async function persistWorkOrder(dispatch, button) {
         assignedByName: state.profile.name,
         workOrderId: workOrderRef.id,
         workOrderName,
+        // Lưu thứ tự dòng trong phiếu để các công việc cùng nhân viên chạy nối tiếp nhau.
+        sequenceIndex: row.index,
         // Lưu tổng số công việc của phiếu vào từng task để các màn hình có thể hiển thị thống nhất.
         workOrderTaskCount: rows.length,
         createdAt: serverTimestamp(),
@@ -1269,16 +1317,20 @@ async function persistWorkOrder(dispatch, button) {
       };
 
       if (dispatch) {
-        const deadlineAt = new Date(now.getTime() + deadlineMinutes * 60 * 1000);
+        const scheduledStartAt = employeeScheduleCursors.get(assignedToUid) || now;
+        const deadlineAt = new Date(scheduledStartAt.getTime() + deadlineMinutes * 60 * 1000);
+
         taskData.status = "doing";
-        taskData.dispatchedAt = serverTimestamp();
+        taskData.dispatchedAt = Timestamp.fromDate(scheduledStartAt);
         taskData.deadlineAt = Timestamp.fromDate(deadlineAt);
+
+        employeeScheduleCursors.set(assignedToUid, deadlineAt);
 
         notificationItems.push({
           recipientUid: assignedToUid,
           type: "task_assigned",
           title: "Bạn có công việc mới",
-          message: `${state.profile.name || "Admin"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.`,
+          message: `${state.profile.name || "Admin"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Bắt đầu: ${formatDateTime(Timestamp.fromDate(scheduledStartAt))}. Hạn hoàn thành: ${formatDateTime(Timestamp.fromDate(deadlineAt))}.`,
           taskId: taskRef.id,
           taskTitle: row.title
         });
@@ -1365,20 +1417,26 @@ async function dispatchWorkOrder(workOrderId, button) {
     const batch = writeBatch(db);
     const notificationItems = [];
 
-    tasksInGroup.forEach((task) => {
-      const deadlineAt = new Date(now.getTime() + Number(task.deadlineMinutes) * 60 * 1000);
+    const employeeScheduleCursors = new Map();
+
+    sortTasksBySequence(tasksInGroup).forEach((task) => {
+      const deadlineMinutes = Number(task.deadlineMinutes) || 0;
+      const scheduledStartAt = employeeScheduleCursors.get(task.assignedToUid) || now;
+      const deadlineAt = new Date(scheduledStartAt.getTime() + deadlineMinutes * 60 * 1000);
 
       batch.update(doc(db, "tasks", task.id), {
         status: "doing",
-        dispatchedAt: serverTimestamp(),
+        dispatchedAt: Timestamp.fromDate(scheduledStartAt),
         deadlineAt: Timestamp.fromDate(deadlineAt)
       });
+
+      employeeScheduleCursors.set(task.assignedToUid, deadlineAt);
 
       notificationItems.push({
         recipientUid: task.assignedToUid,
         type: "task_assigned",
         title: "Bạn có công việc mới",
-        message: `${state.profile.name || "Admin"} đã giao cho bạn: ${task.title} (phiếu “${task.workOrderName}”). Hạn hoàn thành: ${formatMinutes(task.deadlineMinutes)}.`,
+        message: `${state.profile.name || "Admin"} đã giao cho bạn: ${task.title} (phiếu “${task.workOrderName}”). Bắt đầu: ${formatDateTime(Timestamp.fromDate(scheduledStartAt))}. Hạn hoàn thành: ${formatDateTime(Timestamp.fromDate(deadlineAt))}.`,
         taskId: task.id,
         taskTitle: task.title
       });
@@ -1499,6 +1557,76 @@ els.adminEmployeeFilter.addEventListener("change", (event) => {
   state.adminEmployeeFilter = event.target.value;
   renderAdminTasks();
 });
+
+async function syncSequentialSchedulesByAdmin() {
+  if (state.profile?.role !== "admin") return;
+
+  const activeTasks = state.tasks
+    .filter((task) => ["doing", "redo", "overdue"].includes(task.status))
+    .filter((task) => task.workOrderId && task.assignedToUid && timestampToDate(task.deadlineAt));
+
+  if (!activeTasks.length) return;
+
+  const groups = new Map();
+
+  activeTasks.forEach((task, index) => {
+    const key = `${task.workOrderId}__${task.assignedToUid}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ ...task, __fallbackIndex: index });
+  });
+
+  const updates = [];
+
+  groups.forEach((items) => {
+    if (items.length <= 1) return;
+
+    const sorted = [...items].sort((a, b) => {
+      const aSeq = getTaskSequenceValue(a, a.__fallbackIndex);
+      const bSeq = getTaskSequenceValue(b, b.__fallbackIndex);
+
+      if (aSeq !== bSeq) return aSeq - bSeq;
+
+      return (getTaskStartMs(a) || 0) - (getTaskStartMs(b) || 0);
+    });
+
+    let cursor = getTaskStartDate(sorted[0]) || new Date();
+
+    sorted.forEach((task) => {
+      const durationMinutes = Number(task.deadlineMinutes || 0);
+      if (durationMinutes <= 0) return;
+
+      const expectedStart = cursor;
+      const expectedDeadline = new Date(expectedStart.getTime() + durationMinutes * 60 * 1000);
+      const currentStart = getTaskStartDate(task);
+      const currentDeadline = timestampToDate(task.deadlineAt);
+      const startDiff = currentStart ? Math.abs(currentStart.getTime() - expectedStart.getTime()) : Infinity;
+      const deadlineDiff = currentDeadline ? Math.abs(currentDeadline.getTime() - expectedDeadline.getTime()) : Infinity;
+
+      if (startDiff > 30000 || deadlineDiff > 30000) {
+        const now = new Date();
+        const nextStatus = task.status === "overdue" && expectedDeadline.getTime() > now.getTime()
+          ? "doing"
+          : task.status;
+
+        updates.push(() => updateDoc(doc(db, "tasks", task.id), {
+          dispatchedAt: Timestamp.fromDate(expectedStart),
+          deadlineAt: Timestamp.fromDate(expectedDeadline),
+          status: nextStatus
+        }));
+      }
+
+      cursor = expectedDeadline;
+    });
+  });
+
+  if (!updates.length) return;
+
+  try {
+    await Promise.all(updates.slice(0, 20).map((update) => update()));
+  } catch (error) {
+    console.warn("Không thể tự căn lại lịch nối tiếp:", error);
+  }
+}
 
 async function syncOverdueTasksByAdmin() {
   if (state.profile?.role !== "admin") return;
@@ -1688,6 +1816,11 @@ function groupTasksByWorkOrder(tasks) {
     group.totalTaskCount = getWorkOrderTotalTaskCount(key, group.tasks);
   });
 
+  groups.forEach((group) => {
+    group.tasks = sortTasksBySequence(group.tasks);
+    group.totalTaskCount = getWorkOrderTotalTaskCount(group.key, group.tasks);
+  });
+
   return groups;
 }
 
@@ -1778,6 +1911,8 @@ function renderTaskCard(task, mode) {
   const displayStatus = task.displayStatus || getDisplayStatus(task);
   const deadlineDate = timestampToDate(task.deadlineAt);
   const deadlineMs = deadlineDate?.getTime() || 0;
+  const startDate = getTaskStartDate(task);
+  const startMs = startDate?.getTime() || 0;
 
   const canEmployeeSubmit =
     mode === "employee" &&
@@ -1790,7 +1925,7 @@ function renderTaskCard(task, mode) {
     task.status === "submitted";
 
   return `
-    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-raw-status="${escapeHtml(task.status)}">
+    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-start-ms="${startMs}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-raw-status="${escapeHtml(task.status)}">
       <div class="task-top">
         <div>
           <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
@@ -1821,7 +1956,7 @@ function renderTaskCard(task, mode) {
       <div class="task-meta">
         <div class="meta-box">
           <span>Giao lúc</span>
-          <strong>${formatDateTime(task.createdAt)}</strong>
+          <strong>${formatDateTime(startDate)}</strong>
         </div>
         <div class="meta-box">
           <span>Hạn lúc</span>
@@ -1848,6 +1983,12 @@ function getInitialCountdownText(task) {
   if (task.status === "draft") return "Chưa giao việc";
   if (task.status === "completed") return "Đã hoàn thành";
   if (task.status === "submitted") return "Chờ Admin duyệt";
+
+  const start = getTaskStartDate(task);
+
+  if (start && start.getTime() > Date.now()) {
+    return `Bắt đầu sau ${formatCountdown(start.getTime() - Date.now())}`;
+  }
 
   const deadline = timestampToDate(task.deadlineAt);
 
@@ -1928,7 +2069,7 @@ function renderTaskActions(task, permissions) {
 
   if (permissions.canEmployeeSubmit) {
     buttons.push(`
-      <button class="btn primary" data-action="submit-task" data-task-id="${escapeHtml(task.id)}">
+      <button class="btn primary" data-action="submit-task" data-submit-task-button data-task-id="${escapeHtml(task.id)}">
         Hoàn thành
       </button>
     `);
@@ -1994,6 +2135,29 @@ document.addEventListener("click", async (event) => {
     await deleteWorkOrder(button.dataset.workOrderId, button);
   }
 });
+
+
+function getFollowingTasksForSameEmployee(task) {
+  if (!task?.workOrderId || !task?.assignedToUid) return [];
+
+  const currentSeq = getTaskSequenceValue(task, 999999);
+  const currentStart = getTaskStartMs(task) || 0;
+
+  return sortTasksBySequence(
+    state.tasks.filter((item) => {
+      if (item.id === task.id) return false;
+      if ((item.workOrderId || "") !== (task.workOrderId || "")) return false;
+      if ((item.assignedToUid || "") !== (task.assignedToUid || "")) return false;
+
+      const itemSeq = getTaskSequenceValue(item, 999999);
+      if (itemSeq !== currentSeq) return itemSeq > currentSeq;
+
+      // Fallback cho dữ liệu cũ chưa có sequenceIndex: dùng giờ bắt đầu dự kiến.
+      const itemStart = getTaskStartMs(item) || 0;
+      return currentStart ? itemStart > currentStart : false;
+    })
+  );
+}
 
 
 // Không dùng mục đích mặc định của hệ thống.
@@ -2200,6 +2364,7 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     await ensureCustomTimeExtensionReason(reason);
     const taskRef = doc(db, "tasks", taskId);
     let updatedTask = null;
+    let shiftedFollowingCount = 0;
 
     await runTransaction(db, async (transaction) => {
       const taskSnap = await transaction.get(taskRef);
@@ -2212,6 +2377,16 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
 
       if (!canAdminExtendTaskTime(task, "admin")) {
         throw new Error("Chỉ thêm giờ cho công việc đang làm, yêu cầu làm lại hoặc quá hạn.");
+      }
+
+      const followingTasks = getFollowingTasksForSameEmployee(task)
+        .filter((item) => ["doing", "redo", "overdue"].includes(item.status));
+
+      const followingRefs = followingTasks.map((item) => doc(db, "tasks", item.id));
+      const followingSnaps = [];
+
+      for (const ref of followingRefs) {
+        followingSnaps.push(await transaction.get(ref));
       }
 
       const oldDeadlineMinutes = Number(task.deadlineMinutes || 0);
@@ -2241,6 +2416,30 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
         lastTimeExtendedAt: Timestamp.fromDate(now),
         lastTimeExtendedByUid: state.user.uid,
         lastTimeExtendedByName: state.profile.name || state.user.email || "Admin"
+      });
+
+      followingSnaps.forEach((snap) => {
+        if (!snap.exists()) return;
+
+        const followingTask = { id: snap.id, ...snap.data() };
+        const followingStart = timestampToDate(followingTask.dispatchedAt);
+        const followingDeadline = timestampToDate(followingTask.deadlineAt);
+
+        if (!followingStart || !followingDeadline) return;
+
+        const newStart = new Date(followingStart.getTime() + minutes * 60 * 1000);
+        const newDeadline = new Date(followingDeadline.getTime() + minutes * 60 * 1000);
+        const shiftedStatus = followingTask.status === "overdue" && newDeadline.getTime() > now.getTime()
+          ? "doing"
+          : followingTask.status;
+
+        transaction.update(doc(db, "tasks", followingTask.id), {
+          dispatchedAt: Timestamp.fromDate(newStart),
+          deadlineAt: Timestamp.fromDate(newDeadline),
+          status: shiftedStatus
+        });
+
+        shiftedFollowingCount += 1;
       });
 
       updatedTask = {
@@ -2273,7 +2472,12 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     }
 
     closeExtendTimeModal();
-    toast(`Đã cộng thêm ${minutes} phút vào công việc.`, "success");
+    toast(
+      shiftedFollowingCount
+        ? `Đã cộng thêm ${minutes} phút và tự dời lịch ${shiftedFollowingCount} công việc tiếp theo của cùng nhân viên.`
+        : `Đã cộng thêm ${minutes} phút vào công việc.`,
+      "success"
+    );
   } catch (error) {
     console.error(error);
     toast(error.message || "Không thêm giờ được cho công việc.", "error");
@@ -2290,6 +2494,11 @@ async function submitTask(taskId, button) {
 
     if (!task || task.assignedToUid !== state.user.uid) {
       throw new Error("Bạn không có quyền hoàn thành công việc này.");
+    }
+
+    const startDate = getTaskStartDate(task);
+    if (startDate && startDate.getTime() > Date.now()) {
+      throw new Error(`Công việc này chưa tới giờ bắt đầu. Bắt đầu sau ${formatCountdown(startDate.getTime() - Date.now())}.`);
     }
 
     await updateDoc(doc(db, "tasks", taskId), {
@@ -2417,16 +2626,16 @@ async function requestRedo(taskId, button) {
 }
 
 function calculateResult(task) {
-  const createdAt = timestampToDate(task.createdAt);
+  const startedAt = getTaskStartDate(task);
   const submittedAt = timestampToDate(task.submittedAt);
 
-  if (!createdAt || !submittedAt) {
-    throw new Error("Thiếu thời gian giao việc hoặc thời gian nhân viên báo hoàn thành.");
+  if (!startedAt || !submittedAt) {
+    throw new Error("Thiếu thời gian bắt đầu công việc hoặc thời gian nhân viên báo hoàn thành.");
   }
 
   const actualMinutes = Math.max(
     0,
-    Math.ceil((submittedAt.getTime() - createdAt.getTime()) / 60000)
+    Math.ceil((submittedAt.getTime() - startedAt.getTime()) / 60000)
   );
 
   const deadlineMinutes = Number(task.deadlineMinutes || 0);
@@ -2449,6 +2658,14 @@ function calculateResult(task) {
     differenceMinutes,
     differencePercent
   };
+}
+
+function updateCardStatusPill(card, displayStatus) {
+  const pill = card.querySelector(".status-pill");
+  if (!pill) return;
+
+  pill.textContent = statusLabel(displayStatus);
+  pill.className = `status-pill status-${displayStatus}`;
 }
 
 // Cập nhật đồng hồ đếm ngược mỗi giây mà không cần đọc lại database.
@@ -2476,6 +2693,27 @@ function updateCountdowns() {
       return;
     }
 
+    const startMs = Number(card.dataset.startMs || 0);
+    const now = Date.now();
+    const submitButton = card.querySelector("[data-submit-task-button]");
+
+    if (startMs && startMs > now) {
+      countdown.textContent = `Bắt đầu sau ${formatCountdown(startMs - now)}`;
+      updateCardStatusPill(card, "waiting");
+      card.classList.add("is-waiting");
+      card.classList.remove("is-overdue", "is-near-due");
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = "Chưa tới giờ";
+      }
+      return;
+    }
+
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Hoàn thành";
+    }
+
     const deadlineMs = Number(card.dataset.deadlineMs || 0);
 
     if (!deadlineMs) {
@@ -2483,12 +2721,13 @@ function updateCountdowns() {
       return;
     }
 
-    const remainingMs = deadlineMs - Date.now();
+    const remainingMs = deadlineMs - now;
 
     countdown.textContent = remainingMs >= 0
       ? `Còn ${formatCountdown(remainingMs)}`
       : `Quá hạn ${formatCountdown(remainingMs)}`;
 
+    card.classList.remove("is-waiting");
     card.classList.toggle("is-overdue", remainingMs <= 0 && rawStatus !== "completed");
 
     const deadlineMinutes = Number(card.dataset.deadlineMinutes || 0);
@@ -2496,6 +2735,12 @@ function updateCountdowns() {
       15 * 60 * 1000,
       Math.max(1, deadlineMinutes) * 60 * 1000 * 0.2
     );
+
+    const computedStatus = remainingMs <= 0
+      ? "overdue"
+      : (remainingMs <= nearThreshold ? "near_due" : (rawStatus === "redo" ? "redo" : "doing"));
+
+    updateCardStatusPill(card, computedStatus);
 
     card.classList.toggle(
       "is-near-due",
