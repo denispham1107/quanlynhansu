@@ -126,10 +126,12 @@ service cloud.firestore {
           "workOrderId",
           "workOrderName",
           "workOrderTaskCount",
+          "rowIndex",
           "createdAt",
           "deadlineMinutes",
           "deadlineAt",
           "dispatchedAt",
+          "queueStartAt",
           "submittedAt",
           "approvedAt",
           "status",
@@ -160,6 +162,8 @@ service cloud.firestore {
         && request.resource.data.workOrderTaskCount is int
         && request.resource.data.workOrderTaskCount > 0
         && request.resource.data.workOrderTaskCount <= 500
+        && request.resource.data.rowIndex is int
+        && request.resource.data.rowIndex >= 0
         && request.resource.data.createdAt == request.time
         && request.resource.data.deadlineMinutes is int
         && request.resource.data.deadlineMinutes >= 0
@@ -175,14 +179,17 @@ service cloud.firestore {
             request.resource.data.status == "draft"
             && request.resource.data.deadlineAt == null
             && request.resource.data.dispatchedAt == null
+            && request.resource.data.queueStartAt == null
           )
           || (
             request.resource.data.status == "doing"
             && request.resource.data.title.size() > 0
             && request.resource.data.assignedToUid != ""
             && request.resource.data.deadlineMinutes > 0
+            && request.resource.data.queueStartAt is timestamp
+            && request.resource.data.queueStartAt >= request.time
             && request.resource.data.deadlineAt is timestamp
-            && request.resource.data.deadlineAt > request.time
+            && request.resource.data.deadlineAt > request.resource.data.queueStartAt
             && request.resource.data.dispatchedAt == request.time
           )
         );
@@ -197,16 +204,18 @@ service cloud.firestore {
         && request.resource.data.submittedAt == request.time;
 
       // Admin bấm "Giao việc" cho 1 phiếu đang ở trạng thái nháp: chuyển task draft -> doing,
-      // bắt đầu tính hạn hoàn thành từ thời điểm này.
+      // bắt đầu tính hạn hoàn thành từ thời điểm này (có thể xếp hàng nếu nhân viên còn việc khác).
       allow update: if isAdmin()
         && resource.data.status == "draft"
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "dispatchedAt", "deadlineAt"])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "dispatchedAt", "queueStartAt", "deadlineAt"])
         && request.resource.data.status == "doing"
         && request.resource.data.assignedToUid != ""
         && request.resource.data.deadlineMinutes > 0
         && request.resource.data.dispatchedAt == request.time
+        && request.resource.data.queueStartAt is timestamp
+        && request.resource.data.queueStartAt >= request.time
         && request.resource.data.deadlineAt is timestamp
-        && request.resource.data.deadlineAt > request.time;
+        && request.resource.data.deadlineAt > request.resource.data.queueStartAt;
 
       // Admin được duyệt hoàn thành, yêu cầu làm lại, hoặc đánh dấu quá hạn.
       allow update: if isAdmin()
