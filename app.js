@@ -32,7 +32,8 @@ import {
   getStorage,
   ref as storageRef,
   uploadBytes,
-  getDownloadURL
+  getDownloadURL,
+  deleteObject
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
 // =========================
@@ -2758,16 +2759,87 @@ async function dispatchWorkOrder(workOrderId, button) {
   }
 }
 
+function getStoragePathFromPhoto(photo) {
+  if (!photo) return "";
+
+  if (photo.storagePath) return String(photo.storagePath);
+  if (photo.fullPath) return String(photo.fullPath);
+  if (photo.path) return String(photo.path);
+
+  const url = String(photo.url || "");
+  if (!url.includes("/o/")) return "";
+
+  try {
+    const encodedPath = url.split("/o/")[1]?.split("?")[0] || "";
+    return decodeURIComponent(encodedPath);
+  } catch (error) {
+    console.warn("Không đọc được đường dẫn ảnh từ URL", error);
+    return "";
+  }
+}
+
+function getTaskPhotoStoragePaths(tasks = []) {
+  const paths = new Set();
+
+  tasks.forEach((task) => {
+    getTaskPhotos(task).forEach((photo) => {
+      const path = getStoragePathFromPhoto(photo);
+      if (path) paths.add(path);
+    });
+  });
+
+  return Array.from(paths);
+}
+
+function isStorageObjectNotFound(error) {
+  const code = String(error?.code || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code.includes("object-not-found") || message.includes("object does not exist");
+}
+
+async function deleteTaskPhotosFromStorage(tasks = []) {
+  const paths = getTaskPhotoStoragePaths(tasks);
+  const failed = [];
+  let deleted = 0;
+
+  for (const path of paths) {
+    try {
+      await deleteObject(storageRef(storage, path));
+      deleted += 1;
+    } catch (error) {
+      if (isStorageObjectNotFound(error)) {
+        continue;
+      }
+
+      console.error(`Không xoá được ảnh Storage: ${path}`, error);
+      failed.push({ path, error });
+    }
+  }
+
+  if (failed.length) {
+    throw new Error(`Không xoá được ${failed.length} hình trong Firebase Storage. Hãy kiểm tra đã deploy storage.rules mới nhất rồi thử lại.`);
+  }
+
+  return { deleted, total: paths.length };
+}
+
+async function getCollectionDeleteOperations(collectionName) {
+  const snapshot = await getDocs(collection(db, collectionName));
+  return snapshot.docs.map((item) => (batch) => batch.delete(doc(db, collectionName, item.id)));
+}
+
 async function deleteWorkOrder(workOrderId, button) {
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
-  if (!window.confirm(`Xoá phiếu này cùng ${tasksInGroup.length} công việc bên trong? Không thể hoàn tác.`)) {
+  if (!window.confirm(`Xoá phiếu này cùng ${tasksInGroup.length} công việc bên trong? Hình ảnh báo cáo trong phiếu cũng sẽ bị xoá. Không thể hoàn tác.`)) {
     return;
   }
 
   setButtonLoading(button, true, "Đang xoá...");
 
   try {
+    await deleteTaskPhotosFromStorage(tasksInGroup);
+
     const batch = writeBatch(db);
     tasksInGroup.forEach((task) => batch.delete(doc(db, "tasks", task.id)));
 
@@ -2777,7 +2849,7 @@ async function deleteWorkOrder(workOrderId, button) {
 
     await batch.commit();
 
-    toast("Đã xoá phiếu.", "success");
+    toast("Đã xoá phiếu và hình ảnh báo cáo trong phiếu.", "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không xoá được phiếu.", "error");
@@ -2796,8 +2868,15 @@ async function commitInChunks(operations, chunkSize = 450) {
 }
 
 async function deleteAllWorkOrders(button) {
-  if (!state.tasks.length && !state.workOrders.length) {
-    toast("Không có phiếu công việc nào để xoá.", "info");
+  const hasAnyWorkData = Boolean(
+    state.tasks.length
+    || state.workOrders.length
+    || state.hotelDailyReports.length
+    || state.notifications.length
+  );
+
+  if (!hasAnyWorkData) {
+    toast("Không có dữ liệu phiếu công việc nào để xoá.", "info");
     return;
   }
 
@@ -2805,14 +2884,17 @@ async function deleteAllWorkOrders(button) {
     ...state.tasks.map((task) => task.workOrderId || "legacy"),
     ...state.workOrders.map((wo) => wo.id)
   ]).size;
+  const photoCount = getTaskPhotoStoragePaths(state.tasks).length;
 
-  if (!window.confirm(`Xoá TOÀN BỘ ${ticketCount} phiếu công việc (mọi trạng thái: chưa giao việc, đang làm, đã hoàn thành...) cùng ${state.tasks.length} công việc bên trong? Hành động này không thể hoàn tác.`)) {
+  if (!window.confirm(`Xoá TOÀN BỘ ${ticketCount} phiếu công việc (mọi trạng thái) cùng ${state.tasks.length} công việc bên trong? Hệ thống cũng sẽ xoá toàn bộ báo cáo Hotel hằng ngày, thiết lập/thống kê liên quan, thông báo cũ và ${photoCount} hình ảnh báo cáo. Hành động này không thể hoàn tác.`)) {
     return;
   }
 
   setButtonLoading(button, true, "Đang xoá toàn bộ...");
 
   try {
+    await deleteTaskPhotosFromStorage(state.tasks);
+
     const operations = [];
 
     state.tasks.forEach((task) => {
@@ -2825,9 +2907,16 @@ async function deleteAllWorkOrders(button) {
       operations.push((batch) => batch.delete(doc(db, "workOrders", workOrder.id)));
     });
 
+    operations.push(...await getCollectionDeleteOperations("hotelDailyReports"));
+    operations.push(...await getCollectionDeleteOperations("notifications"));
+
     await commitInChunks(operations);
 
-    toast("Đã xoá toàn bộ phiếu công việc.", "success");
+    state.adminHotelReportDrafts = {};
+    state.adminHotelReportHygiene = "pending";
+    state.adminHotelEndPetCount = "";
+
+    toast("Đã xoá toàn bộ phiếu, báo cáo, thống kê, thông báo và hình ảnh liên quan.", "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không xoá được toàn bộ phiếu.", "error");
