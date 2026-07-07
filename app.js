@@ -1891,14 +1891,7 @@ function createTaskRowElement(prefill = null) {
       </label>
     </div>
     <p class="small-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
-    <p class="small-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới.</p>
-    <div class="hotel-pet-box hidden">
-      <label>
-        Số lượng bé ở hotel
-        <input type="number" class="row-hotel-pet-count" min="1" max="500" step="1" value="10" />
-      </label>
-      <p class="small-note hotel-time-preview">Tự động tính thời gian theo số lượng bé ở hotel.</p>
-    </div>
+    <p class="small-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>10 bé</strong> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <strong>30 phút</strong>. Cứ <strong>mỗi 1 bé vào</strong> ở thêm thì sẽ cộng thêm thời gian cho <strong>2 phút</strong>.</p>
     <div class="two-col">
       <label>
         Số giờ
@@ -1932,10 +1925,6 @@ function createTaskRowElement(prefill = null) {
 
     if (prefill.isHotel) {
       wrapper.querySelector(".row-hotel").checked = true;
-      const hotelPetCountInput = wrapper.querySelector(".row-hotel-pet-count");
-      if (hotelPetCountInput) {
-        hotelPetCountInput.value = normalizeHotelPetCount(prefill.hotelPetCount) || HOTEL_BASE_PET_COUNT;
-      }
     }
   }
 
@@ -1984,9 +1973,6 @@ function syncLunchBreakRowControls(row, changedInput = null) {
   const hoursInput = row.querySelector(".row-hours");
   const minutesInput = row.querySelector(".row-minutes");
   const titleInput = row.querySelector(".row-title");
-  const hotelPetBox = row.querySelector(".hotel-pet-box");
-  const hotelPetCountInput = row.querySelector(".row-hotel-pet-count");
-  const hotelTimePreview = row.querySelector(".hotel-time-preview");
   const lunchNote = row.querySelector(".lunch-break-note");
   const hotelNote = row.querySelector(".hotel-note");
 
@@ -2027,15 +2013,6 @@ function syncLunchBreakRowControls(row, changedInput = null) {
 
   lunchNote?.classList.toggle("hidden", !isLunch);
   hotelNote?.classList.toggle("hidden", !isHotel);
-  hotelPetBox?.classList.toggle("hidden", !isHotel);
-
-  if (hotelPetCountInput) {
-    hotelPetCountInput.disabled = !isHotel;
-    if (isHotel && !normalizeHotelPetCount(hotelPetCountInput.value)) {
-      hotelPetCountInput.value = HOTEL_BASE_PET_COUNT;
-    }
-  }
-
   if (!hoursInput || !minutesInput) return;
 
   if (isLunch) {
@@ -2055,17 +2032,9 @@ function syncLunchBreakRowControls(row, changedInput = null) {
   if (isHotel) {
     if (!titleInput.value.trim()) titleInput.value = HOTEL_AUTO_TITLE;
 
-    const petCount = normalizeHotelPetCount(hotelPetCountInput?.value) || HOTEL_BASE_PET_COUNT;
-    const allowedMinutes = calculateHotelAllowedMinutes(petCount);
-
     hoursInput.max = 168;
     minutesInput.min = 0;
     minutesInput.max = 59;
-    applyHotelTimeFromPetCount(row);
-
-    if (hotelTimePreview) {
-      hotelTimePreview.innerHTML = `Thời gian Hotel được tự động tính: <strong>${formatMinutes(allowedMinutes)}</strong> cho <strong>${petCount}</strong> bé.`;
-    }
     return;
   }
 
@@ -2162,7 +2131,7 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   const row = event.target.closest(".task-row");
   if (!row) return;
 
-  if (event.target.matches(".row-lunch-break, .row-hotel, .row-hotel-pet-count, .row-hours, .row-minutes")) {
+  if (event.target.matches(".row-lunch-break, .row-hotel, .row-hours, .row-minutes")) {
     syncLunchBreakRowControls(row, event.target);
 
     if (event.target.matches(".row-lunch-break, .row-hotel")) {
@@ -2179,15 +2148,6 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   applyWorkTemplateToRow(titleInput.closest(".task-row"), template);
   syncLunchBreakRowControls(titleInput.closest(".task-row"));
   toast(`Đã áp dụng thời gian ${formatMinutes(Number(template.deadlineMinutes || 0))} cho công việc “${template.name}”.`, "success");
-});
-
-els.taskRowsContainer.addEventListener("input", (event) => {
-  const row = event.target.closest(".task-row");
-  if (!row) return;
-
-  if (event.target.matches(".row-hotel-pet-count")) {
-    syncLunchBreakRowControls(row, event.target);
-  }
 });
 
 els.openTaskModalBtn.addEventListener("click", () => {
@@ -2259,11 +2219,11 @@ function readTaskRowsData() {
     const assignedToUid = row.querySelector(".row-assignee").value;
     const isLunchBreak = Boolean(row.querySelector(".row-lunch-break")?.checked);
     const isHotel = Boolean(row.querySelector(".row-hotel")?.checked);
-    const hotelPetCount = isHotel ? normalizeHotelPetCount(row.querySelector(".row-hotel-pet-count")?.value) : 0;
-    const hotelAllowedMinutes = isHotel ? calculateHotelAllowedMinutes(hotelPetCount) : 0;
+    const hotelPetCount = 0;
+    const hotelAllowedMinutes = 0;
     const hours = Number(row.querySelector(".row-hours").value || 0);
     const minutes = Number(row.querySelector(".row-minutes").value || 0);
-    const deadlineMinutes = isHotel ? hotelAllowedMinutes : (hours * 60 + minutes);
+    const deadlineMinutes = hours * 60 + minutes;
     const assignedEmployee = state.employees.find((employee) => employee.uid === assignedToUid);
 
     return {
@@ -2293,9 +2253,6 @@ function validateTaskRows(rows) {
     if (!row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
     if (row.assignedToUid && !row.assignedEmployee) return `${rowLabel}: nhân viên được chọn không hợp lệ.`;
     if (row.isLunchBreak && row.isHotel) return `${rowLabel}: chỉ được chọn Nghỉ trưa hoặc Hotel, không chọn cả hai.`;
-    if (row.isHotel && (!Number.isInteger(row.hotelPetCount) || row.hotelPetCount <= 0)) {
-      return `${rowLabel}: vui lòng nhập số lượng bé ở hotel lớn hơn 0.`;
-    }
     if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
     if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
   }
