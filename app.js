@@ -2594,20 +2594,23 @@ function getCompletedNormalTaskStats(task) {
 function formatNormalCompletedSummary(name, stats) {
   const actualMinutes = Number(stats.actualMinutes || 0);
   const deadlineMinutes = Number(stats.deadlineMinutes || 0);
-  const differenceMinutes = Math.abs(deadlineMinutes - actualMinutes);
-  const differencePercent = deadlineMinutes > 0
-    ? Number(((differenceMinutes / deadlineMinutes) * 100).toFixed(1))
-    : 0;
 
-  let resultText = `đúng thời gian quy định 0 phút (${differencePercent}%)`;
-
-  if (actualMinutes < deadlineMinutes) {
-    resultText = `làm nhanh hơn ${differenceMinutes} phút (${differencePercent}%) so với quy định`;
-  } else if (actualMinutes > deadlineMinutes) {
-    resultText = `làm chậm hơn ${differenceMinutes} phút (${differencePercent}%) so với quy định`;
+  if (deadlineMinutes <= 0) {
+    return `${name}: chưa đủ dữ liệu để tính năng lực làm so với quy định`;
   }
 
-  return `${name}: ${resultText} • Thời gian thực tế ${formatMinutes(actualMinutes)} • Thời gian quy định ${formatMinutes(deadlineMinutes)}`;
+  const differencePercent = Number(((Math.abs(deadlineMinutes - actualMinutes) / deadlineMinutes) * 100).toFixed(1));
+  let capacityPercent = 100;
+
+  if (actualMinutes < deadlineMinutes) {
+    capacityPercent = 100 + differencePercent;
+  } else if (actualMinutes > deadlineMinutes) {
+    capacityPercent = 100 - differencePercent;
+  }
+
+  capacityPercent = Math.max(0, Number(capacityPercent.toFixed(1)));
+
+  return `${name}: năng lực làm đạt ${capacityPercent}% so với năng lực quy định`;
 }
 
 function renderCompletedTypeReport(tasks, scope = "admin") {
