@@ -1524,6 +1524,7 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
 // Quản lý các dòng công việc trong phiếu (task rows)
 // =========================
 let taskRowIdCounter = 0;
+let photoRequirementTouched = false;
 
 function createTaskRowElement(prefill = null) {
   taskRowIdCounter += 1;
@@ -1614,6 +1615,7 @@ function createTaskRowElement(prefill = null) {
 function addTaskRow() {
   els.taskRowsContainer.appendChild(createTaskRowElement());
   updateTaskRowHeadings();
+  syncPhotoRequirementDefaultFromTaskTypes();
 }
 
 function removeTaskRow(rowId) {
@@ -1626,6 +1628,7 @@ function removeTaskRow(rowId) {
   const row = els.taskRowsContainer.querySelector(`[data-row-id="${rowId}"]`);
   row?.remove();
   updateTaskRowHeadings();
+  syncPhotoRequirementDefaultFromTaskTypes();
 }
 
 function updateTaskRowHeadings() {
@@ -1699,23 +1702,45 @@ function resetTaskRows() {
   addTaskRow();
 }
 
+function setPhotoRequirementChecked(checked) {
+  if (!els.photoRequiredCheckbox || !els.requiredPhotoCount) return;
+
+  els.photoRequiredCheckbox.checked = Boolean(checked);
+  els.requiredPhotoCount.disabled = !Boolean(checked);
+
+  if (checked && Number(els.requiredPhotoCount.value || 0) <= 0) {
+    els.requiredPhotoCount.value = 10;
+  }
+}
+
+function hasSelectedHotelTaskRow() {
+  return $$("#taskRowsContainer .row-hotel").some((checkbox) => checkbox.checked);
+}
+
+function syncPhotoRequirementDefaultFromTaskTypes() {
+  if (photoRequirementTouched) return;
+  setPhotoRequirementChecked(hasSelectedHotelTaskRow());
+}
+
 function resetPhotoRequirementControls() {
-  if (els.photoRequiredCheckbox) els.photoRequiredCheckbox.checked = true;
+  photoRequirementTouched = false;
   if (els.requiredPhotoCount) {
     els.requiredPhotoCount.value = 10;
-    els.requiredPhotoCount.disabled = false;
   }
+  // Mặc định không bắt buộc đăng hình cho công việc thường.
+  // Khi Admin chọn Hotel, hệ thống sẽ tự bật mặc định nhưng Admin vẫn có thể bỏ chọn lại.
+  setPhotoRequirementChecked(false);
 }
 
 function setPhotoRequirementControlsFromTask(task = null) {
   if (!els.photoRequiredCheckbox || !els.requiredPhotoCount) return;
 
-  const required = task ? Boolean(task.photoRequired) : true;
+  const required = task ? Boolean(task.photoRequired) : false;
   const count = task ? getTaskRequiredPhotoCount(task) : 10;
 
-  els.photoRequiredCheckbox.checked = required;
+  photoRequirementTouched = Boolean(task);
   els.requiredPhotoCount.value = required ? Math.max(1, count) : 10;
-  els.requiredPhotoCount.disabled = !required;
+  setPhotoRequirementChecked(required);
 }
 
 function readPhotoRequirementOptions() {
@@ -1743,13 +1768,8 @@ function validatePhotoRequirementOptions(options) {
 }
 
 els.photoRequiredCheckbox?.addEventListener("change", () => {
-  const checked = Boolean(els.photoRequiredCheckbox.checked);
-  if (els.requiredPhotoCount) {
-    els.requiredPhotoCount.disabled = !checked;
-    if (checked && Number(els.requiredPhotoCount.value || 0) <= 0) {
-      els.requiredPhotoCount.value = 10;
-    }
-  }
+  photoRequirementTouched = true;
+  setPhotoRequirementChecked(Boolean(els.photoRequiredCheckbox.checked));
 });
 
 els.addTaskRowBtn.addEventListener("click", addTaskRow);
@@ -1766,6 +1786,10 @@ els.taskRowsContainer.addEventListener("change", (event) => {
 
   if (event.target.matches(".row-lunch-break, .row-hotel, .row-hours, .row-minutes")) {
     syncLunchBreakRowControls(row, event.target);
+
+    if (event.target.matches(".row-lunch-break, .row-hotel")) {
+      syncPhotoRequirementDefaultFromTaskTypes();
+    }
   }
 
   const titleInput = event.target.closest(".row-title");
