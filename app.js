@@ -1847,8 +1847,22 @@ function validateTaskRowsForDraft(rows) {
 // việc họ đã bấm hoàn thành hay chưa), công việc mới phải xếp hàng, chỉ thực sự bắt đầu
 // đếm giờ khi công việc trước đó (của chính người này) hết thời gian quy định.
 //
-// Trả về map { uid: mốc thời gian (ms) mà nhân viên đó RẢNH để bắt đầu việc tiếp theo }
-// dựa trên các công việc ĐÃ GIAO (khác "draft") hiện có trong state.tasks.
+// Trả về map { uid: mốc thời gian (ms) mà nhân viên đó RẢNH để bắt đầu việc tiếp theo }.
+// Chỉ các task nhân viên còn đang thực sự phải làm mới được tính vào hàng đợi.
+// Task đã báo hoàn thành/chờ Admin duyệt hoặc đã hoàn thành sẽ không còn giữ chỗ thời gian,
+// để nếu nhân viên làm xong sớm thì công việc mới được bắt đầu ngay thay vì phải chờ tới hạn cũ.
+function isTaskBlockingQueue(task) {
+  return Boolean(task?.assignedToUid)
+    && !["draft", "waiting_assignee", "submitted", "completed"].includes(task.status);
+}
+
+function getTaskQueueEndMs(task) {
+  const start = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt);
+  if (!start) return 0;
+
+  return start.getTime() + Number(task.deadlineMinutes || 0) * 60 * 1000;
+}
+
 function getEmployeeQueueEndMap(assignedToUids) {
   const map = {};
 
@@ -1859,12 +1873,9 @@ function getEmployeeQueueEndMap(assignedToUids) {
 
     state.tasks.forEach((task) => {
       if (task.assignedToUid !== uid) return;
-      if (["draft", "waiting_assignee"].includes(task.status)) return;
+      if (!isTaskBlockingQueue(task)) return;
 
-      const start = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt);
-      if (!start) return;
-
-      const end = start.getTime() + Number(task.deadlineMinutes || 0) * 60 * 1000;
+      const end = getTaskQueueEndMs(task);
       if (end > latestEnd) latestEnd = end;
     });
 
@@ -1872,6 +1883,71 @@ function getEmployeeQueueEndMap(assignedToUids) {
   });
 
   return map;
+}
+
+// Khi một task hoàn thành sớm, những task đang "Đang chờ đến lượt" của cùng nhân viên
+// cần được kéo lên sớm hơn. Nếu không, task mới/đang chờ vẫn bị kẹt tới mốc hạn cũ.
+async function reflowQueuedTasksForEmployee(employeeUid, completedTaskId = "", now = new Date()) {
+  if (!employeeUid) return 0;
+
+  const nowMs = now.getTime();
+  let latestActiveEndMs = 0;
+  const queuedTasks = [];
+
+  state.tasks.forEach((task) => {
+    if (task.id === completedTaskId) return;
+    if (task.assignedToUid !== employeeUid) return;
+    if (!isTaskBlockingQueue(task)) return;
+
+    const queueStart = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt);
+    const deadlineMinutes = Number(task.deadlineMinutes || 0);
+    if (!queueStart || deadlineMinutes <= 0) return;
+
+    if (queueStart.getTime() > nowMs) {
+      queuedTasks.push(task);
+      return;
+    }
+
+    latestActiveEndMs = Math.max(latestActiveEndMs, getTaskQueueEndMs(task));
+  });
+
+  if (!queuedTasks.length) return 0;
+
+  queuedTasks.sort((a, b) => {
+    const aStart = timestampToDate(a.queueStartAt)?.getTime() || 0;
+    const bStart = timestampToDate(b.queueStartAt)?.getTime() || 0;
+    if (aStart !== bStart) return aStart - bStart;
+    return Number(a.rowIndex || 0) - Number(b.rowIndex || 0);
+  });
+
+  let cursorMs = Math.max(nowMs, latestActiveEndMs);
+  const batch = writeBatch(db);
+  let changedCount = 0;
+
+  queuedTasks.forEach((task) => {
+    const deadlineMinutes = Number(task.deadlineMinutes || 0);
+    const newStartMs = cursorMs;
+    const newEndMs = newStartMs + deadlineMinutes * 60 * 1000;
+    cursorMs = newEndMs;
+
+    const oldStartMs = timestampToDate(task.queueStartAt)?.getTime() || 0;
+    const oldEndMs = timestampToDate(task.deadlineAt)?.getTime() || 0;
+
+    if (Math.abs(oldStartMs - newStartMs) < 1000 && Math.abs(oldEndMs - newEndMs) < 1000) {
+      return;
+    }
+
+    batch.update(doc(db, "tasks", task.id), {
+      queueStartAt: Timestamp.fromDate(new Date(newStartMs)),
+      deadlineAt: Timestamp.fromDate(new Date(newEndMs))
+    });
+    changedCount += 1;
+  });
+
+  if (!changedCount) return 0;
+
+  await batch.commit();
+  return changedCount;
 }
 
 // Tính mốc bắt đầu đếm giờ thực sự cho 1 công việc mới của 1 nhân viên, đồng thời
@@ -3836,6 +3912,8 @@ async function approveTask(taskId, button) {
       differencePercent: result.differencePercent
     });
 
+    await reflowQueuedTasksForEmployee(task.assignedToUid, taskId);
+
     const resultText = taskResultShortText(result);
 
     await createNotifications([
@@ -3896,6 +3974,8 @@ async function endLunchBreakTask(taskId, button) {
       differenceMinutes: result.differenceMinutes,
       differencePercent: result.differencePercent
     });
+
+    await reflowQueuedTasksForEmployee(task.assignedToUid, taskId);
 
     const notifications = [
       {
