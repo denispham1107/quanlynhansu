@@ -2561,6 +2561,7 @@ function getCompletedTaskActualMinutes(task) {
 
 function getCompletedTypeFilterLabel(value) {
   const labels = {
+    normal: "Công việc bình thường",
     lunch_break: "Đã nghỉ trưa",
     hotel: "Hotel đã làm"
   };
@@ -2569,9 +2570,44 @@ function getCompletedTypeFilterLabel(value) {
 }
 
 function getCompletedReportTitle(filterValue) {
+  if (filterValue === "normal") {
+    return "Báo cáo tổng kết các task Công việc bình thường đã hoàn thành";
+  }
+
   return filterValue === "lunch_break"
     ? "Báo cáo tổng thời gian các task Nghỉ trưa đã hoàn thành"
     : "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
+}
+
+function getCompletedNormalTaskStats(task) {
+  const deadlineMinutes = Number(task.deadlineMinutes || 0);
+  const actualMinutes = Number(task.actualMinutes || 0) > 0
+    ? Number(task.actualMinutes || 0)
+    : getCompletedTaskActualMinutes(task);
+
+  return {
+    deadlineMinutes: Math.max(0, deadlineMinutes),
+    actualMinutes: Math.max(0, actualMinutes)
+  };
+}
+
+function formatNormalCompletedSummary(name, stats) {
+  const actualMinutes = Number(stats.actualMinutes || 0);
+  const deadlineMinutes = Number(stats.deadlineMinutes || 0);
+  const differenceMinutes = Math.abs(deadlineMinutes - actualMinutes);
+  const differencePercent = deadlineMinutes > 0
+    ? Number(((differenceMinutes / deadlineMinutes) * 100).toFixed(1))
+    : 0;
+
+  let resultText = `đúng thời gian quy định 0 phút (${differencePercent}%)`;
+
+  if (actualMinutes < deadlineMinutes) {
+    resultText = `làm nhanh hơn ${differenceMinutes} phút (${differencePercent}%) so với quy định`;
+  } else if (actualMinutes > deadlineMinutes) {
+    resultText = `làm chậm hơn ${differenceMinutes} phút (${differencePercent}%) so với quy định`;
+  }
+
+  return `${name}: ${resultText} • Thời gian thực tế ${formatMinutes(actualMinutes)} • Thời gian quy định ${formatMinutes(deadlineMinutes)}`;
 }
 
 function renderCompletedTypeReport(tasks, scope = "admin") {
@@ -2583,11 +2619,38 @@ function renderCompletedTypeReport(tasks, scope = "admin") {
 
   const shouldShowReport =
     statusFilter === "completed" &&
-    ["lunch_break", "hotel"].includes(completedTypeFilter);
+    ["normal", "lunch_break", "hotel"].includes(completedTypeFilter);
 
   if (!shouldShowReport) {
     reportEl.classList.add("hidden");
     reportEl.innerHTML = "";
+    return;
+  }
+
+  if (completedTypeFilter === "normal") {
+    const totalsByEmployee = new Map();
+
+    tasks.forEach((task) => {
+      const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+      const current = totalsByEmployee.get(employeeName) || { actualMinutes: 0, deadlineMinutes: 0 };
+      const taskStats = getCompletedNormalTaskStats(task);
+
+      totalsByEmployee.set(employeeName, {
+        actualMinutes: current.actualMinutes + taskStats.actualMinutes,
+        deadlineMinutes: current.deadlineMinutes + taskStats.deadlineMinutes
+      });
+    });
+
+    const rows = Array.from(totalsByEmployee.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], "vi"))
+      .map(([name, stats]) => `<span>${escapeHtml(formatNormalCompletedSummary(name, stats))}</span>`)
+      .join("");
+
+    reportEl.classList.remove("hidden");
+    reportEl.innerHTML = `
+      <strong>${escapeHtml(getCompletedReportTitle(completedTypeFilter))}</strong>
+      ${rows || "<span>Chưa có dữ liệu phù hợp</span>"}
+    `;
     return;
   }
 
