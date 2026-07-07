@@ -436,6 +436,7 @@ function statusLabel(status) {
     waiting_assignee: "Chờ chọn người",
     queued: "Đang chờ đến lượt",
     lunch_break: "Nghỉ trưa",
+    lunch_completed: "Đã nghỉ trưa",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
@@ -450,6 +451,7 @@ function statusLabel(status) {
 function getDisplayStatus(task) {
   if (task.status === "draft") return "draft";
   if (task.status === "waiting_assignee" || !task.assignedToUid) return "waiting_assignee";
+  if (task.status === "completed" && isLunchBreakTask(task)) return "lunch_completed";
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
   if (task.status === "lunch_break" || (task.isLunchBreak && task.status === "doing")) return "lunch_break";
@@ -488,6 +490,7 @@ function taskCardClass(displayStatus) {
     waiting_assignee: "is-waiting-assignee",
     queued: "is-queued",
     lunch_break: "is-lunch-break",
+    lunch_completed: "is-lunch-completed",
     doing: "",
     near_due: "is-near-due",
     overdue: "is-overdue",
@@ -2395,7 +2398,7 @@ function renderAdminTasks() {
     )).length,
     submitted: baseFiltered.filter((task) => task.displayStatus === "submitted").length,
     overdue: baseFiltered.filter((task) => task.displayStatus === "overdue").length,
-    completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
+    completed: baseFiltered.filter((task) => task.displayStatus === "completed" || task.displayStatus === "lunch_completed").length
   };
 
   els.statDoing.textContent = stats.doing;
@@ -2406,10 +2409,17 @@ function renderAdminTasks() {
   let filtered = baseFiltered;
 
   if (state.adminStatusFilter !== "all") {
-    filtered = filtered.filter((task) => (
-      task.displayStatus === state.adminStatusFilter ||
-      task.status === state.adminStatusFilter
-    ));
+    filtered = filtered.filter((task) => {
+      if (state.adminStatusFilter === "completed") {
+        return task.displayStatus === "completed";
+      }
+
+      if (state.adminStatusFilter === "lunch_completed") {
+        return task.displayStatus === "lunch_completed";
+      }
+
+      return task.displayStatus === state.adminStatusFilter || task.status === state.adminStatusFilter;
+    });
   }
 
   refreshDateFilterVisibility("admin");
@@ -2661,7 +2671,7 @@ function renderTaskCard(task, mode) {
     task.status === "submitted";
 
   return `
-    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}">
+    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
       <div class="task-top">
         <div>
           <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
@@ -2712,6 +2722,7 @@ function renderTaskCard(task, mode) {
       ${renderTaskActions(task, {
         canEmployeeSubmit,
         canAdminReview,
+        canAdminEndLunchBreak: canAdminEndLunchBreak(task, mode),
         canAdminExtendTime: canAdminExtendTaskTime(task, mode),
         canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
         submitPhotoReady: hasEnoughRequiredPhotos(task)
@@ -2728,6 +2739,7 @@ function getInitialCountdownText(task) {
       ? `Tạm dừng - còn ${formatCountdown(remainingMs)}`
       : `Chờ chọn người - chưa bắt đầu`;
   }
+  if (task.status === "completed" && isLunchBreakTask(task)) return "Đã nghỉ trưa";
   if (task.status === "completed") return "Đã hoàn thành";
   if (task.status === "submitted") return "Chờ Admin duyệt";
 
@@ -2829,6 +2841,7 @@ function renderPhotoReportBox(task, mode) {
 }
 
 function renderResultBox(task) {
+  if (isLunchBreakTask(task)) return "";
   if (task.status !== "completed" || !task.resultType) return "";
 
   let summary = "Hoàn thành đúng thời gian quy định.";
@@ -2847,6 +2860,13 @@ function renderResultBox(task) {
       <span>Thời gian thực tế: ${formatMinutes(task.actualMinutes)} • Thời gian quy định: ${formatMinutes(task.deadlineMinutes)}</span>
     </div>
   `;
+}
+
+function canAdminEndLunchBreak(task, mode) {
+  return mode === "admin"
+    && state.profile?.role === "admin"
+    && isLunchBreakTask(task)
+    && task.status === "lunch_break";
 }
 
 function canAdminExtendTaskTime(task, mode) {
@@ -2921,6 +2941,14 @@ function renderTaskActions(task, permissions) {
     `);
   }
 
+  if (permissions.canAdminEndLunchBreak) {
+    buttons.push(`
+      <button class="btn primary" data-action="end-lunch-break" data-task-id="${escapeHtml(task.id)}">
+        Kết thúc
+      </button>
+    `);
+  }
+
   if (permissions.canAdminReview) {
     buttons.push(`
       <button class="btn secondary" data-action="approve-task" data-task-id="${escapeHtml(task.id)}">
@@ -2971,6 +2999,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "approve-task") {
     await approveTask(taskId, button);
+  }
+
+  if (action === "end-lunch-break") {
+    await endLunchBreakTask(taskId, button);
   }
 
   if (action === "redo-task") {
@@ -3801,6 +3833,69 @@ async function approveTask(taskId, button) {
   }
 }
 
+async function endLunchBreakTask(taskId, button) {
+  setButtonLoading(button, true, "Đang kết thúc...");
+
+  try {
+    const taskSnap = await getDoc(doc(db, "tasks", taskId));
+
+    if (!taskSnap.exists()) {
+      throw new Error("Không tìm thấy phiếu Nghỉ trưa.");
+    }
+
+    const task = {
+      id: taskSnap.id,
+      ...taskSnap.data()
+    };
+
+    if (!isLunchBreakTask(task) || task.status !== "lunch_break") {
+      throw new Error("Chỉ có thể kết thúc trực tiếp task đang ở trạng thái Nghỉ trưa.");
+    }
+
+    const result = calculateResultAt(task, new Date());
+
+    await updateDoc(doc(db, "tasks", taskId), {
+      status: "completed",
+      submittedAt: serverTimestamp(),
+      approvedAt: serverTimestamp(),
+      actualMinutes: result.actualMinutes,
+      resultType: result.resultType,
+      differenceMinutes: result.differenceMinutes,
+      differencePercent: result.differencePercent
+    });
+
+    const notifications = [
+      {
+        recipientUid: state.user.uid,
+        type: "task_approved_admin",
+        title: "Đã kết thúc nghỉ trưa",
+        message: `Bạn đã kết thúc phiếu Nghỉ trưa “${task.title}” của ${task.assignedToName || "nhân viên"}.`,
+        taskId,
+        taskTitle: task.title
+      }
+    ];
+
+    if (task.assignedToUid) {
+      notifications.unshift({
+        recipientUid: task.assignedToUid,
+        type: "task_approved",
+        title: "Phiếu Nghỉ trưa đã kết thúc",
+        message: `Admin đã kết thúc phiếu Nghỉ trưa “${task.title}”.`,
+        taskId,
+        taskTitle: task.title
+      });
+    }
+
+    await createNotifications(notifications);
+    toast("Đã kết thúc phiếu Nghỉ trưa và chuyển sang trạng thái Đã nghỉ trưa.", "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không kết thúc được phiếu Nghỉ trưa.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 function taskResultShortText(result) {
   if (result.resultType === "faster") return `nhanh hơn ${result.differenceMinutes} phút (${result.differencePercent}%)`;
   if (result.resultType === "slower") return `chậm hơn ${result.differenceMinutes} phút (${result.differencePercent}%)`;
@@ -3842,14 +3937,23 @@ async function requestRedo(taskId, button) {
 
 function calculateResult(task) {
   const submittedAt = timestampToDate(task.submittedAt);
+
+  if (!submittedAt) {
+    throw new Error("Thiếu thời gian nhân viên báo hoàn thành.");
+  }
+
+  return calculateResultAt(task, submittedAt);
+}
+
+function calculateResultAt(task, completedAt) {
   const activeStartAt = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt) || timestampToDate(task.createdAt);
 
-  if (!activeStartAt || !submittedAt) {
-    throw new Error("Thiếu thời gian bắt đầu hoặc thời gian nhân viên báo hoàn thành.");
+  if (!activeStartAt || !(completedAt instanceof Date)) {
+    throw new Error("Thiếu thời gian bắt đầu hoặc thời gian hoàn thành.");
   }
 
   const accumulatedWorkedMs = Number(task.accumulatedWorkedMs || 0);
-  const actualMs = accumulatedWorkedMs + Math.max(0, submittedAt.getTime() - activeStartAt.getTime());
+  const actualMs = accumulatedWorkedMs + Math.max(0, completedAt.getTime() - activeStartAt.getTime());
   const actualMinutes = Math.max(0, Math.ceil(actualMs / 60000));
 
   const deadlineMinutes = Number(task.deadlineMinutes || 0);
@@ -3899,7 +4003,7 @@ function updateCountdowns() {
     }
 
     if (rawStatus === "completed") {
-      countdown.textContent = "Đã hoàn thành";
+      countdown.textContent = card.dataset.displayStatus === "lunch_completed" ? "Đã nghỉ trưa" : "Đã hoàn thành";
       return;
     }
 
