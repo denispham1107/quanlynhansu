@@ -80,6 +80,8 @@ const state = {
   adminStatusFilter: "all",
   adminCompletedTypeFilter: "all",
   adminEmployeeFilter: "all",
+  adminHotelReportHygiene: "pending",
+  adminHotelEndPetCount: "",
   employeeStatusFilter: "all",
   employeeCompletedTypeFilter: "all",
   adminDateFilter: {
@@ -2046,7 +2048,7 @@ function syncLunchBreakRowControls(row, changedInput = null) {
     applyHotelTimeFromPetCount(row);
 
     if (hotelTimePreview) {
-      hotelTimePreview.innerHTML = `Tổng số lượng bé ở hôm nay là <strong>${petCount}</strong>, tổng thời gian được phép cho tất cả các lần tạo phiếu là <strong>${formatMinutes(allowedMinutes)}</strong>.`;
+      hotelTimePreview.innerHTML = `Thời gian Hotel được tự động tính: <strong>${formatMinutes(allowedMinutes)}</strong> cho <strong>${petCount}</strong> bé.`;
     }
     return;
   }
@@ -2836,6 +2838,29 @@ els.adminCompletedTypeFilter?.addEventListener("change", (event) => {
   renderAdminTasks();
 });
 
+els.adminCompletedTypeReport?.addEventListener("change", (event) => {
+  const target = event.target;
+
+  if (target?.matches?.("[data-admin-hotel-hygiene]")) {
+    state.adminHotelReportHygiene = target.value || "pending";
+    renderAdminTasks();
+  }
+
+  if (target?.matches?.("[data-admin-hotel-end-pet-count]")) {
+    state.adminHotelEndPetCount = target.value;
+    renderAdminTasks();
+  }
+});
+
+els.adminCompletedTypeReport?.addEventListener("input", (event) => {
+  const target = event.target;
+
+  if (target?.matches?.("[data-admin-hotel-end-pet-count]")) {
+    state.adminHotelEndPetCount = target.value;
+    renderAdminTasks();
+  }
+});
+
 els.employeeStatusFilter?.addEventListener("change", (event) => {
   state.employeeStatusFilter = event.target.value;
 
@@ -3018,6 +3043,59 @@ function formatNormalCompletedSummary(name, stats) {
   return `${name}: năng lực làm đạt ${capacityPercent}% so với năng lực quy định`;
 }
 
+function getHotelHygieneStatusText(value) {
+  if (value === "pass") return "Vệ sinh đạt";
+  if (value === "fail") return "Vệ sinh không đạt";
+  return "Chưa đánh giá";
+}
+
+function getAdminCompletedHotelTasksForCurrentDate() {
+  return state.tasks
+    .map((task) => ({
+      ...task,
+      displayStatus: getDisplayStatus(task)
+    }))
+    .filter((task) => isTaskInDateFilter(task, state.adminDateFilter))
+    .filter((task) => task.displayStatus === "completed")
+    .filter((task) => getCompletedTaskGroup(task) === "hotel");
+}
+
+function renderAdminHotelReportControls() {
+  const hygieneValue = state.adminHotelReportHygiene || "pending";
+  const endPetCountRaw = state.adminHotelEndPetCount ?? "";
+  const endPetCount = normalizeHotelPetCount(endPetCountRaw);
+  const allowedMinutes = endPetCount ? calculateHotelAllowedMinutes(endPetCount) : 0;
+  const allCompletedHotelTasks = getAdminCompletedHotelTasksForCurrentDate();
+  const totalActualMinutes = allCompletedHotelTasks.reduce((sum, task) => (
+    sum + getCompletedTaskActualMinutes(task)
+  ), 0);
+
+  let timeStatusText = "Chưa nhập số lượng bé hotel cuối ngày";
+  if (endPetCount) {
+    timeStatusText = totalActualMinutes <= allowedMinutes
+      ? "Các bạn hôm nay làm đúng thời gian"
+      : "Các bạn hôm nay làm không đúng thời gian";
+  }
+
+  return `
+    <label class="hotel-report-control">
+      <span>Vệ sinh</span>
+      <select data-admin-hotel-hygiene>
+        <option value="pending" ${hygieneValue === "pending" ? "selected" : ""}>Chưa đánh giá</option>
+        <option value="pass" ${hygieneValue === "pass" ? "selected" : ""}>Đạt</option>
+        <option value="fail" ${hygieneValue === "fail" ? "selected" : ""}>Không đạt</option>
+      </select>
+    </label>
+    <label class="hotel-report-control hotel-report-pet-control">
+      <span>Số lượng bé ở hotel cuối ngày</span>
+      <input data-admin-hotel-end-pet-count type="number" min="1" max="500" step="1" value="${escapeHtml(endPetCountRaw)}" placeholder="Nhập số bé" />
+    </label>
+    <span class="hotel-report-hygiene-status">${escapeHtml(getHotelHygieneStatusText(hygieneValue))}</span>
+    <span class="hotel-report-end-time">Thời gian làm hotel cuối ngày: ${endPetCount ? escapeHtml(formatMinutes(allowedMinutes)) : "--"}</span>
+    <span class="hotel-report-time-status">${escapeHtml(timeStatusText)}</span>
+  `;
+}
+
 function renderCompletedTypeReport(tasks, scope = "admin") {
   const statusFilter = state[`${scope}StatusFilter`];
   const completedTypeFilter = state[`${scope}CompletedTypeFilter`];
@@ -3075,9 +3153,14 @@ function renderCompletedTypeReport(tasks, scope = "admin") {
     .map(([name, minutes]) => `<span>${escapeHtml(name)}: ${escapeHtml(formatMinutes(minutes))}</span>`)
     .join("");
 
+  const adminHotelControls = scope === "admin" && completedTypeFilter === "hotel"
+    ? renderAdminHotelReportControls()
+    : "";
+
   reportEl.classList.remove("hidden");
   reportEl.innerHTML = `
     <strong>${escapeHtml(getCompletedReportTitle(completedTypeFilter))}</strong>
+    ${adminHotelControls}
     ${rows || "<span>Chưa có dữ liệu phù hợp</span>"}
   `;
 }
@@ -3353,18 +3436,12 @@ function getTaskHotelAllowedMinutes(task) {
 function renderHotelInfoBox(task) {
   if (!isHotelTask(task)) return "";
 
-  const petCount = getHotelPetCount(task);
-  const allowedMinutes = getTaskHotelAllowedMinutes(task);
-
   return `
     <div class="hotel-info-box">
       <strong>
         <span class="hotel-highlight">10 bé</span> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <span class="hotel-highlight">30 phút</span>.
         Cứ <span class="hotel-highlight">mỗi 1 bé vào</span> ở thêm thì sẽ cộng thêm thời gian cho <span class="hotel-highlight">2 phút</span>.
       </strong>
-      <span>
-        Tổng số lượng bé ở hôm nay là <strong>${petCount}</strong>, tổng thời gian được phép cho tất cả các lần tạo phiếu là <strong>${escapeHtml(formatMinutes(allowedMinutes))}</strong>.
-      </span>
     </div>
   `;
 }
