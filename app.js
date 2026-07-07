@@ -302,6 +302,10 @@ function isLunchBreakTask(task) {
   return Boolean(task?.isLunchBreak);
 }
 
+function isHotelTask(task) {
+  return Boolean(task?.isHotel);
+}
+
 function isActiveLunchBreakTask(task) {
   return isLunchBreakTask(task)
     && Boolean(task?.assignedToUid)
@@ -377,6 +381,12 @@ function validateLunchBreakAssignment(task, employeeUid) {
   return null;
 }
 
+function getActiveTaskStatusFromFlags(value = {}) {
+  if (value.isLunchBreak) return "lunch_break";
+  if (value.isHotel) return "hotel";
+  return "doing";
+}
+
 function formatDateOnly(value) {
   if (!value) return "--";
   const [year, month, day] = String(value).split("-");
@@ -436,6 +446,7 @@ function statusLabel(status) {
     waiting_assignee: "Chờ chọn người",
     queued: "Đang chờ đến lượt",
     lunch_break: "Nghỉ trưa",
+    hotel: "Hotel",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
@@ -453,6 +464,7 @@ function getDisplayStatus(task) {
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
   if (task.status === "lunch_break" || (task.isLunchBreak && task.status === "doing")) return "lunch_break";
+  if (task.status === "hotel" || (task.isHotel && task.status === "doing")) return "hotel";
 
   // Công việc đã giao nhưng nhân viên chưa tới lượt (vẫn còn đang trong thời gian
   // quy định của (các) công việc được giao trước đó cho chính người này).
@@ -488,6 +500,7 @@ function taskCardClass(displayStatus) {
     waiting_assignee: "is-waiting-assignee",
     queued: "is-queued",
     lunch_break: "is-lunch-break",
+    hotel: "is-hotel",
     doing: "",
     near_due: "is-near-due",
     overdue: "is-overdue",
@@ -1538,11 +1551,18 @@ function createTaskRowElement(prefill = null) {
         </select>
       </label>
     </div>
-    <label class="checkbox-line lunch-break-line">
-      <input type="checkbox" class="row-lunch-break" />
-      Nghỉ trưa
-    </label>
+    <div class="task-type-options">
+      <label class="checkbox-line lunch-break-line">
+        <input type="checkbox" class="row-lunch-break" />
+        Nghỉ trưa
+      </label>
+      <label class="checkbox-line hotel-line">
+        <input type="checkbox" class="row-hotel" />
+        Hotel
+      </label>
+    </div>
     <p class="small-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
+    <p class="small-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới.</p>
     <div class="two-col">
       <label>
         Số giờ
@@ -1572,6 +1592,10 @@ function createTaskRowElement(prefill = null) {
 
     if (prefill.isLunchBreak) {
       wrapper.querySelector(".row-lunch-break").checked = true;
+    }
+
+    if (prefill.isHotel) {
+      wrapper.querySelector(".row-hotel").checked = true;
     }
   }
 
@@ -1610,21 +1634,35 @@ function updateTaskRowHeadings() {
   });
 }
 
-function syncLunchBreakRowControls(row) {
+function syncLunchBreakRowControls(row, changedInput = null) {
   if (!row) return;
 
-  const checkbox = row.querySelector(".row-lunch-break");
+  const lunchCheckbox = row.querySelector(".row-lunch-break");
+  const hotelCheckbox = row.querySelector(".row-hotel");
   const hoursInput = row.querySelector(".row-hours");
   const minutesInput = row.querySelector(".row-minutes");
   const titleInput = row.querySelector(".row-title");
-  const note = row.querySelector(".lunch-break-note");
-  const checked = Boolean(checkbox?.checked);
+  const lunchNote = row.querySelector(".lunch-break-note");
+  const hotelNote = row.querySelector(".hotel-note");
 
-  note?.classList.toggle("hidden", !checked);
+  // Hai loại đặc biệt không được chọn cùng lúc.
+  if (changedInput?.matches?.(".row-lunch-break") && lunchCheckbox?.checked && hotelCheckbox) {
+    hotelCheckbox.checked = false;
+  }
+
+  if (changedInput?.matches?.(".row-hotel") && hotelCheckbox?.checked && lunchCheckbox) {
+    lunchCheckbox.checked = false;
+  }
+
+  const isLunch = Boolean(lunchCheckbox?.checked);
+  const isHotel = Boolean(hotelCheckbox?.checked);
+
+  lunchNote?.classList.toggle("hidden", !isLunch);
+  hotelNote?.classList.toggle("hidden", !isHotel);
 
   if (!hoursInput || !minutesInput) return;
 
-  if (checked) {
+  if (isLunch) {
     if (!titleInput.value.trim()) titleInput.value = "Nghỉ trưa";
 
     const totalMinutes = (Number(hoursInput.value || 0) * 60) + Number(minutesInput.value || 0);
@@ -1635,12 +1673,17 @@ function syncLunchBreakRowControls(row) {
     minutesInput.min = 1;
     minutesInput.max = LUNCH_BREAK_MAX_MINUTES_PER_DAY;
     minutesInput.value = nextMinutes;
-  } else {
-    hoursInput.max = 168;
-    minutesInput.min = 0;
-    minutesInput.max = 59;
-    if (Number(minutesInput.value || 0) < 0) minutesInput.value = 0;
+    return;
   }
+
+  if (isHotel && !titleInput.value.trim()) {
+    titleInput.value = "Hotel";
+  }
+
+  hoursInput.max = 168;
+  minutesInput.min = 0;
+  minutesInput.max = 59;
+  if (Number(minutesInput.value || 0) < 0) minutesInput.value = 0;
 }
 
 function resetTaskRows() {
@@ -1713,8 +1756,8 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   const row = event.target.closest(".task-row");
   if (!row) return;
 
-  if (event.target.matches(".row-lunch-break, .row-hours, .row-minutes")) {
-    syncLunchBreakRowControls(row);
+  if (event.target.matches(".row-lunch-break, .row-hotel, .row-hours, .row-minutes")) {
+    syncLunchBreakRowControls(row, event.target);
   }
 
   const titleInput = event.target.closest(".row-title");
@@ -1763,6 +1806,7 @@ function openEditWorkOrderModal(workOrderId) {
         taskDate: task.taskDate,
         assignedToUid: task.assignedToUid,
         isLunchBreak: Boolean(task.isLunchBreak),
+        isHotel: Boolean(task.isHotel),
         hours: Math.floor(deadlineMinutes / 60),
         minutes: deadlineMinutes % 60
       }));
@@ -1794,6 +1838,7 @@ function readTaskRowsData() {
     const taskDate = row.querySelector(".row-date").value;
     const assignedToUid = row.querySelector(".row-assignee").value;
     const isLunchBreak = Boolean(row.querySelector(".row-lunch-break")?.checked);
+    const isHotel = Boolean(row.querySelector(".row-hotel")?.checked);
     const hours = Number(row.querySelector(".row-hours").value || 0);
     const minutes = Number(row.querySelector(".row-minutes").value || 0);
     const deadlineMinutes = hours * 60 + minutes;
@@ -1807,7 +1852,8 @@ function readTaskRowsData() {
       assignedToUid,
       assignedEmployee,
       deadlineMinutes,
-      isLunchBreak
+      isLunchBreak,
+      isHotel
     };
   });
 }
@@ -1822,6 +1868,7 @@ function validateTaskRows(rows) {
 
     if (!row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
     if (row.assignedToUid && !row.assignedEmployee) return `${rowLabel}: nhân viên được chọn không hợp lệ.`;
+    if (row.isLunchBreak && row.isHotel) return `${rowLabel}: chỉ được chọn Nghỉ trưa hoặc Hotel, không chọn cả hai.`;
     if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
     if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
   }
@@ -2052,6 +2099,7 @@ async function persistWorkOrder(dispatch, button) {
         createdAt: serverTimestamp(),
         deadlineMinutes,
         isLunchBreak: Boolean(row.isLunchBreak),
+        isHotel: Boolean(row.isHotel),
         deadlineAt: null,
         dispatchedAt: null,
         queueStartAt: null,
@@ -2065,7 +2113,8 @@ async function persistWorkOrder(dispatch, button) {
         resultType: null,
         differenceMinutes: null,
         differencePercent: null,
-        // Phiếu Nghỉ trưa là thời gian nghỉ, không bắt buộc nhân viên đăng hình báo cáo.
+        // Phiếu Nghỉ trưa là thời gian nghỉ nên không bắt buộc đăng hình.
+        // Phiếu Hotel vẫn áp dụng đúng cài đặt bắt buộc đăng hình của Admin.
         photoRequired: row.isLunchBreak ? false : photoOptions.photoRequired,
         requiredPhotoCount: row.isLunchBreak ? 0 : photoOptions.requiredPhotoCount,
         photos: [],
@@ -2077,7 +2126,7 @@ async function persistWorkOrder(dispatch, button) {
         if (assignedToUid) {
           const { queueStartDate, deadlineDate } = reserveQueueSlot(employeeQueueEnd, assignedToUid, deadlineMinutes, now);
 
-          taskData.status = row.isLunchBreak ? "lunch_break" : "doing";
+          taskData.status = getActiveTaskStatusFromFlags(row);
           taskData.dispatchedAt = serverTimestamp();
           taskData.queueStartAt = Timestamp.fromDate(queueStartDate);
           taskData.deadlineAt = Timestamp.fromDate(deadlineDate);
@@ -2187,7 +2236,8 @@ async function dispatchWorkOrder(workOrderId, button) {
     assignedToUid: task.assignedToUid,
     assignedEmployee: state.employees.find((employee) => employee.uid === task.assignedToUid),
     deadlineMinutes: Number(task.deadlineMinutes || 0),
-    isLunchBreak: Boolean(task.isLunchBreak)
+    isLunchBreak: Boolean(task.isLunchBreak),
+    isHotel: Boolean(task.isHotel)
   })));
 
   if (lunchValidationError) {
@@ -2228,7 +2278,7 @@ async function dispatchWorkOrder(workOrderId, button) {
       );
 
       batch.update(doc(db, "tasks", task.id), {
-        status: task.isLunchBreak ? "lunch_break" : "doing",
+        status: getActiveTaskStatusFromFlags(task),
         dispatchedAt: serverTimestamp(),
         queueStartAt: Timestamp.fromDate(queueStartDate),
         deadlineAt: Timestamp.fromDate(deadlineDate),
@@ -2372,7 +2422,7 @@ async function syncOverdueTasksByAdmin() {
   if (state.profile?.role !== "admin") return;
 
   const updates = state.tasks
-    .filter((task) => ["doing", "redo"].includes(task.status))
+    .filter((task) => ["doing", "hotel", "redo"].includes(task.status))
     .filter((task) => {
       const deadline = timestampToDate(task.deadlineAt);
       return deadline && deadline.getTime() < Date.now();
@@ -2466,6 +2516,7 @@ function renderAdminTasks() {
     doing: baseFiltered.filter((task) => (
       task.displayStatus === "doing" ||
       task.displayStatus === "lunch_break" ||
+      task.displayStatus === "hotel" ||
       task.displayStatus === "near_due" ||
       task.displayStatus === "redo"
     )).length,
@@ -2660,8 +2711,8 @@ function canAdminReassignTask(task, mode, displayStatus = null) {
   const visibleStatus = displayStatus || getDisplayStatus(task);
 
   return (
-    ["waiting_assignee", "doing", "lunch_break", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
-    && ["waiting_assignee", "doing", "lunch_break", "redo", "overdue"].includes(task.status)
+    ["waiting_assignee", "doing", "lunch_break", "hotel", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
+    && ["waiting_assignee", "doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status)
   );
 }
 
@@ -2731,7 +2782,7 @@ function renderTaskCard(task, mode) {
 
   const canEmployeeSubmit =
     mode === "employee" &&
-    ["doing", "lunch_break", "redo", "overdue"].includes(task.status) &&
+    ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status) &&
     task.status !== "completed" &&
     task.status !== "submitted" &&
     displayStatus !== "queued";
@@ -2979,15 +3030,15 @@ function canAdminEndLunchBreak(task, mode) {
 }
 
 function canAdminExtendTaskTime(task, mode) {
-  return mode === "admin" && ["doing", "redo", "overdue"].includes(task.status);
+  return mode === "admin" && ["doing", "hotel", "redo", "overdue"].includes(task.status);
 }
 
 function canEmployeeUploadTaskPhotos(task, mode, displayStatus = null) {
   if (mode !== "employee") return false;
   if (!task?.id || task.assignedToUid !== state.user?.uid) return false;
   const visibleStatus = displayStatus || getDisplayStatus(task);
-  return ["doing", "lunch_break", "redo", "overdue", "near_due"].includes(visibleStatus)
-    && ["doing", "lunch_break", "redo", "overdue"].includes(task.status);
+  return ["doing", "lunch_break", "hotel", "redo", "overdue", "near_due"].includes(visibleStatus)
+    && ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status);
 }
 
 function renderTimeExtensionBox(task) {
@@ -3501,7 +3552,7 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
     };
 
     if (isWaitingAssignee || wasQueued) {
-      updateData.status = task.isLunchBreak ? "lunch_break" : "doing";
+      updateData.status = getActiveTaskStatusFromFlags(task);
       updateData.dispatchedAt = serverTimestamp();
       updateData.queueStartAt = Timestamp.fromDate(now);
       updateData.deadlineAt = Timestamp.fromDate(new Date(now.getTime() + resumeMs));

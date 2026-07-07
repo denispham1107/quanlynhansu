@@ -430,18 +430,43 @@
       }
     }
 
-    .lunch-break-line {
+    .task-type-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .lunch-break-line,
+    .hotel-line {
       width: fit-content;
       padding: 10px 12px;
-      border: 1px dashed #99f6e4;
       border-radius: 14px;
+    }
+
+    .lunch-break-line {
+      border: 1px dashed #99f6e4;
       background: #f0fdfa;
       color: #0f766e;
     }
 
-    .lunch-break-note {
+    .hotel-line {
+      border: 1px dashed #bfdbfe;
+      background: #eff6ff;
+      color: #1d4ed8;
+    }
+
+    .lunch-break-note,
+    .hotel-note {
       margin: -4px 0 0;
+    }
+
+    .lunch-break-note {
       color: #0f766e;
+    }
+
+    .hotel-note {
+      color: #1d4ed8;
     }
 
     .status-lunch_break {
@@ -449,8 +474,17 @@
       color: #0f766e;
     }
 
+    .status-hotel {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
     .task-card.is-lunch-break {
       border-left-color: #14b8a6;
+    }
+
+    .task-card.is-hotel {
+      border-left-color: #2563eb;
     }
 
     @media (max-width: 640px) {
@@ -556,6 +590,7 @@
               <option value="draft">Chưa giao việc</option>
               <option value="waiting_assignee">Chờ chọn người</option>
               <option value="lunch_break">Nghỉ trưa</option>
+              <option value="hotel">Hotel</option>
               <option value="doing">Đang làm</option>
               <option value="near_due">Gần hết giờ</option>
               <option value="overdue">Quá hạn</option>
