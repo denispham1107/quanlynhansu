@@ -772,6 +772,25 @@
             <p class="muted">Bấm “Hoàn thành” khi đã làm xong để gửi Admin duyệt.</p>
           </div>
           <div class="filters enhanced-filters employee-date-filters">
+            <select id="employeeStatusFilter" aria-label="Lọc trạng thái công việc của tôi">
+              <option value="all">Tất cả trạng thái</option>
+              <option value="draft">Chưa giao việc</option>
+              <option value="waiting_assignee">Chờ chọn người</option>
+              <option value="lunch_break">Nghỉ trưa</option>
+              <option value="hotel">Hotel</option>
+              <option value="doing">Đang làm</option>
+              <option value="near_due">Gần hết giờ</option>
+              <option value="overdue">Quá hạn</option>
+              <option value="submitted">Chờ xác nhận</option>
+              <option value="completed">Đã hoàn thành</option>
+              <option value="redo">Yêu cầu làm lại</option>
+            </select>
+            <select id="employeeCompletedTypeFilter" class="completed-subfilter hidden" aria-label="Lọc nhóm công việc đã hoàn thành của tôi">
+              <option value="all">Tất cả đã hoàn thành</option>
+              <option value="normal">Công việc bình thường</option>
+              <option value="lunch_break">Đã nghỉ trưa</option>
+              <option value="hotel">Hotel đã làm</option>
+            </select>
             <select id="employeeDateMode" aria-label="Lọc thời gian công việc của tôi">
               <option value="all">Tất cả ngày</option>
               <option value="today">Hôm nay</option>
@@ -785,6 +804,7 @@
           </div>
         </div>
         <p id="employeeDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
+        <div id="employeeCompletedTypeReport" class="completed-type-report hidden"></div>
         <div id="employeeTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>
     </main>

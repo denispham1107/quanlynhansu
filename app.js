@@ -79,6 +79,8 @@ const state = {
   adminStatusFilter: "all",
   adminCompletedTypeFilter: "all",
   adminEmployeeFilter: "all",
+  employeeStatusFilter: "all",
+  employeeCompletedTypeFilter: "all",
   adminDateFilter: {
     mode: "today",
     single: "",
@@ -150,6 +152,9 @@ const els = {
   adminClearDateFilter: $("#adminClearDateFilter"),
   adminDateSummary: $("#adminDateSummary"),
   adminTaskList: $("#adminTaskList"),
+  employeeStatusFilter: $("#employeeStatusFilter"),
+  employeeCompletedTypeFilter: $("#employeeCompletedTypeFilter"),
+  employeeCompletedTypeReport: $("#employeeCompletedTypeReport"),
   employeeDateMode: $("#employeeDateMode"),
   employeeSingleDate: $("#employeeSingleDate"),
   employeeDateFrom: $("#employeeDateFrom"),
@@ -2426,6 +2431,21 @@ els.adminCompletedTypeFilter?.addEventListener("change", (event) => {
   renderAdminTasks();
 });
 
+els.employeeStatusFilter?.addEventListener("change", (event) => {
+  state.employeeStatusFilter = event.target.value;
+
+  if (state.employeeStatusFilter !== "completed") {
+    state.employeeCompletedTypeFilter = "all";
+  }
+
+  renderEmployeeTasks();
+});
+
+els.employeeCompletedTypeFilter?.addEventListener("change", (event) => {
+  state.employeeCompletedTypeFilter = event.target.value;
+  renderEmployeeTasks();
+});
+
 els.adminEmployeeFilter.addEventListener("change", (event) => {
   state.adminEmployeeFilter = event.target.value;
   renderAdminTasks();
@@ -2548,16 +2568,26 @@ function getCompletedTypeFilterLabel(value) {
   return labels[value] || "";
 }
 
-function renderCompletedTypeReport(tasks) {
-  if (!els.adminCompletedTypeReport) return;
+function getCompletedReportTitle(filterValue) {
+  return filterValue === "lunch_break"
+    ? "Báo cáo tổng thời gian các task Nghỉ trưa đã hoàn thành"
+    : "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
+}
+
+function renderCompletedTypeReport(tasks, scope = "admin") {
+  const statusFilter = state[`${scope}StatusFilter`];
+  const completedTypeFilter = state[`${scope}CompletedTypeFilter`];
+  const reportEl = els[`${scope}CompletedTypeReport`];
+
+  if (!reportEl) return;
 
   const shouldShowReport =
-    state.adminStatusFilter === "completed" &&
-    ["lunch_break", "hotel"].includes(state.adminCompletedTypeFilter);
+    statusFilter === "completed" &&
+    ["lunch_break", "hotel"].includes(completedTypeFilter);
 
   if (!shouldShowReport) {
-    els.adminCompletedTypeReport.classList.add("hidden");
-    els.adminCompletedTypeReport.innerHTML = "";
+    reportEl.classList.add("hidden");
+    reportEl.innerHTML = "";
     return;
   }
 
@@ -2569,34 +2599,43 @@ function renderCompletedTypeReport(tasks) {
     totalsByEmployee.set(employeeName, current + getCompletedTaskActualMinutes(task));
   });
 
-  const reportTitle = state.adminCompletedTypeFilter === "lunch_break"
-    ? "Báo cáo tổng thời gian các task Nghỉ trưa đã hoàn thành"
-    : "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
-
   const rows = Array.from(totalsByEmployee.entries())
     .sort((a, b) => a[0].localeCompare(b[0], "vi"))
     .map(([name, minutes]) => `<span>${escapeHtml(name)}: ${escapeHtml(formatMinutes(minutes))}</span>`)
     .join("");
 
-  els.adminCompletedTypeReport.classList.remove("hidden");
-  els.adminCompletedTypeReport.innerHTML = `
-    <strong>${escapeHtml(reportTitle)}</strong>
+  reportEl.classList.remove("hidden");
+  reportEl.innerHTML = `
+    <strong>${escapeHtml(getCompletedReportTitle(completedTypeFilter))}</strong>
     ${rows || "<span>Chưa có dữ liệu phù hợp</span>"}
   `;
 }
 
-function updateCompletedTypeFilterVisibility() {
-  if (!els.adminCompletedTypeFilter) return;
+function updateCompletedTypeFilterVisibility(scope = "admin") {
+  const statusFilter = state[`${scope}StatusFilter`];
+  const completedTypeFilterEl = els[`${scope}CompletedTypeFilter`];
 
-  const show = state.adminStatusFilter === "completed";
-  els.adminCompletedTypeFilter.classList.toggle("hidden", !show);
+  if (!completedTypeFilterEl) return;
+
+  const show = statusFilter === "completed";
+  completedTypeFilterEl.classList.toggle("hidden", !show);
 
   if (show) {
-    els.adminCompletedTypeFilter.value = state.adminCompletedTypeFilter;
+    completedTypeFilterEl.value = state[`${scope}CompletedTypeFilter`];
   } else {
-    els.adminCompletedTypeFilter.value = "all";
-    state.adminCompletedTypeFilter = "all";
+    completedTypeFilterEl.value = "all";
+    state[`${scope}CompletedTypeFilter`] = "all";
   }
+}
+
+function taskMatchesStatusFilter(task, statusFilter) {
+  if (statusFilter === "all") return true;
+
+  if (statusFilter === "completed") {
+    return task.displayStatus === "completed";
+  }
+
+  return task.displayStatus === statusFilter || task.status === statusFilter;
 }
 
 function renderAdminTasks() {
@@ -2628,16 +2667,10 @@ function renderAdminTasks() {
   let filtered = baseFiltered;
 
   if (state.adminStatusFilter !== "all") {
-    filtered = filtered.filter((task) => {
-      if (state.adminStatusFilter === "completed") {
-        return task.displayStatus === "completed";
-      }
-
-      return task.displayStatus === state.adminStatusFilter || task.status === state.adminStatusFilter;
-    });
+    filtered = filtered.filter((task) => taskMatchesStatusFilter(task, state.adminStatusFilter));
   }
 
-  updateCompletedTypeFilterVisibility();
+  updateCompletedTypeFilterVisibility("admin");
 
   if (state.adminStatusFilter === "completed" && state.adminCompletedTypeFilter !== "all") {
     filtered = filtered.filter((task) => getCompletedTaskGroup(task) === state.adminCompletedTypeFilter);
@@ -2781,13 +2814,24 @@ function renderTicketGroup(group, mode = "admin") {
 }
 
 function renderEmployeeTasks() {
-  const filtered = state.tasks
+  let filtered = state.tasks
     .filter((task) => isTaskInDateFilter(task, state.employeeDateFilter))
     .map((task) => ({
       ...task,
       displayStatus: getDisplayStatus(task)
     }));
 
+  if (state.employeeStatusFilter !== "all") {
+    filtered = filtered.filter((task) => taskMatchesStatusFilter(task, state.employeeStatusFilter));
+  }
+
+  updateCompletedTypeFilterVisibility("employee");
+
+  if (state.employeeStatusFilter === "completed" && state.employeeCompletedTypeFilter !== "all") {
+    filtered = filtered.filter((task) => getCompletedTaskGroup(task) === state.employeeCompletedTypeFilter);
+  }
+
+  renderCompletedTypeReport(filtered, "employee");
   refreshDateFilterVisibility("employee");
 
   if (!filtered.length) {
