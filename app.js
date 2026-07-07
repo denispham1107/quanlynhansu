@@ -71,6 +71,7 @@ const state = {
   workOrders: [],
   timeExtensionReasons: [],
   workTemplates: [],
+  hotelDailyReports: [],
   notifications: [],
   knownNotificationIds: new Set(),
   notificationsReady: false,
@@ -82,6 +83,7 @@ const state = {
   adminEmployeeFilter: "all",
   adminHotelReportHygiene: "pending",
   adminHotelEndPetCount: "",
+  adminHotelReportDrafts: {},
   employeeStatusFilter: "all",
   employeeCompletedTypeFilter: "all",
   adminDateFilter: {
@@ -1116,7 +1118,19 @@ function setupAdminDashboard() {
     }
   );
 
-  state.unsubs.push(unsubUsers, unsubTasks, unsubWorkOrders, unsubWorkTemplates, unsubTimeExtensionReasons);
+  const unsubHotelDailyReports = onSnapshot(
+    collection(db, "hotelDailyReports"),
+    (snapshot) => {
+      state.hotelDailyReports = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderAdminTasks();
+    },
+    (error) => {
+      console.error(error);
+      toast("Không đọc được báo cáo Hotel hằng ngày. Cần cập nhật Firestore Rules hotelDailyReports.", "error");
+    }
+  );
+
+  state.unsubs.push(unsubUsers, unsubTasks, unsubWorkOrders, unsubWorkTemplates, unsubTimeExtensionReasons, unsubHotelDailyReports);
 }
 
 function handleSnapshotError(error) {
@@ -1371,7 +1385,8 @@ const BACKUP_COLLECTIONS = [
   "tasks",
   "workTemplates",
   "timeExtensionReasons",
-  "notifications"
+  "notifications",
+  "hotelDailyReports"
 ];
 
 function encodeBackupValue(value) {
@@ -2842,13 +2857,15 @@ els.adminCompletedTypeReport?.addEventListener("change", (event) => {
   const target = event.target;
 
   if (target?.matches?.("[data-admin-hotel-hygiene]")) {
-    state.adminHotelReportHygiene = target.value || "pending";
+    updateAdminHotelReportDraft({ hygiene: target.value || "pending" });
     renderAdminTasks();
+    scheduleSaveAdminHotelDailyReport();
   }
 
   if (target?.matches?.("[data-admin-hotel-end-pet-count]")) {
-    state.adminHotelEndPetCount = target.value;
+    updateAdminHotelReportDraft({ endPetCount: target.value });
     renderAdminTasks();
+    scheduleSaveAdminHotelDailyReport();
   }
 });
 
@@ -2856,8 +2873,9 @@ els.adminCompletedTypeReport?.addEventListener("input", (event) => {
   const target = event.target;
 
   if (target?.matches?.("[data-admin-hotel-end-pet-count]")) {
-    state.adminHotelEndPetCount = target.value;
+    updateAdminHotelReportDraft({ endPetCount: target.value });
     renderAdminTasks();
+    scheduleSaveAdminHotelDailyReport();
   }
 });
 
@@ -3049,6 +3067,43 @@ function getHotelHygieneStatusText(value) {
   return "Chưa đánh giá";
 }
 
+function getAdminHotelReportDateKey() {
+  const filter = state.adminDateFilter || {};
+
+  if (filter.mode === "today") return todayInputValue();
+  if (filter.mode === "single") return filter.single || "";
+
+  return "";
+}
+
+function getSavedHotelDailyReport(dateKey) {
+  if (!dateKey) return null;
+  return state.hotelDailyReports.find((report) => report.id === dateKey || report.date === dateKey) || null;
+}
+
+function getAdminHotelReportDraft(dateKey = getAdminHotelReportDateKey()) {
+  const saved = getSavedHotelDailyReport(dateKey);
+  const draft = dateKey ? state.adminHotelReportDrafts[dateKey] : null;
+
+  return {
+    hygiene: draft?.hygiene ?? saved?.hygiene ?? state.adminHotelReportHygiene ?? "pending",
+    endPetCount: draft?.endPetCount ?? (
+      saved?.endPetCount ? String(saved.endPetCount) : (state.adminHotelEndPetCount ?? "")
+    )
+  };
+}
+
+function updateAdminHotelReportDraft(partial) {
+  const dateKey = getAdminHotelReportDateKey();
+  if (!dateKey) return;
+
+  const current = getAdminHotelReportDraft(dateKey);
+  state.adminHotelReportDrafts[dateKey] = {
+    ...current,
+    ...partial
+  };
+}
+
 function getAdminCompletedHotelTasksForCurrentDate() {
   return state.tasks
     .map((task) => ({
@@ -3060,15 +3115,33 @@ function getAdminCompletedHotelTasksForCurrentDate() {
     .filter((task) => getCompletedTaskGroup(task) === "hotel");
 }
 
-function renderAdminHotelReportControls() {
-  const hygieneValue = state.adminHotelReportHygiene || "pending";
-  const endPetCountRaw = state.adminHotelEndPetCount ?? "";
+function buildAdminHotelDailyReportPayload() {
+  const dateKey = getAdminHotelReportDateKey();
+  const draft = getAdminHotelReportDraft(dateKey);
+  const hygieneValue = draft.hygiene || "pending";
+  const endPetCountRaw = draft.endPetCount ?? "";
   const endPetCount = normalizeHotelPetCount(endPetCountRaw);
   const allowedMinutes = endPetCount ? calculateHotelAllowedMinutes(endPetCount) : 0;
   const allCompletedHotelTasks = getAdminCompletedHotelTasksForCurrentDate();
-  const totalActualMinutes = allCompletedHotelTasks.reduce((sum, task) => (
-    sum + getCompletedTaskActualMinutes(task)
-  ), 0);
+  const totalsByEmployee = new Map();
+
+  allCompletedHotelTasks.forEach((task) => {
+    const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+    const key = task.assignedToUid || employeeName;
+    const current = totalsByEmployee.get(key) || {
+      uid: task.assignedToUid || "",
+      name: employeeName,
+      minutes: 0
+    };
+
+    current.minutes += getCompletedTaskActualMinutes(task);
+    totalsByEmployee.set(key, current);
+  });
+
+  const employeeTotals = Array.from(totalsByEmployee.values())
+    .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+
+  const totalActualMinutes = employeeTotals.reduce((sum, item) => sum + Number(item.minutes || 0), 0);
 
   let timeStatusText = "Chưa nhập số lượng bé hotel cuối ngày";
   if (endPetCount) {
@@ -3076,6 +3149,65 @@ function renderAdminHotelReportControls() {
       ? "Các bạn hôm nay làm đúng thời gian"
       : "Các bạn hôm nay làm không đúng thời gian";
   }
+
+  return {
+    dateKey,
+    hygiene: hygieneValue,
+    hygieneText: getHotelHygieneStatusText(hygieneValue),
+    endPetCountRaw,
+    endPetCount,
+    allowedMinutes,
+    totalActualMinutes,
+    timeStatusText,
+    employeeTotals
+  };
+}
+
+let saveAdminHotelDailyReportTimer = null;
+
+function scheduleSaveAdminHotelDailyReport() {
+  clearTimeout(saveAdminHotelDailyReportTimer);
+  saveAdminHotelDailyReportTimer = setTimeout(() => {
+    saveAdminHotelDailyReport().catch((error) => {
+      console.error(error);
+      toast("Không lưu được tổng kết Hotel trong ngày. Kiểm tra Firestore Rules hotelDailyReports.", "error");
+    });
+  }, 500);
+}
+
+async function saveAdminHotelDailyReport() {
+  if (state.profile?.role !== "admin") return;
+
+  const payload = buildAdminHotelDailyReportPayload();
+  if (!payload.dateKey) return;
+
+  await setDoc(doc(db, "hotelDailyReports", payload.dateKey), {
+    id: payload.dateKey,
+    date: payload.dateKey,
+    hygiene: payload.hygiene,
+    hygieneText: payload.hygieneText,
+    endPetCount: Number(payload.endPetCount || 0),
+    allowedMinutes: Number(payload.allowedMinutes || 0),
+    totalActualMinutes: Number(payload.totalActualMinutes || 0),
+    timeStatusText: payload.timeStatusText,
+    employeeTotals: payload.employeeTotals.map((item) => ({
+      uid: item.uid || "",
+      name: item.name || "",
+      minutes: Number(item.minutes || 0)
+    })),
+    updatedByUid: state.user?.uid || "",
+    updatedByName: state.profile?.name || state.user?.email || "Admin",
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+function renderAdminHotelReportControls() {
+  const payload = buildAdminHotelDailyReportPayload();
+  const hygieneValue = payload.hygiene || "pending";
+  const endPetCountRaw = payload.endPetCountRaw ?? "";
+  const endPetCount = payload.endPetCount;
+  const allowedMinutes = payload.allowedMinutes;
+  const timeStatusText = payload.timeStatusText;
 
   return `
     <label class="hotel-report-control">
@@ -3091,7 +3223,7 @@ function renderAdminHotelReportControls() {
       <input data-admin-hotel-end-pet-count type="number" min="1" max="500" step="1" value="${escapeHtml(endPetCountRaw)}" placeholder="Nhập số bé" />
     </label>
     <span class="hotel-report-hygiene-status">${escapeHtml(getHotelHygieneStatusText(hygieneValue))}</span>
-    <span class="hotel-report-end-time">Thời gian làm hotel cuối ngày: ${endPetCount ? escapeHtml(formatMinutes(allowedMinutes)) : "--"}</span>
+    <span class="hotel-report-end-time">Thời gian làm hotel: ${endPetCount ? escapeHtml(formatMinutes(allowedMinutes)) : "--"}</span>
     <span class="hotel-report-time-status">${escapeHtml(timeStatusText)}</span>
   `;
 }
