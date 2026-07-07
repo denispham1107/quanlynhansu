@@ -291,6 +291,23 @@
     }
 
 
+    .backup-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .backup-actions .btn {
+      width: 100%;
+    }
+
+    @media (max-width: 768px) {
+      .backup-actions {
+        grid-template-columns: 1fr;
+      }
+    }
+
     /* Danh sách công việc mẫu cho Admin */
     .hero-actions {
       display: flex;
@@ -612,6 +629,11 @@
           <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
           <button id="openWorkTemplatePageBtn" class="btn ghost large" type="button">Danh sách công việc</button>
           <button id="openEmployeeManagerPageBtn" class="btn ghost large" type="button">Danh sách nhân viên</button>
+          <div class="backup-actions">
+            <button id="exportDataBtn" class="btn ghost large" type="button">Xuất</button>
+            <button id="importDataBtn" class="btn ghost large" type="button">Nhập</button>
+            <input id="importDataInput" class="hidden" type="file" accept="application/json,.json" />
+          </div>
         </div>
       </section>
 

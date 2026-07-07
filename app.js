@@ -13,6 +13,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -117,6 +118,9 @@ const els = {
   openTaskModalBtn: $("#openTaskModalBtn"),
   openWorkTemplatePageBtn: $("#openWorkTemplatePageBtn"),
   openEmployeeManagerPageBtn: $("#openEmployeeManagerPageBtn"),
+  exportDataBtn: $("#exportDataBtn"),
+  importDataBtn: $("#importDataBtn"),
+  importDataInput: $("#importDataInput"),
   employeeManagerView: $("#employeeManagerView"),
   backToAdminFromEmployeesBtn: $("#backToAdminFromEmployeesBtn"),
   workTemplateView: $("#workTemplateView"),
@@ -1354,6 +1358,247 @@ els.clearWorkTemplateSearchBtn?.addEventListener("click", () => {
   els.workTemplateSearch?.focus();
 });
 els.workTemplateSearch?.addEventListener("input", renderWorkTemplateList);
+
+
+// =========================
+// Backup / Restore JSON
+// =========================
+const BACKUP_COLLECTIONS = [
+  "users",
+  "workOrders",
+  "tasks",
+  "workTemplates",
+  "timeExtensionReasons",
+  "notifications"
+];
+
+function encodeBackupValue(value) {
+  if (value == null) return value;
+
+  if (value instanceof Timestamp || (typeof value.toDate === "function" && Number.isFinite(value.seconds))) {
+    return {
+      __backupType: "timestamp",
+      seconds: value.seconds,
+      nanoseconds: value.nanoseconds || 0
+    };
+  }
+
+  if (Array.isArray(value)) return value.map(encodeBackupValue);
+
+  if (typeof value === "object") {
+    const output = {};
+    Object.entries(value).forEach(([key, item]) => {
+      if (typeof item !== "undefined") output[key] = encodeBackupValue(item);
+    });
+    return output;
+  }
+
+  return value;
+}
+
+function decodeBackupValue(value) {
+  if (value == null) return value;
+
+  if (Array.isArray(value)) return value.map(decodeBackupValue);
+
+  if (typeof value === "object") {
+    const seconds = Number(value.seconds);
+    const nanoseconds = Number(value.nanoseconds || 0);
+
+    if (
+      value.__backupType === "timestamp"
+      && Number.isFinite(seconds)
+      && Number.isFinite(nanoseconds)
+    ) {
+      return new Timestamp(seconds, nanoseconds);
+    }
+
+    // Hỗ trợ thêm định dạng Timestamp JSON mặc định của Firebase SDK nếu có.
+    if (
+      (value.type === "firestore/timestamp" || value.__type__ === "timestamp")
+      && Number.isFinite(seconds)
+      && Number.isFinite(nanoseconds)
+    ) {
+      return new Timestamp(seconds, nanoseconds);
+    }
+
+    const output = {};
+    Object.entries(value).forEach(([key, item]) => {
+      output[key] = decodeBackupValue(item);
+    });
+    return output;
+  }
+
+  return value;
+}
+
+function backupFileName() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mi = String(now.getMinutes()).padStart(2, "0");
+  return `quanlynhansu-backup-${yyyy}-${mm}-${dd}-${hh}${mi}.json`;
+}
+
+function normalizeBackupCollection(collectionData) {
+  if (!collectionData) return {};
+
+  if (Array.isArray(collectionData)) {
+    return collectionData.reduce((acc, item) => {
+      if (item && typeof item.id === "string" && item.data && typeof item.data === "object") {
+        acc[item.id] = item.data;
+      }
+      return acc;
+    }, {});
+  }
+
+  if (typeof collectionData === "object") return collectionData;
+  return {};
+}
+
+function countBackupDocuments(collections = {}) {
+  return BACKUP_COLLECTIONS.reduce((total, collectionName) => {
+    const collectionData = normalizeBackupCollection(collections[collectionName]);
+    return total + Object.keys(collectionData).length;
+  }, 0);
+}
+
+async function exportAllDataToJson() {
+  if (state.profile?.role !== "admin") return;
+
+  try {
+    setButtonLoading(els.exportDataBtn, true, "Đang xuất...");
+
+    const collections = {};
+
+    for (const collectionName of BACKUP_COLLECTIONS) {
+      const snapshot = await getDocs(collection(db, collectionName));
+      collections[collectionName] = {};
+
+      snapshot.forEach((docSnapshot) => {
+        collections[collectionName][docSnapshot.id] = encodeBackupValue(docSnapshot.data());
+      });
+    }
+
+    const backup = {
+      app: "quanlynhansu",
+      backupVersion: 1,
+      exportedAt: new Date().toISOString(),
+      exportedBy: {
+        uid: state.user?.uid || "",
+        name: state.profile?.name || "",
+        email: state.user?.email || ""
+      },
+      collections
+    };
+
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = backupFileName();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    toast(`Đã xuất ${countBackupDocuments(collections)} document ra file JSON.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không xuất được dữ liệu JSON.", "error");
+  } finally {
+    setButtonLoading(els.exportDataBtn, false);
+  }
+}
+
+function readTextFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Không đọc được file."));
+    reader.readAsText(file, "utf-8");
+  });
+}
+
+async function importBackupJsonFile(file) {
+  if (state.profile?.role !== "admin") return;
+  if (!file) return;
+
+  try {
+    setButtonLoading(els.importDataBtn, true, "Đang đọc...");
+
+    const rawText = await readTextFile(file);
+    const backup = JSON.parse(rawText);
+
+    if (!backup || typeof backup !== "object" || !backup.collections || typeof backup.collections !== "object") {
+      throw new Error("File JSON không đúng định dạng backup của hệ thống.");
+    }
+
+    const totalDocuments = countBackupDocuments(backup.collections);
+    if (totalDocuments <= 0) {
+      throw new Error("File JSON không có dữ liệu để nhập.");
+    }
+
+    const confirmed = window.confirm(
+      `Bạn chắc chắn muốn nhập ${totalDocuments} document từ file JSON này?\n\n` +
+      "Hệ thống sẽ ghi đè/cập nhật các document có cùng ID. " +
+      "Dữ liệu hiện có nhưng không nằm trong file sẽ được giữ nguyên."
+    );
+
+    if (!confirmed) return;
+
+    setButtonLoading(els.importDataBtn, true, "Đang nhập...");
+
+    let batch = writeBatch(db);
+    let batchCount = 0;
+    let importedCount = 0;
+
+    async function commitBatchIfNeeded(force = false) {
+      if (batchCount === 0) return;
+      if (!force && batchCount < 450) return;
+      await batch.commit();
+      batch = writeBatch(db);
+      batchCount = 0;
+    }
+
+    for (const collectionName of BACKUP_COLLECTIONS) {
+      const collectionData = normalizeBackupCollection(backup.collections[collectionName]);
+      const entries = Object.entries(collectionData);
+
+      for (const [documentId, rawData] of entries) {
+        if (!documentId || !rawData || typeof rawData !== "object" || Array.isArray(rawData)) continue;
+
+        const decodedData = decodeBackupValue(rawData);
+        batch.set(doc(db, collectionName, documentId), decodedData, { merge: false });
+        batchCount += 1;
+        importedCount += 1;
+        await commitBatchIfNeeded(false);
+      }
+    }
+
+    await commitBatchIfNeeded(true);
+
+    toast(`Đã nhập thành công ${importedCount} document từ file JSON.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không nhập được dữ liệu JSON.", "error");
+  } finally {
+    setButtonLoading(els.importDataBtn, false);
+    if (els.importDataInput) els.importDataInput.value = "";
+  }
+}
+
+els.exportDataBtn?.addEventListener("click", exportAllDataToJson);
+els.importDataBtn?.addEventListener("click", () => {
+  if (state.profile?.role !== "admin") return;
+  els.importDataInput?.click();
+});
+els.importDataInput?.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  importBackupJsonFile(file);
+});
 
 els.workTemplateList?.addEventListener("click", (event) => {
   const item = event.target.closest("[data-edit-template-id]");
