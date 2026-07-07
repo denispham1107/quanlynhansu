@@ -2718,6 +2718,7 @@ function renderTaskCard(task, mode) {
       ${renderPhotoReportBox(task, mode)}
       ${renderTimeExtensionBox(task)}
       ${renderAssigneeHistoryBox(task)}
+      ${renderLunchBreakHistoryBox(task)}
       ${renderResultBox(task)}
       ${renderTaskActions(task, {
         canEmployeeSubmit,
@@ -2806,6 +2807,45 @@ function renderAssigneeHistoryBox(task) {
         <span>${history.length} lần thay đổi</span>
       </div>
       <ul class="extension-list">${rows}</ul>
+    </div>
+  `;
+}
+
+function getLunchBreakActualMinutes(task) {
+  const storedMinutes = Number(task.actualMinutes || 0);
+
+  if (storedMinutes > 0) return storedMinutes;
+
+  const completedAt = timestampToDate(task.approvedAt) || timestampToDate(task.submittedAt);
+
+  if (!completedAt) return 0;
+
+  try {
+    return calculateResultAt(task, completedAt).actualMinutes;
+  } catch (error) {
+    return 0;
+  }
+}
+
+function renderLunchBreakHistoryBox(task) {
+  if (!isLunchBreakTask(task) || task.status !== "completed") return "";
+
+  const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+  const actualMinutes = getLunchBreakActualMinutes(task);
+  const finishedAt = formatFullDateTime(task.approvedAt || task.submittedAt);
+
+  return `
+    <div class="extension-box lunch-break-history-box">
+      <div class="extension-box-head">
+        <strong>Lịch sử nghỉ trưa</strong>
+        <span>${escapeHtml(finishedAt)}</span>
+      </div>
+      <ul class="extension-list">
+        <li>
+          <strong>${escapeHtml(employeeName)} đã nghỉ trưa được ${actualMinutes} phút</strong>
+          <span>Thời gian tính từ lúc bắt đầu nghỉ trưa đến khi hoàn thành.</span>
+        </li>
+      </ul>
     </div>
   `;
 }
