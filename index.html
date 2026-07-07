@@ -414,6 +414,22 @@
       }
     }
 
+
+
+    /* Trang Danh sách nhân viên riêng cho Admin */
+    .employee-manager-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    @media (max-width: 900px) {
+      .employee-manager-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
     @media (max-width: 640px) {
       .photo-report-box {
         align-items: stretch;
@@ -490,6 +506,7 @@
         <div class="hero-actions">
           <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
           <button id="openWorkTemplatePageBtn" class="btn ghost large" type="button">Danh sách công việc</button>
+          <button id="openEmployeeManagerPageBtn" class="btn ghost large" type="button">Danh sách nhân viên</button>
         </div>
       </section>
 
@@ -500,42 +517,6 @@
         <div class="stat-card success"><span>Đã hoàn thành</span><strong id="statCompleted">0</strong></div>
       </section>
 
-      <div class="admin-grid">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <h3>Tạo tài khoản nhân viên</h3>
-              <p class="muted">Admin tạo email/mật khẩu cho nhân viên đăng nhập.</p>
-            </div>
-          </div>
-
-          <form id="createEmployeeForm" class="form-stack compact">
-            <label>
-              Tên nhân viên
-              <input id="employeeName" type="text" placeholder="Ví dụ: Phúc" required />
-            </label>
-            <label>
-              Email đăng nhập
-              <input id="employeeEmail" type="email" placeholder="phuc@shop.com" required />
-            </label>
-            <label>
-              Mật khẩu
-              <input id="employeePassword" type="password" placeholder="Tối thiểu 6 ký tự" minlength="6" required />
-            </label>
-            <button id="createEmployeeBtn" class="btn secondary" type="submit">Tạo nhân viên</button>
-          </form>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <h3>Danh sách nhân viên</h3>
-              <p class="muted">Nhân viên sẽ xuất hiện trong form giao việc.</p>
-            </div>
-          </div>
-          <div id="employeeList" class="employee-list empty-box">Chưa có nhân viên.</div>
-        </section>
-      </div>
 
       <section class="panel task-panel">
         <div class="panel-header task-filter-row">
@@ -607,6 +588,57 @@
 
         <div id="workTemplateList" class="work-template-list empty-box">Chưa có công việc mẫu.</div>
       </section>
+    </main>
+
+    <!-- ADMIN EMPLOYEE MANAGER PAGE -->
+    <main id="employeeManagerView" class="page hidden">
+      <section class="hero-panel">
+        <div>
+          <p class="eyebrow">Admin Dashboard</p>
+          <h2>Danh sách nhân viên</h2>
+          <p class="muted">Tạo tài khoản nhân viên mới và xem danh sách nhân viên đang dùng trong hệ thống giao việc.</p>
+        </div>
+        <div class="hero-actions">
+          <button id="backToAdminFromEmployeesBtn" class="btn ghost large" type="button">← Quay lại</button>
+        </div>
+      </section>
+
+      <div class="employee-manager-grid">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Tạo tài khoản nhân viên</h3>
+              <p class="muted">Admin tạo email/mật khẩu cho nhân viên đăng nhập.</p>
+            </div>
+          </div>
+
+          <form id="createEmployeeForm" class="form-stack compact">
+            <label>
+              Tên nhân viên
+              <input id="employeeName" type="text" placeholder="Ví dụ: Phúc" required />
+            </label>
+            <label>
+              Email đăng nhập
+              <input id="employeeEmail" type="email" placeholder="phuc@shop.com" required />
+            </label>
+            <label>
+              Mật khẩu
+              <input id="employeePassword" type="password" placeholder="Tối thiểu 6 ký tự" minlength="6" required />
+            </label>
+            <button id="createEmployeeBtn" class="btn secondary" type="submit">Tạo nhân viên</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Danh sách nhân viên</h3>
+              <p class="muted">Nhân viên sẽ xuất hiện trong form giao việc.</p>
+            </div>
+          </div>
+          <div id="employeeList" class="employee-list empty-box">Chưa có nhân viên.</div>
+        </section>
+      </div>
     </main>
 
     <!-- EMPLOYEE DASHBOARD -->

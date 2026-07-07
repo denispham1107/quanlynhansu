@@ -113,6 +113,9 @@ const els = {
   employeeList: $("#employeeList"),
   openTaskModalBtn: $("#openTaskModalBtn"),
   openWorkTemplatePageBtn: $("#openWorkTemplatePageBtn"),
+  openEmployeeManagerPageBtn: $("#openEmployeeManagerPageBtn"),
+  employeeManagerView: $("#employeeManagerView"),
+  backToAdminFromEmployeesBtn: $("#backToAdminFromEmployeesBtn"),
   workTemplateView: $("#workTemplateView"),
   backToAdminBtn: $("#backToAdminBtn"),
   openWorkTemplateModalBtn: $("#openWorkTemplateModalBtn"),
@@ -901,6 +904,7 @@ function showLogin() {
   els.appView.classList.add("hidden");
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
+  els.employeeManagerView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
   els.notificationPanel?.classList.add("hidden");
 }
@@ -926,6 +930,7 @@ function cleanupSubscriptions() {
 function setupAdminDashboard() {
   els.adminView.classList.remove("hidden");
   els.workTemplateView?.classList.add("hidden");
+  els.employeeManagerView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
 
   const unsubUsers = onSnapshot(
@@ -1155,13 +1160,25 @@ function openWorkTemplatePage() {
   if (state.profile?.role !== "admin") return;
 
   els.adminView.classList.add("hidden");
+  els.employeeManagerView?.classList.add("hidden");
   els.workTemplateView?.classList.remove("hidden");
   renderWorkTemplateList();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function openEmployeeManagerPage() {
+  if (state.profile?.role !== "admin") return;
+
+  els.adminView.classList.add("hidden");
+  els.workTemplateView?.classList.add("hidden");
+  els.employeeManagerView?.classList.remove("hidden");
+  renderEmployees();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function backToAdminDashboard() {
   els.workTemplateView?.classList.add("hidden");
+  els.employeeManagerView?.classList.add("hidden");
   els.adminView.classList.remove("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -1222,7 +1239,9 @@ function applyWorkTemplateToRow(row, template) {
 }
 
 els.openWorkTemplatePageBtn?.addEventListener("click", openWorkTemplatePage);
+els.openEmployeeManagerPageBtn?.addEventListener("click", openEmployeeManagerPage);
 els.backToAdminBtn?.addEventListener("click", backToAdminDashboard);
+els.backToAdminFromEmployeesBtn?.addEventListener("click", backToAdminDashboard);
 els.openWorkTemplateModalBtn?.addEventListener("click", openWorkTemplateModal);
 els.clearWorkTemplateSearchBtn?.addEventListener("click", () => {
   if (els.workTemplateSearch) els.workTemplateSearch.value = "";
@@ -2146,6 +2165,7 @@ async function syncOverdueTasksByAdmin() {
 function setupEmployeeDashboard() {
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
+  els.employeeManagerView?.classList.add("hidden");
   els.employeeView.classList.remove("hidden");
 
   // Chỉ query task của chính nhân viên đang đăng nhập.
