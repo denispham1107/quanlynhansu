@@ -296,6 +296,87 @@ function hasEnoughRequiredPhotos(task) {
   return getTaskPhotoCount(task) >= getTaskRequiredPhotoCount(task);
 }
 
+const LUNCH_BREAK_MAX_MINUTES_PER_DAY = 30;
+
+function isLunchBreakTask(task) {
+  return Boolean(task?.isLunchBreak);
+}
+
+function isActiveLunchBreakTask(task) {
+  return isLunchBreakTask(task)
+    && Boolean(task?.assignedToUid)
+    && !["draft", "waiting_assignee", "submitted", "completed"].includes(task.status);
+}
+
+function employeeHasActiveLunchBreak(employeeUid, ignoredTaskId = "") {
+  if (!employeeUid) return false;
+
+  return state.tasks.some((task) => (
+    task.id !== ignoredTaskId
+    && task.assignedToUid === employeeUid
+    && isActiveLunchBreakTask(task)
+  ));
+}
+
+function validateLunchBreakBasicRows(rows) {
+  const invalidRow = rows.find((row) => row.isLunchBreak && Number(row.deadlineMinutes || 0) > LUNCH_BREAK_MAX_MINUTES_PER_DAY);
+  if (invalidRow) {
+    return `Công việc #${invalidRow.index + 1}: phiếu Nghỉ trưa không được lớn hơn ${LUNCH_BREAK_MAX_MINUTES_PER_DAY} phút.`;
+  }
+
+  const zeroRow = rows.find((row) => row.isLunchBreak && Number(row.deadlineMinutes || 0) <= 0);
+  if (zeroRow) {
+    return `Công việc #${zeroRow.index + 1}: thời gian Nghỉ trưa phải lớn hơn 0 phút.`;
+  }
+
+  return null;
+}
+
+function validateLunchBreakRowsForDispatch(rows) {
+  const basicError = validateLunchBreakBasicRows(rows);
+  if (basicError) return basicError;
+
+  const plannedActiveKeys = new Set();
+
+  for (const row of rows) {
+    if (!row.isLunchBreak || !row.assignedToUid) continue;
+
+    const employeeName = row.assignedEmployee?.name || row.assignedEmployee?.email || "nhân viên này";
+    const activeKey = row.assignedToUid;
+    const ignoredTaskId = row.taskId || "";
+
+    if (plannedActiveKeys.has(activeKey)) {
+      return `${employeeName} đã có 1 phiếu Nghỉ trưa trong chính lượt giao này. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.`;
+    }
+
+    if (employeeHasActiveLunchBreak(row.assignedToUid, ignoredTaskId)) {
+      return `${employeeName} đang có phiếu Nghỉ trưa chưa báo hoàn thành. Chỉ tạo phiếu nghỉ trưa mới sau khi nhân viên đã bấm Hoàn thành.`;
+    }
+
+    plannedActiveKeys.add(activeKey);
+  }
+
+  return null;
+}
+
+function validateLunchBreakAssignment(task, employeeUid) {
+  if (!isLunchBreakTask(task) || !employeeUid) return null;
+
+  const employee = state.employees.find((item) => item.uid === employeeUid);
+  const employeeName = employee?.name || employee?.email || "Nhân viên này";
+  const deadlineMinutes = Number(task.deadlineMinutes || 0);
+
+  if (deadlineMinutes <= 0 || deadlineMinutes > LUNCH_BREAK_MAX_MINUTES_PER_DAY) {
+    return `Phiếu Nghỉ trưa chỉ được từ 1 đến ${LUNCH_BREAK_MAX_MINUTES_PER_DAY} phút.`;
+  }
+
+  if (employeeHasActiveLunchBreak(employeeUid, task.id)) {
+    return `${employeeName} đang có phiếu Nghỉ trưa chưa báo hoàn thành. Chỉ chọn lại nhân viên sau khi phiếu Nghỉ trưa trước đã báo hoàn thành.`;
+  }
+
+  return null;
+}
+
 function formatDateOnly(value) {
   if (!value) return "--";
   const [year, month, day] = String(value).split("-");
@@ -354,6 +435,7 @@ function statusLabel(status) {
     draft: "Chưa giao việc",
     waiting_assignee: "Chờ chọn người",
     queued: "Đang chờ đến lượt",
+    lunch_break: "Nghỉ trưa",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
@@ -370,6 +452,7 @@ function getDisplayStatus(task) {
   if (task.status === "waiting_assignee" || !task.assignedToUid) return "waiting_assignee";
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
+  if (task.status === "lunch_break" || (task.isLunchBreak && task.status === "doing")) return "lunch_break";
 
   // Công việc đã giao nhưng nhân viên chưa tới lượt (vẫn còn đang trong thời gian
   // quy định của (các) công việc được giao trước đó cho chính người này).
@@ -404,6 +487,7 @@ function taskCardClass(displayStatus) {
     draft: "is-draft",
     waiting_assignee: "is-waiting-assignee",
     queued: "is-queued",
+    lunch_break: "is-lunch-break",
     doing: "",
     near_due: "is-near-due",
     overdue: "is-overdue",
@@ -1454,6 +1538,11 @@ function createTaskRowElement(prefill = null) {
         </select>
       </label>
     </div>
+    <label class="checkbox-line lunch-break-line">
+      <input type="checkbox" class="row-lunch-break" />
+      Nghỉ trưa
+    </label>
+    <p class="small-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
     <div class="two-col">
       <label>
         Số giờ
@@ -1480,8 +1569,13 @@ function createTaskRowElement(prefill = null) {
     if (prefill.assignedToUid) {
       wrapper.querySelector(".row-assignee").value = prefill.assignedToUid;
     }
+
+    if (prefill.isLunchBreak) {
+      wrapper.querySelector(".row-lunch-break").checked = true;
+    }
   }
 
+  syncLunchBreakRowControls(wrapper);
   return wrapper;
 }
 
@@ -1514,6 +1608,39 @@ function updateTaskRowHeadings() {
     const removeBtn = row.querySelector('[data-action="remove-task-row"]');
     if (removeBtn) removeBtn.classList.toggle("hidden", rows.length <= 1);
   });
+}
+
+function syncLunchBreakRowControls(row) {
+  if (!row) return;
+
+  const checkbox = row.querySelector(".row-lunch-break");
+  const hoursInput = row.querySelector(".row-hours");
+  const minutesInput = row.querySelector(".row-minutes");
+  const titleInput = row.querySelector(".row-title");
+  const note = row.querySelector(".lunch-break-note");
+  const checked = Boolean(checkbox?.checked);
+
+  note?.classList.toggle("hidden", !checked);
+
+  if (!hoursInput || !minutesInput) return;
+
+  if (checked) {
+    if (!titleInput.value.trim()) titleInput.value = "Nghỉ trưa";
+
+    const totalMinutes = (Number(hoursInput.value || 0) * 60) + Number(minutesInput.value || 0);
+    const nextMinutes = Math.min(Math.max(totalMinutes || 30, 1), LUNCH_BREAK_MAX_MINUTES_PER_DAY);
+
+    hoursInput.value = 0;
+    hoursInput.max = 0;
+    minutesInput.min = 1;
+    minutesInput.max = LUNCH_BREAK_MAX_MINUTES_PER_DAY;
+    minutesInput.value = nextMinutes;
+  } else {
+    hoursInput.max = 168;
+    minutesInput.min = 0;
+    minutesInput.max = 59;
+    if (Number(minutesInput.value || 0) < 0) minutesInput.value = 0;
+  }
 }
 
 function resetTaskRows() {
@@ -1583,6 +1710,13 @@ els.taskRowsContainer.addEventListener("click", (event) => {
 });
 
 els.taskRowsContainer.addEventListener("change", (event) => {
+  const row = event.target.closest(".task-row");
+  if (!row) return;
+
+  if (event.target.matches(".row-lunch-break, .row-hours, .row-minutes")) {
+    syncLunchBreakRowControls(row);
+  }
+
   const titleInput = event.target.closest(".row-title");
   if (!titleInput) return;
 
@@ -1590,6 +1724,7 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   if (!template) return;
 
   applyWorkTemplateToRow(titleInput.closest(".task-row"), template);
+  syncLunchBreakRowControls(titleInput.closest(".task-row"));
   toast(`Đã áp dụng thời gian ${formatMinutes(Number(template.deadlineMinutes || 0))} cho công việc “${template.name}”.`, "success");
 });
 
@@ -1627,6 +1762,7 @@ function openEditWorkOrderModal(workOrderId) {
         description: task.description,
         taskDate: task.taskDate,
         assignedToUid: task.assignedToUid,
+        isLunchBreak: Boolean(task.isLunchBreak),
         hours: Math.floor(deadlineMinutes / 60),
         minutes: deadlineMinutes % 60
       }));
@@ -1657,6 +1793,7 @@ function readTaskRowsData() {
     const description = row.querySelector(".row-description").value.trim();
     const taskDate = row.querySelector(".row-date").value;
     const assignedToUid = row.querySelector(".row-assignee").value;
+    const isLunchBreak = Boolean(row.querySelector(".row-lunch-break")?.checked);
     const hours = Number(row.querySelector(".row-hours").value || 0);
     const minutes = Number(row.querySelector(".row-minutes").value || 0);
     const deadlineMinutes = hours * 60 + minutes;
@@ -1669,7 +1806,8 @@ function readTaskRowsData() {
       taskDate,
       assignedToUid,
       assignedEmployee,
-      deadlineMinutes
+      deadlineMinutes,
+      isLunchBreak
     };
   });
 }
@@ -1688,7 +1826,7 @@ function validateTaskRows(rows) {
     if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
   }
 
-  return null;
+  return validateLunchBreakRowsForDispatch(rows);
 }
 
 // Lưu nháp chỉ bắt buộc có tên phiếu (kiểm tra riêng ở persistWorkOrder),
@@ -1698,7 +1836,7 @@ function validateTaskRowsForDraft(rows) {
     return "Phiếu cần có ít nhất 1 công việc (có thể để trống thông tin, điền sau).";
   }
 
-  return null;
+  return validateLunchBreakBasicRows(rows);
 }
 
 // =========================
@@ -1837,6 +1975,7 @@ async function persistWorkOrder(dispatch, button) {
         rowIndex: row.index,
         createdAt: serverTimestamp(),
         deadlineMinutes,
+        isLunchBreak: Boolean(row.isLunchBreak),
         deadlineAt: null,
         dispatchedAt: null,
         queueStartAt: null,
@@ -1850,8 +1989,9 @@ async function persistWorkOrder(dispatch, button) {
         resultType: null,
         differenceMinutes: null,
         differencePercent: null,
-        photoRequired: photoOptions.photoRequired,
-        requiredPhotoCount: photoOptions.requiredPhotoCount,
+        // Phiếu Nghỉ trưa là thời gian nghỉ, không bắt buộc nhân viên đăng hình báo cáo.
+        photoRequired: row.isLunchBreak ? false : photoOptions.photoRequired,
+        requiredPhotoCount: row.isLunchBreak ? 0 : photoOptions.requiredPhotoCount,
         photos: [],
         photoCount: 0,
         lastPhotoUploadedAt: null
@@ -1861,7 +2001,7 @@ async function persistWorkOrder(dispatch, button) {
         if (assignedToUid) {
           const { queueStartDate, deadlineDate } = reserveQueueSlot(employeeQueueEnd, assignedToUid, deadlineMinutes, now);
 
-          taskData.status = "doing";
+          taskData.status = row.isLunchBreak ? "lunch_break" : "doing";
           taskData.dispatchedAt = serverTimestamp();
           taskData.queueStartAt = Timestamp.fromDate(queueStartDate);
           taskData.deadlineAt = Timestamp.fromDate(deadlineDate);
@@ -1963,6 +2103,22 @@ async function dispatchWorkOrder(workOrderId, button) {
     return;
   }
 
+  const lunchValidationError = validateLunchBreakRowsForDispatch(tasksInGroup.map((task, index) => ({
+    index,
+    taskId: task.id,
+    title: task.title,
+    taskDate: getTaskDateValue(task),
+    assignedToUid: task.assignedToUid,
+    assignedEmployee: state.employees.find((employee) => employee.uid === task.assignedToUid),
+    deadlineMinutes: Number(task.deadlineMinutes || 0),
+    isLunchBreak: Boolean(task.isLunchBreak)
+  })));
+
+  if (lunchValidationError) {
+    toast(lunchValidationError, "error");
+    return;
+  }
+
   setButtonLoading(button, true, "Đang giao việc...");
 
   try {
@@ -1996,7 +2152,7 @@ async function dispatchWorkOrder(workOrderId, button) {
       );
 
       batch.update(doc(db, "tasks", task.id), {
-        status: "doing",
+        status: task.isLunchBreak ? "lunch_break" : "doing",
         dispatchedAt: serverTimestamp(),
         queueStartAt: Timestamp.fromDate(queueStartDate),
         deadlineAt: Timestamp.fromDate(deadlineDate),
@@ -2233,6 +2389,7 @@ function renderAdminTasks() {
   const stats = {
     doing: baseFiltered.filter((task) => (
       task.displayStatus === "doing" ||
+      task.displayStatus === "lunch_break" ||
       task.displayStatus === "near_due" ||
       task.displayStatus === "redo"
     )).length,
@@ -2423,8 +2580,8 @@ function canAdminReassignTask(task, mode, displayStatus = null) {
   const visibleStatus = displayStatus || getDisplayStatus(task);
 
   return (
-    ["waiting_assignee", "doing", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
-    && ["waiting_assignee", "doing", "redo", "overdue"].includes(task.status)
+    ["waiting_assignee", "doing", "lunch_break", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
+    && ["waiting_assignee", "doing", "lunch_break", "redo", "overdue"].includes(task.status)
   );
 }
 
@@ -2494,7 +2651,7 @@ function renderTaskCard(task, mode) {
 
   const canEmployeeSubmit =
     mode === "employee" &&
-    ["doing", "redo", "overdue"].includes(task.status) &&
+    ["doing", "lunch_break", "redo", "overdue"].includes(task.status) &&
     task.status !== "completed" &&
     task.status !== "submitted" &&
     displayStatus !== "queued";
@@ -2700,8 +2857,8 @@ function canEmployeeUploadTaskPhotos(task, mode, displayStatus = null) {
   if (mode !== "employee") return false;
   if (!task?.id || task.assignedToUid !== state.user?.uid) return false;
   const visibleStatus = displayStatus || getDisplayStatus(task);
-  return ["doing", "redo", "overdue", "near_due"].includes(visibleStatus)
-    && ["doing", "redo", "overdue"].includes(task.status);
+  return ["doing", "lunch_break", "redo", "overdue", "near_due"].includes(visibleStatus)
+    && ["doing", "lunch_break", "redo", "overdue"].includes(task.status);
 }
 
 function renderTimeExtensionBox(task) {
@@ -3104,6 +3261,9 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
       if (employeeHasUnfinishedTask(newEmployee.uid, task.id)) {
         throw new Error("Nhân viên này đang có công việc chưa hoàn thành. Vui lòng chọn nhân viên chưa được giao việc.");
       }
+
+      const lunchAssignmentError = validateLunchBreakAssignment(task, newEmployee.uid);
+      if (lunchAssignmentError) throw new Error(lunchAssignmentError);
     }
 
     setButtonLoading(els.confirmReassignEmployeeBtn, true, releaseToWaiting ? "Đang tạm dừng..." : "Đang đổi...");
@@ -3200,7 +3360,7 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
     };
 
     if (isWaitingAssignee || wasQueued) {
-      updateData.status = "doing";
+      updateData.status = task.isLunchBreak ? "lunch_break" : "doing";
       updateData.dispatchedAt = serverTimestamp();
       updateData.queueStartAt = Timestamp.fromDate(now);
       updateData.deadlineAt = Timestamp.fromDate(new Date(now.getTime() + resumeMs));
