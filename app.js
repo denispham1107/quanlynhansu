@@ -1526,6 +1526,27 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
 let taskRowIdCounter = 0;
 let photoRequirementTouched = false;
 
+const LUNCH_BREAK_AUTO_TITLE = "Phiếu nghỉ trưa";
+const HOTEL_AUTO_TITLE = "Làm hotel";
+const LEGACY_LUNCH_BREAK_AUTO_TITLES = ["Nghỉ trưa", LUNCH_BREAK_AUTO_TITLE];
+const LEGACY_HOTEL_AUTO_TITLES = ["Hotel", HOTEL_AUTO_TITLE];
+
+function isAutoSpecialTitle(value, titles) {
+  return titles.includes(String(value || "").trim());
+}
+
+function setWorkOrderNameForSpecialTask(autoName) {
+  if (!els.workOrderName) return;
+  els.workOrderName.value = autoName;
+}
+
+function clearWorkOrderNameIfAutoSpecial(autoTitles) {
+  if (!els.workOrderName) return;
+  if (isAutoSpecialTitle(els.workOrderName.value, autoTitles)) {
+    els.workOrderName.value = "";
+  }
+}
+
 function createTaskRowElement(prefill = null) {
   taskRowIdCounter += 1;
   const rowId = `row-${taskRowIdCounter}`;
@@ -1656,13 +1677,36 @@ function syncLunchBreakRowControls(row, changedInput = null) {
   const lunchNote = row.querySelector(".lunch-break-note");
   const hotelNote = row.querySelector(".hotel-note");
 
+  const lunchChanged = Boolean(changedInput?.matches?.(".row-lunch-break"));
+  const hotelChanged = Boolean(changedInput?.matches?.(".row-hotel"));
+
   // Hai loại đặc biệt không được chọn cùng lúc.
-  if (changedInput?.matches?.(".row-lunch-break") && lunchCheckbox?.checked && hotelCheckbox) {
+  if (lunchChanged && lunchCheckbox?.checked && hotelCheckbox) {
     hotelCheckbox.checked = false;
   }
 
-  if (changedInput?.matches?.(".row-hotel") && hotelCheckbox?.checked && lunchCheckbox) {
+  if (hotelChanged && hotelCheckbox?.checked && lunchCheckbox) {
     lunchCheckbox.checked = false;
+  }
+
+  if (lunchChanged && titleInput) {
+    if (lunchCheckbox?.checked) {
+      titleInput.value = LUNCH_BREAK_AUTO_TITLE;
+      setWorkOrderNameForSpecialTask(LUNCH_BREAK_AUTO_TITLE);
+    } else if (isAutoSpecialTitle(titleInput.value, LEGACY_LUNCH_BREAK_AUTO_TITLES)) {
+      titleInput.value = "";
+      clearWorkOrderNameIfAutoSpecial(LEGACY_LUNCH_BREAK_AUTO_TITLES);
+    }
+  }
+
+  if (hotelChanged && titleInput) {
+    if (hotelCheckbox?.checked) {
+      titleInput.value = HOTEL_AUTO_TITLE;
+      setWorkOrderNameForSpecialTask(HOTEL_AUTO_TITLE);
+    } else if (isAutoSpecialTitle(titleInput.value, LEGACY_HOTEL_AUTO_TITLES)) {
+      titleInput.value = "";
+      clearWorkOrderNameIfAutoSpecial(LEGACY_HOTEL_AUTO_TITLES);
+    }
   }
 
   const isLunch = Boolean(lunchCheckbox?.checked);
@@ -1674,7 +1718,7 @@ function syncLunchBreakRowControls(row, changedInput = null) {
   if (!hoursInput || !minutesInput) return;
 
   if (isLunch) {
-    if (!titleInput.value.trim()) titleInput.value = "Nghỉ trưa";
+    if (!titleInput.value.trim()) titleInput.value = LUNCH_BREAK_AUTO_TITLE;
 
     const totalMinutes = (Number(hoursInput.value || 0) * 60) + Number(minutesInput.value || 0);
     const nextMinutes = Math.min(Math.max(totalMinutes || 30, 1), LUNCH_BREAK_MAX_MINUTES_PER_DAY);
@@ -1688,7 +1732,7 @@ function syncLunchBreakRowControls(row, changedInput = null) {
   }
 
   if (isHotel && !titleInput.value.trim()) {
-    titleInput.value = "Hotel";
+    titleInput.value = HOTEL_AUTO_TITLE;
   }
 
   hoursInput.max = 168;
