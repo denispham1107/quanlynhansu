@@ -77,6 +77,7 @@ const state = {
   editingWorkOrderId: null,
   editingWorkTemplateId: null,
   adminStatusFilter: "all",
+  adminCompletedTypeFilter: "all",
   adminEmployeeFilter: "all",
   adminDateFilter: {
     mode: "today",
@@ -140,6 +141,8 @@ const els = {
   deleteAllWorkOrdersBtn: $("#deleteAllWorkOrdersBtn"),
   adminEmployeeFilter: $("#adminEmployeeFilter"),
   adminStatusFilter: $("#adminStatusFilter"),
+  adminCompletedTypeFilter: $("#adminCompletedTypeFilter"),
+  adminCompletedTypeReport: $("#adminCompletedTypeReport"),
   adminDateMode: $("#adminDateMode"),
   adminSingleDate: $("#adminSingleDate"),
   adminDateFrom: $("#adminDateFrom"),
@@ -2410,6 +2413,16 @@ els.deleteAllWorkOrdersBtn?.addEventListener("click", () => deleteAllWorkOrders(
 
 els.adminStatusFilter.addEventListener("change", (event) => {
   state.adminStatusFilter = event.target.value;
+
+  if (state.adminStatusFilter !== "completed") {
+    state.adminCompletedTypeFilter = "all";
+  }
+
+  renderAdminTasks();
+});
+
+els.adminCompletedTypeFilter?.addEventListener("change", (event) => {
+  state.adminCompletedTypeFilter = event.target.value;
   renderAdminTasks();
 });
 
@@ -2504,6 +2517,88 @@ function getAdminBaseFilteredTasks(computedTasks) {
     .filter((task) => state.adminEmployeeFilter === "all" || task.assignedToUid === state.adminEmployeeFilter);
 }
 
+function getCompletedTaskGroup(task) {
+  if (isLunchBreakTask(task)) return "lunch_break";
+  if (isHotelTask(task)) return "hotel";
+  return "normal";
+}
+
+function getCompletedTaskActualMinutes(task) {
+  const storedMinutes = Number(task.actualMinutes || 0);
+
+  if (storedMinutes > 0) return storedMinutes;
+
+  const completedAt = timestampToDate(task.approvedAt) || timestampToDate(task.submittedAt);
+
+  if (!completedAt) return 0;
+
+  try {
+    return calculateResultAt(task, completedAt).actualMinutes;
+  } catch (error) {
+    return 0;
+  }
+}
+
+function getCompletedTypeFilterLabel(value) {
+  const labels = {
+    lunch_break: "Đã nghỉ trưa",
+    hotel: "Hotel đã làm"
+  };
+
+  return labels[value] || "";
+}
+
+function renderCompletedTypeReport(tasks) {
+  if (!els.adminCompletedTypeReport) return;
+
+  const shouldShowReport =
+    state.adminStatusFilter === "completed" &&
+    ["lunch_break", "hotel"].includes(state.adminCompletedTypeFilter);
+
+  if (!shouldShowReport) {
+    els.adminCompletedTypeReport.classList.add("hidden");
+    els.adminCompletedTypeReport.innerHTML = "";
+    return;
+  }
+
+  const totalsByEmployee = new Map();
+
+  tasks.forEach((task) => {
+    const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+    const current = totalsByEmployee.get(employeeName) || 0;
+    totalsByEmployee.set(employeeName, current + getCompletedTaskActualMinutes(task));
+  });
+
+  const reportTitle = state.adminCompletedTypeFilter === "lunch_break"
+    ? "Báo cáo tổng thời gian các task Nghỉ trưa đã hoàn thành"
+    : "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
+
+  const rows = Array.from(totalsByEmployee.entries())
+    .sort((a, b) => a[0].localeCompare(b[0], "vi"))
+    .map(([name, minutes]) => `<span>${escapeHtml(name)}: ${escapeHtml(formatMinutes(minutes))}</span>`)
+    .join("");
+
+  els.adminCompletedTypeReport.classList.remove("hidden");
+  els.adminCompletedTypeReport.innerHTML = `
+    <strong>${escapeHtml(reportTitle)}</strong>
+    ${rows || "<span>Chưa có dữ liệu phù hợp</span>"}
+  `;
+}
+
+function updateCompletedTypeFilterVisibility() {
+  if (!els.adminCompletedTypeFilter) return;
+
+  const show = state.adminStatusFilter === "completed";
+  els.adminCompletedTypeFilter.classList.toggle("hidden", !show);
+
+  if (show) {
+    els.adminCompletedTypeFilter.value = state.adminCompletedTypeFilter;
+  } else {
+    els.adminCompletedTypeFilter.value = "all";
+    state.adminCompletedTypeFilter = "all";
+  }
+}
+
 function renderAdminTasks() {
   const computed = state.tasks.map((task) => ({
     ...task,
@@ -2538,11 +2633,17 @@ function renderAdminTasks() {
         return task.displayStatus === "completed";
       }
 
-
       return task.displayStatus === state.adminStatusFilter || task.status === state.adminStatusFilter;
     });
   }
 
+  updateCompletedTypeFilterVisibility();
+
+  if (state.adminStatusFilter === "completed" && state.adminCompletedTypeFilter !== "all") {
+    filtered = filtered.filter((task) => getCompletedTaskGroup(task) === state.adminCompletedTypeFilter);
+  }
+
+  renderCompletedTypeReport(filtered);
   refreshDateFilterVisibility("admin");
 
   // Chỉ chèn thêm phiếu nháp trống (0 công việc) khi không có bộ lọc nào khác đang áp dụng,

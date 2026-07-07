@@ -496,6 +496,54 @@
         grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
       }
     }
+
+
+    .completed-subfilter.hidden,
+    .completed-type-report.hidden {
+      display: none !important;
+    }
+
+    .completed-type-report {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 14px;
+      margin: 8px 0 14px;
+      border: 1px dashed #bfdbfe;
+      border-radius: 16px;
+      background: #f8fbff;
+      color: #475569;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .completed-type-report strong {
+      color: #0f172a;
+    }
+
+    .completed-type-report span {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1d4ed8;
+      font-weight: 800;
+    }
+
+    @media (max-width: 768px) {
+      .completed-type-report {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .completed-type-report span {
+        justify-content: center;
+        width: 100%;
+      }
+    }
+
   </style>
 </head>
 <body>
@@ -598,6 +646,12 @@
               <option value="completed">Đã hoàn thành</option>
               <option value="redo">Yêu cầu làm lại</option>
             </select>
+            <select id="adminCompletedTypeFilter" class="completed-subfilter hidden" aria-label="Lọc nhóm công việc đã hoàn thành">
+              <option value="all">Tất cả đã hoàn thành</option>
+              <option value="normal">Công việc bình thường</option>
+              <option value="lunch_break">Đã nghỉ trưa</option>
+              <option value="hotel">Hotel đã làm</option>
+            </select>
             <select id="adminEmployeeFilter" aria-label="Lọc nhân viên">
               <option value="all">Tất cả nhân viên</option>
             </select>
@@ -614,6 +668,7 @@
           </div>
         </div>
         <p id="adminDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
+        <div id="adminCompletedTypeReport" class="completed-type-report hidden"></div>
         <div id="adminTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>
     </main>
