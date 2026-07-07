@@ -69,6 +69,7 @@ const state = {
   tasks: [],
   workOrders: [],
   timeExtensionReasons: [],
+  workTemplates: [],
   notifications: [],
   knownNotificationIds: new Set(),
   notificationsReady: false,
@@ -110,6 +111,20 @@ const els = {
   createEmployeeForm: $("#createEmployeeForm"),
   employeeList: $("#employeeList"),
   openTaskModalBtn: $("#openTaskModalBtn"),
+  openWorkTemplatePageBtn: $("#openWorkTemplatePageBtn"),
+  workTemplateView: $("#workTemplateView"),
+  backToAdminBtn: $("#backToAdminBtn"),
+  openWorkTemplateModalBtn: $("#openWorkTemplateModalBtn"),
+  workTemplateModal: $("#workTemplateModal"),
+  workTemplateForm: $("#workTemplateForm"),
+  workTemplateName: $("#workTemplateName"),
+  workTemplateHours: $("#workTemplateHours"),
+  workTemplateMinutes: $("#workTemplateMinutes"),
+  saveWorkTemplateBtn: $("#saveWorkTemplateBtn"),
+  workTemplateSearch: $("#workTemplateSearch"),
+  clearWorkTemplateSearchBtn: $("#clearWorkTemplateSearchBtn"),
+  workTemplateList: $("#workTemplateList"),
+  workTemplateOptions: $("#workTemplateOptions"),
   taskModal: $("#taskModal"),
   createTaskForm: $("#createTaskForm"),
   workOrderName: $("#workOrderName"),
@@ -839,6 +854,9 @@ onAuthStateChanged(auth, async (user) => {
   state.profile = null;
   state.employees = [];
   state.tasks = [];
+  state.workOrders = [];
+  state.timeExtensionReasons = [];
+  state.workTemplates = [];
   state.notifications = [];
   state.knownNotificationIds = new Set();
   state.notificationsReady = false;
@@ -879,6 +897,7 @@ function showLogin() {
   els.loginView.classList.remove("hidden");
   els.appView.classList.add("hidden");
   els.adminView.classList.add("hidden");
+  els.workTemplateView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
   els.notificationPanel?.classList.add("hidden");
 }
@@ -903,6 +922,7 @@ function cleanupSubscriptions() {
 // =========================
 function setupAdminDashboard() {
   els.adminView.classList.remove("hidden");
+  els.workTemplateView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
 
   const unsubUsers = onSnapshot(
@@ -946,6 +966,21 @@ function setupAdminDashboard() {
     handleSnapshotError
   );
 
+  const templatesQuery = query(collection(db, "workTemplates"), orderBy("createdAt", "desc"));
+
+  const unsubWorkTemplates = onSnapshot(
+    templatesQuery,
+    (snapshot) => {
+      state.workTemplates = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderWorkTemplateList();
+      renderWorkTemplateOptions();
+    },
+    (error) => {
+      console.error(error);
+      toast("Không đọc được Danh sách công việc. Cần cập nhật Firestore Rules cho collection workTemplates.", "error");
+    }
+  );
+
   const reasonsQuery = query(collection(db, "timeExtensionReasons"), orderBy("createdAt", "asc"));
 
   const unsubTimeExtensionReasons = onSnapshot(
@@ -962,7 +997,7 @@ function setupAdminDashboard() {
     }
   );
 
-  state.unsubs.push(unsubUsers, unsubTasks, unsubWorkOrders, unsubTimeExtensionReasons);
+  state.unsubs.push(unsubUsers, unsubTasks, unsubWorkOrders, unsubWorkTemplates, unsubTimeExtensionReasons);
 }
 
 function handleSnapshotError(error) {
@@ -999,6 +1034,230 @@ function employeeOptionsHtml() {
     ))
     .join("");
 }
+
+// =========================
+// Danh sách công việc mẫu
+// =========================
+function normalizeSearchText(value = "") {
+  return String(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function levenshteinDistance(a = "", b = "") {
+  const first = normalizeSearchText(a);
+  const second = normalizeSearchText(b);
+
+  if (first === second) return 0;
+  if (!first.length) return second.length;
+  if (!second.length) return first.length;
+
+  const dp = Array.from({ length: first.length + 1 }, () => []);
+
+  for (let i = 0; i <= first.length; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= second.length; j += 1) dp[0][j] = j;
+
+  for (let i = 1; i <= first.length; i += 1) {
+    for (let j = 1; j <= second.length; j += 1) {
+      const cost = first[i - 1] === second[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dp[first.length][second.length];
+}
+
+function isWorkTemplateMatch(template, queryText) {
+  const queryValue = normalizeSearchText(queryText);
+  if (!queryValue) return true;
+
+  const nameValue = normalizeSearchText(template.name || "");
+  if (!nameValue) return false;
+  if (nameValue.includes(queryValue) || queryValue.includes(nameValue)) return true;
+
+  const queryWords = queryValue.split(" ").filter(Boolean);
+  const nameWords = nameValue.split(" ").filter(Boolean);
+
+  if (queryWords.every((word) => nameValue.includes(word))) return true;
+
+  return queryWords.some((queryWord) => (
+    nameWords.some((nameWord) => {
+      const limit = queryWord.length <= 4 ? 1 : 2;
+      return levenshteinDistance(queryWord, nameWord) <= limit;
+    })
+  ));
+}
+
+function getFilteredWorkTemplates() {
+  const queryText = els.workTemplateSearch?.value || "";
+  return state.workTemplates.filter((template) => isWorkTemplateMatch(template, queryText));
+}
+
+function renderWorkTemplateOptions() {
+  if (!els.workTemplateOptions) return;
+
+  els.workTemplateOptions.innerHTML = state.workTemplates
+    .map((template) => `<option value="${escapeHtml(template.name || "")}"></option>`)
+    .join("");
+}
+
+function renderWorkTemplateList() {
+  if (!els.workTemplateList) return;
+
+  if (!state.workTemplates.length) {
+    els.workTemplateList.innerHTML = "Chưa có công việc mẫu.";
+    els.workTemplateList.classList.add("empty");
+    return;
+  }
+
+  const filteredTemplates = getFilteredWorkTemplates();
+
+  if (!filteredTemplates.length) {
+    els.workTemplateList.innerHTML = "Không tìm thấy công việc phù hợp với nội dung đang nhập.";
+    els.workTemplateList.classList.add("empty");
+    return;
+  }
+
+  els.workTemplateList.classList.remove("empty");
+  els.workTemplateList.innerHTML = filteredTemplates
+    .map((template) => {
+      const minutes = Number(template.deadlineMinutes || 0);
+      const createdAt = template.createdAt ? formatFullDateTime(template.createdAt) : "--";
+
+      return `
+        <div class="work-template-item">
+          <div>
+            <strong>${escapeHtml(template.name || "Không tên")}</strong>
+            <span>Thời gian phải hoàn thành: ${escapeHtml(formatMinutes(minutes))}</span>
+            <span>Tạo lúc: ${escapeHtml(createdAt)}${template.createdByName ? ` • ${escapeHtml(template.createdByName)}` : ""}</span>
+          </div>
+          <div class="work-template-duration">${escapeHtml(formatMinutes(minutes))}</div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function openWorkTemplatePage() {
+  if (state.profile?.role !== "admin") return;
+
+  els.adminView.classList.add("hidden");
+  els.workTemplateView?.classList.remove("hidden");
+  renderWorkTemplateList();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function backToAdminDashboard() {
+  els.workTemplateView?.classList.add("hidden");
+  els.adminView.classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function openWorkTemplateModal() {
+  if (state.profile?.role !== "admin") return;
+
+  els.workTemplateForm?.reset();
+  if (els.workTemplateHours) els.workTemplateHours.value = 0;
+  if (els.workTemplateMinutes) els.workTemplateMinutes.value = 30;
+  els.workTemplateModal?.classList.remove("hidden");
+  setTimeout(() => els.workTemplateName?.focus(), 50);
+}
+
+function closeWorkTemplateModal() {
+  els.workTemplateModal?.classList.add("hidden");
+}
+
+function findWorkTemplateByName(name) {
+  const normalizedName = normalizeSearchText(name);
+  if (!normalizedName) return null;
+
+  return state.workTemplates.find((template) => normalizeSearchText(template.name || "") === normalizedName) || null;
+}
+
+function applyWorkTemplateToRow(row, template) {
+  if (!row || !template) return;
+
+  const deadlineMinutes = Number(template.deadlineMinutes || 0);
+  if (deadlineMinutes <= 0) return;
+
+  const hoursInput = row.querySelector(".row-hours");
+  const minutesInput = row.querySelector(".row-minutes");
+
+  if (hoursInput) hoursInput.value = Math.floor(deadlineMinutes / 60);
+  if (minutesInput) minutesInput.value = deadlineMinutes % 60;
+}
+
+els.openWorkTemplatePageBtn?.addEventListener("click", openWorkTemplatePage);
+els.backToAdminBtn?.addEventListener("click", backToAdminDashboard);
+els.openWorkTemplateModalBtn?.addEventListener("click", openWorkTemplateModal);
+els.clearWorkTemplateSearchBtn?.addEventListener("click", () => {
+  if (els.workTemplateSearch) els.workTemplateSearch.value = "";
+  renderWorkTemplateList();
+  els.workTemplateSearch?.focus();
+});
+els.workTemplateSearch?.addEventListener("input", renderWorkTemplateList);
+
+$$('[data-close-work-template-modal]').forEach((button) => {
+  button.addEventListener("click", closeWorkTemplateModal);
+});
+
+els.workTemplateForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (state.profile?.role !== "admin") return;
+
+  const name = els.workTemplateName?.value.trim() || "";
+  const hours = Number(els.workTemplateHours?.value || 0);
+  const minutes = Number(els.workTemplateMinutes?.value || 0);
+  const deadlineMinutes = hours * 60 + minutes;
+
+  try {
+    if (!name) throw new Error("Vui lòng nhập tên công việc.");
+    if (!Number.isInteger(hours) || hours < 0 || hours > 168) {
+      throw new Error("Số giờ phải nằm trong khoảng 0 đến 168.");
+    }
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
+      throw new Error("Số phút phải nằm trong khoảng 0 đến 59.");
+    }
+    if (deadlineMinutes <= 0) {
+      throw new Error("Thời gian hoàn thành phải lớn hơn 0 phút.");
+    }
+    if (state.workTemplates.some((template) => normalizeSearchText(template.name || "") === normalizeSearchText(name))) {
+      throw new Error("Tên công việc này đã tồn tại trong danh sách.");
+    }
+
+    setButtonLoading(els.saveWorkTemplateBtn, true, "Đang lưu...");
+
+    const templateRef = doc(collection(db, "workTemplates"));
+    await setDoc(templateRef, {
+      id: templateRef.id,
+      name,
+      searchText: normalizeSearchText(name),
+      deadlineMinutes,
+      createdByUid: state.user.uid,
+      createdByName: state.profile.name || state.user.email || "Admin",
+      createdAt: serverTimestamp(),
+      updatedAt: null
+    });
+
+    closeWorkTemplateModal();
+    toast(`Đã tạo công việc “${name}” với thời gian ${formatMinutes(deadlineMinutes)}.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không tạo được công việc mẫu.", "error");
+  } finally {
+    setButtonLoading(els.saveWorkTemplateBtn, false);
+  }
+});
 
 function renderEmployeeSelects() {
   const employeeOptions = employeeOptionsHtml();
@@ -1082,7 +1341,7 @@ function createTaskRowElement(prefill = null) {
     </div>
     <label>
       Tên công việc
-      <input type="text" class="row-title" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
+      <input type="text" class="row-title" list="workTemplateOptions" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
     </label>
     <label>
       Mô tả công việc <span class="optional-label">(không bắt buộc)</span>
@@ -1227,6 +1486,17 @@ els.taskRowsContainer.addEventListener("click", (event) => {
   const button = event.target.closest('[data-action="remove-task-row"]');
   if (!button) return;
   removeTaskRow(button.dataset.rowId);
+});
+
+els.taskRowsContainer.addEventListener("change", (event) => {
+  const titleInput = event.target.closest(".row-title");
+  if (!titleInput) return;
+
+  const template = findWorkTemplateByName(titleInput.value);
+  if (!template) return;
+
+  applyWorkTemplateToRow(titleInput.closest(".task-row"), template);
+  toast(`Đã áp dụng thời gian ${formatMinutes(Number(template.deadlineMinutes || 0))} cho công việc “${template.name}”.`, "success");
 });
 
 els.openTaskModalBtn.addEventListener("click", () => {
@@ -1800,6 +2070,7 @@ async function syncOverdueTasksByAdmin() {
 // =========================
 function setupEmployeeDashboard() {
   els.adminView.classList.add("hidden");
+  els.workTemplateView?.classList.add("hidden");
   els.employeeView.classList.remove("hidden");
 
   // Chỉ query task của chính nhân viên đang đăng nhập.

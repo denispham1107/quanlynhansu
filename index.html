@@ -255,6 +255,93 @@
       color: #64748b;
       line-height: 1.35;
     }
+
+
+    /* Danh sách công việc mẫu cho Admin */
+    .hero-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .work-template-toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .work-template-search {
+      flex: 1 1 280px;
+      min-width: 220px;
+    }
+
+    .work-template-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .work-template-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      border: 1px solid #dbeafe;
+      border-radius: 18px;
+      background: #f8fbff;
+    }
+
+    .work-template-item strong,
+    .work-template-item span {
+      display: block;
+    }
+
+    .work-template-item strong {
+      color: #0f172a;
+      font-size: 16px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .work-template-item span {
+      margin-top: 5px;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .work-template-duration {
+      flex: 0 0 auto;
+      padding: 10px 12px;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1d4ed8;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 640px) {
+      .hero-actions,
+      .work-template-toolbar,
+      .work-template-item {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .work-template-search {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .work-template-duration {
+        width: fit-content;
+      }
+    }
+
     @media (max-width: 640px) {
       .photo-report-box {
         align-items: stretch;
@@ -328,7 +415,10 @@
           <h2>Giao việc và duyệt kết quả nhân viên</h2>
           <p class="muted">Theo dõi realtime: đang làm, gần hết giờ, quá hạn, chờ xác nhận và đã hoàn thành.</p>
         </div>
-        <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
+        <div class="hero-actions">
+          <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
+          <button id="openWorkTemplatePageBtn" class="btn ghost large" type="button">Danh sách công việc</button>
+        </div>
       </section>
 
       <section class="stats-grid">
@@ -416,6 +506,37 @@
       </section>
     </main>
 
+    <!-- ADMIN WORK TEMPLATE PAGE -->
+    <main id="workTemplateView" class="page hidden">
+      <section class="hero-panel">
+        <div>
+          <p class="eyebrow">Admin Dashboard</p>
+          <h2>Danh sách công việc</h2>
+          <p class="muted">Tạo sẵn các công việc mẫu kèm thời gian phải hoàn thành để tìm kiếm và dùng nhanh khi giao việc.</p>
+        </div>
+        <div class="hero-actions">
+          <button id="backToAdminBtn" class="btn ghost large" type="button">← Quay lại</button>
+          <button id="openWorkTemplateModalBtn" class="btn primary large" type="button">+ Tạo công việc</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>Công việc đã tạo</h3>
+            <p class="muted">Nhập tên gần đúng, hệ thống sẽ chỉ hiển thị các công việc phù hợp.</p>
+          </div>
+        </div>
+
+        <div class="work-template-toolbar">
+          <input id="workTemplateSearch" class="work-template-search" type="search" placeholder="Tìm công việc, ví dụ: tắm mèo, dọn phòng..." autocomplete="off" />
+          <button id="clearWorkTemplateSearchBtn" class="btn ghost small" type="button">Xóa tìm kiếm</button>
+        </div>
+
+        <div id="workTemplateList" class="work-template-list empty-box">Chưa có công việc mẫu.</div>
+      </section>
+    </main>
+
     <!-- EMPLOYEE DASHBOARD -->
     <main id="employeeView" class="page hidden">
       <section class="hero-panel employee-hero">
@@ -450,6 +571,44 @@
       </section>
     </main>
   </section>
+
+  <datalist id="workTemplateOptions"></datalist>
+
+  <!-- WORK TEMPLATE MODAL -->
+  <div id="workTemplateModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="workTemplateModalTitle">
+    <div class="modal-backdrop" data-close-work-template-modal></div>
+    <div class="modal-card small-modal">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Danh sách công việc</p>
+          <h3 id="workTemplateModalTitle">+ Tạo công việc mẫu</h3>
+        </div>
+        <button class="icon-btn" data-close-work-template-modal aria-label="Đóng">×</button>
+      </div>
+
+      <form id="workTemplateForm" class="form-stack">
+        <label>
+          Tên công việc
+          <input id="workTemplateName" type="text" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
+        </label>
+        <div class="two-col">
+          <label>
+            Số giờ
+            <input id="workTemplateHours" type="number" min="0" max="168" step="1" value="0" required />
+          </label>
+          <label>
+            Số phút
+            <input id="workTemplateMinutes" type="number" min="0" max="59" step="1" value="30" required />
+          </label>
+        </div>
+        <p class="small-note">Công việc mẫu sau khi tạo sẽ hiển thị trong danh sách và gợi ý khi Admin nhập tên công việc trong phiếu.</p>
+        <div class="modal-footer-actions">
+          <button class="btn ghost" type="button" data-close-work-template-modal>Hủy</button>
+          <button id="saveWorkTemplateBtn" class="btn primary" type="submit">Lưu công việc</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- CREATE WORK ORDER (PHIẾU CÔNG VIỆC) MODAL -->
   <div id="taskModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
