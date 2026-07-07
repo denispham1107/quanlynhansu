@@ -436,7 +436,6 @@ function statusLabel(status) {
     waiting_assignee: "Chờ chọn người",
     queued: "Đang chờ đến lượt",
     lunch_break: "Nghỉ trưa",
-    lunch_completed: "Đã nghỉ trưa",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
@@ -451,7 +450,6 @@ function statusLabel(status) {
 function getDisplayStatus(task) {
   if (task.status === "draft") return "draft";
   if (task.status === "waiting_assignee" || !task.assignedToUid) return "waiting_assignee";
-  if (task.status === "completed" && isLunchBreakTask(task)) return "lunch_completed";
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
   if (task.status === "lunch_break" || (task.isLunchBreak && task.status === "doing")) return "lunch_break";
@@ -490,7 +488,6 @@ function taskCardClass(displayStatus) {
     waiting_assignee: "is-waiting-assignee",
     queued: "is-queued",
     lunch_break: "is-lunch-break",
-    lunch_completed: "is-lunch-completed",
     doing: "",
     near_due: "is-near-due",
     overdue: "is-overdue",
@@ -2398,7 +2395,7 @@ function renderAdminTasks() {
     )).length,
     submitted: baseFiltered.filter((task) => task.displayStatus === "submitted").length,
     overdue: baseFiltered.filter((task) => task.displayStatus === "overdue").length,
-    completed: baseFiltered.filter((task) => task.displayStatus === "completed" || task.displayStatus === "lunch_completed").length
+    completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
 
   els.statDoing.textContent = stats.doing;
@@ -2414,9 +2411,6 @@ function renderAdminTasks() {
         return task.displayStatus === "completed";
       }
 
-      if (state.adminStatusFilter === "lunch_completed") {
-        return task.displayStatus === "lunch_completed";
-      }
 
       return task.displayStatus === state.adminStatusFilter || task.status === state.adminStatusFilter;
     });
@@ -2740,7 +2734,6 @@ function getInitialCountdownText(task) {
       ? `Tạm dừng - còn ${formatCountdown(remainingMs)}`
       : `Chờ chọn người - chưa bắt đầu`;
   }
-  if (task.status === "completed" && isLunchBreakTask(task)) return "Đã nghỉ trưa";
   if (task.status === "completed") return "Đã hoàn thành";
   if (task.status === "submitted") return "Chờ Admin duyệt";
 
@@ -3927,7 +3920,7 @@ async function endLunchBreakTask(taskId, button) {
     }
 
     await createNotifications(notifications);
-    toast("Đã kết thúc phiếu Nghỉ trưa và chuyển sang trạng thái Đã nghỉ trưa.", "success");
+    toast("Đã kết thúc phiếu Nghỉ trưa và chuyển sang trạng thái Đã hoàn thành.", "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không kết thúc được phiếu Nghỉ trưa.", "error");
@@ -4043,7 +4036,7 @@ function updateCountdowns() {
     }
 
     if (rawStatus === "completed") {
-      countdown.textContent = card.dataset.displayStatus === "lunch_completed" ? "Đã nghỉ trưa" : "Đã hoàn thành";
+      countdown.textContent = "Đã hoàn thành";
       return;
     }
 
