@@ -162,9 +162,9 @@ const els = {
   employeeClearDateFilter: $("#employeeClearDateFilter"),
   employeeDateSummary: $("#employeeDateSummary"),
   employeeTaskList: $("#employeeTaskList"),
+  statDraft: $("#statDraft"),
   statDoing: $("#statDoing"),
-  statSubmitted: $("#statSubmitted"),
-  statOverdue: $("#statOverdue"),
+  statHotel: $("#statHotel"),
   statCompleted: $("#statCompleted"),
   enableNotificationsBtn: $("#enableNotificationsBtn"),
   notificationBellBtn: $("#notificationBellBtn"),
@@ -2781,22 +2781,21 @@ function renderAdminTasks() {
   const baseFiltered = getAdminBaseFilteredTasks(computed);
 
   const stats = {
+    draft: baseFiltered.filter((task) => task.displayStatus === "draft").length,
     doing: baseFiltered.filter((task) => (
       task.displayStatus === "doing" ||
       task.displayStatus === "lunch_break" ||
-      task.displayStatus === "hotel" ||
       task.displayStatus === "near_due" ||
       task.displayStatus === "redo"
     )).length,
-    submitted: baseFiltered.filter((task) => task.displayStatus === "submitted").length,
-    overdue: baseFiltered.filter((task) => task.displayStatus === "overdue").length,
+    hotel: baseFiltered.filter((task) => task.displayStatus === "hotel").length,
     completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
 
-  els.statDoing.textContent = stats.doing;
-  els.statSubmitted.textContent = stats.submitted;
-  els.statOverdue.textContent = stats.overdue;
-  els.statCompleted.textContent = stats.completed;
+  if (els.statDraft) els.statDraft.textContent = stats.draft;
+  if (els.statDoing) els.statDoing.textContent = stats.doing;
+  if (els.statHotel) els.statHotel.textContent = stats.hotel;
+  if (els.statCompleted) els.statCompleted.textContent = stats.completed;
 
   let filtered = baseFiltered;
 
