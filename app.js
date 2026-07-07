@@ -75,6 +75,7 @@ const state = {
   notificationsReady: false,
   unsubs: [],
   editingWorkOrderId: null,
+  editingWorkTemplateId: null,
   adminStatusFilter: "all",
   adminEmployeeFilter: "all",
   adminDateFilter: {
@@ -117,10 +118,12 @@ const els = {
   openWorkTemplateModalBtn: $("#openWorkTemplateModalBtn"),
   workTemplateModal: $("#workTemplateModal"),
   workTemplateForm: $("#workTemplateForm"),
+  workTemplateModalTitle: $("#workTemplateModalTitle"),
   workTemplateName: $("#workTemplateName"),
   workTemplateHours: $("#workTemplateHours"),
   workTemplateMinutes: $("#workTemplateMinutes"),
   saveWorkTemplateBtn: $("#saveWorkTemplateBtn"),
+  deleteWorkTemplateBtn: $("#deleteWorkTemplateBtn"),
   workTemplateSearch: $("#workTemplateSearch"),
   clearWorkTemplateSearchBtn: $("#clearWorkTemplateSearchBtn"),
   workTemplateList: $("#workTemplateList"),
@@ -1134,14 +1137,15 @@ function renderWorkTemplateList() {
       const createdAt = template.createdAt ? formatFullDateTime(template.createdAt) : "--";
 
       return `
-        <div class="work-template-item">
+        <button class="work-template-item" type="button" data-edit-template-id="${escapeHtml(template.id)}" aria-label="Chỉnh sửa công việc ${escapeHtml(template.name || "Không tên")}">
           <div>
             <strong>${escapeHtml(template.name || "Không tên")}</strong>
             <span>Thời gian phải hoàn thành: ${escapeHtml(formatMinutes(minutes))}</span>
             <span>Tạo lúc: ${escapeHtml(createdAt)}${template.createdByName ? ` • ${escapeHtml(template.createdByName)}` : ""}</span>
+            <span class="work-template-hint">Bấm vào dòng này để chỉnh sửa hoặc xoá</span>
           </div>
           <div class="work-template-duration">${escapeHtml(formatMinutes(minutes))}</div>
-        </div>
+        </button>
       `;
     })
     .join("");
@@ -1162,18 +1166,39 @@ function backToAdminDashboard() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function openWorkTemplateModal() {
+function openWorkTemplateModal(templateId = null) {
   if (state.profile?.role !== "admin") return;
 
+  const template = templateId
+    ? state.workTemplates.find((item) => item.id === templateId)
+    : null;
+
+  state.editingWorkTemplateId = template?.id || null;
   els.workTemplateForm?.reset();
-  if (els.workTemplateHours) els.workTemplateHours.value = 0;
-  if (els.workTemplateMinutes) els.workTemplateMinutes.value = 30;
+
+  if (template) {
+    const deadlineMinutes = Number(template.deadlineMinutes || 0);
+    if (els.workTemplateModalTitle) els.workTemplateModalTitle.textContent = "Chỉnh sửa công việc mẫu";
+    if (els.workTemplateName) els.workTemplateName.value = template.name || "";
+    if (els.workTemplateHours) els.workTemplateHours.value = Math.floor(deadlineMinutes / 60);
+    if (els.workTemplateMinutes) els.workTemplateMinutes.value = deadlineMinutes % 60;
+    if (els.saveWorkTemplateBtn) els.saveWorkTemplateBtn.textContent = "Lưu thay đổi";
+    els.deleteWorkTemplateBtn?.classList.remove("hidden");
+  } else {
+    if (els.workTemplateModalTitle) els.workTemplateModalTitle.textContent = "+ Tạo công việc mẫu";
+    if (els.workTemplateHours) els.workTemplateHours.value = 0;
+    if (els.workTemplateMinutes) els.workTemplateMinutes.value = 30;
+    if (els.saveWorkTemplateBtn) els.saveWorkTemplateBtn.textContent = "Lưu công việc";
+    els.deleteWorkTemplateBtn?.classList.add("hidden");
+  }
+
   els.workTemplateModal?.classList.remove("hidden");
   setTimeout(() => els.workTemplateName?.focus(), 50);
 }
 
 function closeWorkTemplateModal() {
   els.workTemplateModal?.classList.add("hidden");
+  state.editingWorkTemplateId = null;
 }
 
 function findWorkTemplateByName(name) {
@@ -1206,6 +1231,12 @@ els.clearWorkTemplateSearchBtn?.addEventListener("click", () => {
 });
 els.workTemplateSearch?.addEventListener("input", renderWorkTemplateList);
 
+els.workTemplateList?.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-edit-template-id]");
+  if (!item) return;
+  openWorkTemplateModal(item.dataset.editTemplateId);
+});
+
 $$('[data-close-work-template-modal]').forEach((button) => {
   button.addEventListener("click", closeWorkTemplateModal);
 });
@@ -1231,31 +1262,75 @@ els.workTemplateForm?.addEventListener("submit", async (event) => {
     if (deadlineMinutes <= 0) {
       throw new Error("Thời gian hoàn thành phải lớn hơn 0 phút.");
     }
-    if (state.workTemplates.some((template) => normalizeSearchText(template.name || "") === normalizeSearchText(name))) {
+    const normalizedName = normalizeSearchText(name);
+    const duplicatedTemplate = state.workTemplates.find((template) => (
+      template.id !== state.editingWorkTemplateId
+      && normalizeSearchText(template.name || "") === normalizedName
+    ));
+
+    if (duplicatedTemplate) {
       throw new Error("Tên công việc này đã tồn tại trong danh sách.");
     }
 
+    const adminName = state.profile.name || state.user.email || "Admin";
+
     setButtonLoading(els.saveWorkTemplateBtn, true, "Đang lưu...");
 
-    const templateRef = doc(collection(db, "workTemplates"));
-    await setDoc(templateRef, {
-      id: templateRef.id,
-      name,
-      searchText: normalizeSearchText(name),
-      deadlineMinutes,
-      createdByUid: state.user.uid,
-      createdByName: state.profile.name || state.user.email || "Admin",
-      createdAt: serverTimestamp(),
-      updatedAt: null
-    });
+    if (state.editingWorkTemplateId) {
+      await updateDoc(doc(db, "workTemplates", state.editingWorkTemplateId), {
+        name,
+        searchText: normalizedName,
+        deadlineMinutes,
+        updatedByUid: state.user.uid,
+        updatedByName: adminName,
+        updatedAt: serverTimestamp()
+      });
 
-    closeWorkTemplateModal();
-    toast(`Đã tạo công việc “${name}” với thời gian ${formatMinutes(deadlineMinutes)}.`, "success");
+      closeWorkTemplateModal();
+      toast(`Đã cập nhật công việc “${name}” với thời gian ${formatMinutes(deadlineMinutes)}.`, "success");
+    } else {
+      const templateRef = doc(collection(db, "workTemplates"));
+      await setDoc(templateRef, {
+        id: templateRef.id,
+        name,
+        searchText: normalizedName,
+        deadlineMinutes,
+        createdByUid: state.user.uid,
+        createdByName: adminName,
+        createdAt: serverTimestamp(),
+        updatedAt: null
+      });
+
+      closeWorkTemplateModal();
+      toast(`Đã tạo công việc “${name}” với thời gian ${formatMinutes(deadlineMinutes)}.`, "success");
+    }
   } catch (error) {
     console.error(error);
     toast(error.message || "Không tạo được công việc mẫu.", "error");
   } finally {
     setButtonLoading(els.saveWorkTemplateBtn, false);
+  }
+});
+
+els.deleteWorkTemplateBtn?.addEventListener("click", async () => {
+  if (state.profile?.role !== "admin" || !state.editingWorkTemplateId) return;
+
+  const template = state.workTemplates.find((item) => item.id === state.editingWorkTemplateId);
+  const templateName = template?.name || "công việc này";
+  const confirmed = window.confirm(`Bạn chắc chắn muốn xoá “${templateName}” khỏi Danh sách công việc?`);
+
+  if (!confirmed) return;
+
+  try {
+    setButtonLoading(els.deleteWorkTemplateBtn, true, "Đang xoá...");
+    await deleteDoc(doc(db, "workTemplates", state.editingWorkTemplateId));
+    closeWorkTemplateModal();
+    toast(`Đã xoá công việc “${templateName}”.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không xoá được công việc mẫu.", "error");
+  } finally {
+    setButtonLoading(els.deleteWorkTemplateBtn, false);
   }
 });
 
