@@ -3575,12 +3575,32 @@ function taskMatchesStatusFilter(task, statusFilter) {
     return task.displayStatus === "completed";
   }
 
+  if (statusFilter === "hotel") {
+    return isActiveHotelTaskForEmployeeSummary(task);
+  }
+
   return task.displayStatus === statusFilter || task.status === statusFilter;
 }
 
 
 function getEmployeeSummaryName(employee) {
   return employee?.name || employee?.email || "Chưa đặt tên";
+}
+
+function isActiveHotelTaskForEmployeeSummary(task) {
+  if (!task?.assignedToUid || !isHotelTask(task)) return false;
+
+  const displayStatus = task.displayStatus || getDisplayStatus(task);
+
+  // Task Hotel vẫn phải được tính là “đang làm hotel” kể cả khi đã gần hết giờ
+  // hoặc quá hạn. Chỉ loại những trạng thái chưa bắt đầu/đã xong/đang chờ duyệt.
+  return ![
+    "draft",
+    "waiting_assignee",
+    "queued",
+    "submitted",
+    "completed"
+  ].includes(displayStatus);
 }
 
 function isTaskBlockingEmployeeForSummary(task) {
@@ -3590,13 +3610,14 @@ function isTaskBlockingEmployeeForSummary(task) {
 
   // Nhân viên đang “Chờ đến lượt” vẫn được xem là chưa được giao việc
   // trong phần tổng kết nhân viên, vì task đó chưa bắt đầu chiếm thời gian làm thực tế.
+  if (isActiveHotelTaskForEmployeeSummary(task)) return true;
+
   return [
     "doing",
     "near_due",
     "overdue",
     "redo",
-    "lunch_break",
-    "hotel"
+    "lunch_break"
   ].includes(displayStatus);
 }
 
@@ -3648,7 +3669,7 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
       busyEmployeeUids.add(task.assignedToUid);
     }
 
-    if (displayStatus === "hotel") {
+    if (isActiveHotelTaskForEmployeeSummary(task)) {
       hotelEmployeeUids.add(task.assignedToUid);
     }
 
@@ -3696,7 +3717,7 @@ function renderAdminTasks() {
       task.displayStatus === "near_due" ||
       task.displayStatus === "redo"
     )).length,
-    hotel: baseFiltered.filter((task) => task.displayStatus === "hotel").length,
+    hotel: baseFiltered.filter((task) => isActiveHotelTaskForEmployeeSummary(task)).length,
     completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
 
