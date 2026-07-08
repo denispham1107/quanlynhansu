@@ -38,6 +38,47 @@
       word-break: break-word;
     }
 
+    .notification-panel-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .notification-delete-btn {
+      color: #be123c !important;
+      font-weight: 900;
+    }
+
+    .notification-delete-btn:hover {
+      color: #7e22ce !important;
+    }
+
+    .notification-item {
+      cursor: pointer;
+    }
+
+    .notification-item:focus-visible {
+      outline: 3px solid rgba(37, 99, 235, 0.35);
+      outline-offset: 2px;
+    }
+
+    .notification-jump-highlight {
+      animation: notificationJumpPulse 1.8s ease-in-out 1;
+      box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.22), 0 20px 48px rgba(37, 99, 235, 0.18);
+    }
+
+    @keyframes notificationJumpPulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(124, 58, 237, 0);
+      }
+      30% {
+        box-shadow: 0 0 0 8px rgba(124, 58, 237, 0.24), 0 20px 48px rgba(37, 99, 235, 0.2);
+      }
+    }
+
+
     @media (max-width: 768px) {
       html,
       body {
@@ -90,6 +131,11 @@
         gap: 10px;
         align-items: flex-start;
         flex-wrap: wrap;
+      }
+
+      .notification-panel-actions {
+        width: 100%;
+        justify-content: flex-end;
       }
 
       .notification-list {
@@ -865,7 +911,10 @@
           <div id="notificationPanel" class="notification-panel hidden">
             <div class="notification-panel-head">
               <strong>Thông báo</strong>
-              <button id="markAllNotificationsReadBtn" class="link-btn" type="button">Đánh dấu đã đọc</button>
+              <div class="notification-panel-actions">
+                <button id="markAllNotificationsReadBtn" class="link-btn" type="button">Đánh dấu đã đọc</button>
+                <button id="deleteAllNotificationsBtn" class="link-btn notification-delete-btn" type="button">Xóa</button>
+              </div>
             </div>
             <div id="notificationList" class="notification-list empty-box">Chưa có thông báo.</div>
           </div>

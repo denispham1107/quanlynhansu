@@ -182,6 +182,7 @@ const els = {
   notificationList: $("#notificationList"),
   notificationBadge: $("#notificationBadge"),
   markAllNotificationsReadBtn: $("#markAllNotificationsReadBtn"),
+  deleteAllNotificationsBtn: $("#deleteAllNotificationsBtn"),
   extendTimeModal: $("#extendTimeModal"),
   extendTimeForm: $("#extendTimeForm"),
   extendTimeTaskTitle: $("#extendTimeTaskTitle"),
@@ -653,6 +654,7 @@ document.addEventListener("click", (event) => {
 });
 
 els.markAllNotificationsReadBtn?.addEventListener("click", markAllNotificationsRead);
+els.deleteAllNotificationsBtn?.addEventListener("click", deleteAllNotifications);
 
 function setupNotificationListener() {
   if (!state.user) return;
@@ -725,7 +727,14 @@ function renderNotifications() {
   els.notificationList.innerHTML = state.notifications
     .slice(0, 30)
     .map((item) => `
-      <article class="notification-item ${item.readAt ? "" : "unread"}">
+      <article
+        class="notification-item ${item.readAt ? "" : "unread"}"
+        data-action="open-notification-target"
+        data-notification-id="${escapeHtml(item.id)}"
+        role="button"
+        tabindex="0"
+        title="Bấm để mở vị trí liên quan đến thông báo này"
+      >
         <strong>${escapeHtml(item.title || "Thông báo")}</strong>
         <p>${escapeHtml(item.message || "")}</p>
         <time>${formatDateTime(item.createdAt)}</time>
@@ -762,6 +771,141 @@ async function markAllNotificationsRead() {
     console.error(error);
     toast("Không đánh dấu được toàn bộ thông báo.", "error");
   }
+}
+
+async function deleteAllNotifications() {
+  if (!state.notifications.length) {
+    toast("Không có thông báo nào để xoá.", "info");
+    return;
+  }
+
+  if (!window.confirm(`Xoá toàn bộ ${state.notifications.length} thông báo đang hiển thị trong tài khoản này?`)) {
+    return;
+  }
+
+  setButtonLoading(els.deleteAllNotificationsBtn, true, "Đang xoá...");
+
+  try {
+    const ids = state.notifications.map((item) => item.id).filter(Boolean);
+
+    for (let i = 0; i < ids.length; i += 450) {
+      const batch = writeBatch(db);
+      ids.slice(i, i + 450).forEach((id) => {
+        batch.delete(doc(db, "notifications", id));
+      });
+      await batch.commit();
+    }
+
+    toast("Đã xoá toàn bộ thông báo.", "success");
+  } catch (error) {
+    console.error(error);
+    toast("Không xoá được thông báo. Kiểm tra Firestore Rules notifications.", "error");
+  } finally {
+    setButtonLoading(els.deleteAllNotificationsBtn, false);
+  }
+}
+
+function getSafeSelectorValue(value) {
+  if (window.CSS?.escape) return CSS.escape(String(value));
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+}
+
+function syncSelectValue(element, value) {
+  if (element) element.value = value;
+}
+
+function showTaskInCurrentDashboard(task) {
+  const taskDate = getTaskDateValue(task);
+
+  if (state.profile?.role === "admin") {
+    backToAdminDashboard();
+
+    state.adminStatusFilter = "all";
+    state.adminCompletedTypeFilter = "all";
+    state.adminEmployeeFilter = "all";
+    state.adminDateFilter = {
+      mode: taskDate ? "single" : "all",
+      single: taskDate || "",
+      from: "",
+      to: ""
+    };
+
+    syncSelectValue(els.adminStatusFilter, state.adminStatusFilter);
+    syncSelectValue(els.adminCompletedTypeFilter, state.adminCompletedTypeFilter);
+    syncSelectValue(els.adminEmployeeFilter, state.adminEmployeeFilter);
+    syncSelectValue(els.adminDateMode, state.adminDateFilter.mode);
+    syncSelectValue(els.adminSingleDate, state.adminDateFilter.single);
+    syncSelectValue(els.adminDateFrom, "");
+    syncSelectValue(els.adminDateTo, "");
+
+    renderAdminTasks();
+    return;
+  }
+
+  state.employeeStatusFilter = "all";
+  state.employeeCompletedTypeFilter = "all";
+  state.employeeDateFilter = {
+    mode: taskDate ? "single" : "all",
+    single: taskDate || "",
+    from: "",
+    to: ""
+  };
+
+  syncSelectValue(els.employeeStatusFilter, state.employeeStatusFilter);
+  syncSelectValue(els.employeeCompletedTypeFilter, state.employeeCompletedTypeFilter);
+  syncSelectValue(els.employeeDateMode, state.employeeDateFilter.mode);
+  syncSelectValue(els.employeeSingleDate, state.employeeDateFilter.single);
+  syncSelectValue(els.employeeDateFrom, "");
+  syncSelectValue(els.employeeDateTo, "");
+
+  renderEmployeeTasks();
+}
+
+function scrollToTaskCard(taskId) {
+  const selector = `[data-task-card][data-task-id="${getSafeSelectorValue(taskId)}"]`;
+  const target = document.querySelector(selector);
+
+  if (!target) return false;
+
+  target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  target.classList.add("notification-jump-highlight");
+
+  window.setTimeout(() => {
+    target.classList.remove("notification-jump-highlight");
+  }, 2200);
+
+  return true;
+}
+
+async function openNotificationTarget(notificationId) {
+  const notification = state.notifications.find((item) => item.id === notificationId);
+  if (!notification) return;
+
+  if (!notification.readAt) {
+    markNotificationRead(notificationId);
+  }
+
+  els.notificationPanel?.classList.add("hidden");
+
+  if (!notification.taskId) {
+    toast("Thông báo này chưa có vị trí công việc để mở.", "info");
+    return;
+  }
+
+  const task = state.tasks.find((item) => item.id === notification.taskId);
+
+  if (!task) {
+    toast("Không tìm thấy công việc liên quan. Công việc có thể đã bị xoá hoặc chưa tải xong.", "error");
+    return;
+  }
+
+  showTaskInCurrentDashboard(task);
+
+  window.setTimeout(() => {
+    if (!scrollToTaskCard(notification.taskId)) {
+      toast("Đã mở đúng bộ lọc nhưng chưa tìm thấy thẻ công việc trên màn hình.", "info");
+    }
+  }, 180);
 }
 
 async function createNotification({ recipientUid, type, title, message, taskId, taskTitle }) {
@@ -3590,7 +3734,7 @@ function renderTicketGroup(group, mode = "admin") {
   const headerActions = actionButtons.length ? `<div class="ticket-actions">${actionButtons.join("")}</div>` : "";
 
   return `
-    <section class="ticket-group ${isDraft ? "is-draft-ticket" : ""}">
+    <section class="ticket-group ${isDraft ? "is-draft-ticket" : ""}" data-work-order-id="${escapeHtml(group.key)}">
       <div class="ticket-group-header">
         <div>
           <span class="ticket-badge ${isDraft ? "is-draft-badge" : ""}">${isDraft ? "Chưa giao việc" : "Phiếu công việc"}</span>
@@ -3755,7 +3899,7 @@ function renderTaskCard(task, mode) {
     task.status === "submitted";
 
   return `
-    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
+    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-task-id="${escapeHtml(task.id)}" data-work-order-id="${escapeHtml(task.workOrderId || "legacy")}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
       <div class="task-top">
         <div>
           <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
@@ -4137,6 +4281,10 @@ document.addEventListener("click", async (event) => {
     await markNotificationRead(button.dataset.notificationId);
   }
 
+  if (action === "open-notification-target") {
+    await openNotificationTarget(button.dataset.notificationId);
+  }
+
   if (action === "edit-work-order") {
     openEditWorkOrderModal(button.dataset.workOrderId);
   }
@@ -4150,14 +4298,21 @@ document.addEventListener("click", async (event) => {
   }
 });
 
-document.addEventListener("keydown", (event) => {
-  if (!['Enter', ' '].includes(event.key)) return;
+document.addEventListener("keydown", async (event) => {
+  if (!["Enter", " "].includes(event.key)) return;
 
-  const target = event.target.closest('[data-action="open-reassign-employee"]');
-  if (!target) return;
+  const reassignTarget = event.target.closest('[data-action="open-reassign-employee"]');
+  if (reassignTarget) {
+    event.preventDefault();
+    openReassignEmployeeModal(reassignTarget.dataset.taskId);
+    return;
+  }
 
-  event.preventDefault();
-  openReassignEmployeeModal(target.dataset.taskId);
+  const notificationTarget = event.target.closest('[data-action="open-notification-target"]');
+  if (notificationTarget) {
+    event.preventDefault();
+    await openNotificationTarget(notificationTarget.dataset.notificationId);
+  }
 });
 
 
