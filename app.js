@@ -4234,6 +4234,15 @@ function renderResultBox(task) {
   if (isLunchBreakTask(task)) return "";
   if (task.status !== "completed" || !task.resultType) return "";
 
+  if (isHotelTask(task)) {
+    const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+    return `
+      <div class="result-box hotel-result-box">
+        <strong>${escapeHtml(employeeName)} làm hotel được ${formatMinutes(task.actualMinutes)}</strong>
+      </div>
+    `;
+  }
+
   let summary = "Hoàn thành đúng thời gian quy định.";
   let className = "result-box";
 
