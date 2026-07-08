@@ -326,8 +326,18 @@ function isHotelTask(task) {
   return Boolean(task?.isHotel);
 }
 
+function isCleaningTask(task) {
+  return Boolean(task?.isCleaning);
+}
+
 function isActiveLunchBreakTask(task) {
   return isLunchBreakTask(task)
+    && Boolean(task?.assignedToUid)
+    && !["draft", "waiting_assignee", "submitted", "completed"].includes(task.status);
+}
+
+function isActiveCleaningTask(task) {
+  return isCleaningTask(task)
     && Boolean(task?.assignedToUid)
     && !["draft", "waiting_assignee", "submitted", "completed"].includes(task.status);
 }
@@ -342,15 +352,35 @@ function employeeHasActiveLunchBreak(employeeUid, ignoredTaskId = "") {
   ));
 }
 
+function employeeHasActiveCleaningTask(employeeUid, ignoredTaskId = "") {
+  if (!employeeUid) return false;
+
+  return state.tasks.some((task) => (
+    task.id !== ignoredTaskId
+    && task.assignedToUid === employeeUid
+    && isActiveCleaningTask(task)
+  ));
+}
+
 function validateLunchBreakBasicRows(rows) {
-  const invalidRow = rows.find((row) => row.isLunchBreak && Number(row.deadlineMinutes || 0) > LUNCH_BREAK_MAX_MINUTES_PER_DAY);
-  if (invalidRow) {
-    return `Công việc #${invalidRow.index + 1}: phiếu Nghỉ trưa không được lớn hơn ${LUNCH_BREAK_MAX_MINUTES_PER_DAY} phút.`;
+  const invalidLunchRow = rows.find((row) => row.isLunchBreak && Number(row.deadlineMinutes || 0) > LUNCH_BREAK_MAX_MINUTES_PER_DAY);
+  if (invalidLunchRow) {
+    return `Công việc #${invalidLunchRow.index + 1}: phiếu Nghỉ trưa không được lớn hơn ${LUNCH_BREAK_MAX_MINUTES_PER_DAY} phút.`;
   }
 
-  const zeroRow = rows.find((row) => row.isLunchBreak && Number(row.deadlineMinutes || 0) <= 0);
-  if (zeroRow) {
-    return `Công việc #${zeroRow.index + 1}: thời gian Nghỉ trưa phải lớn hơn 0 phút.`;
+  const zeroLunchRow = rows.find((row) => row.isLunchBreak && Number(row.deadlineMinutes || 0) <= 0);
+  if (zeroLunchRow) {
+    return `Công việc #${zeroLunchRow.index + 1}: thời gian Nghỉ trưa phải lớn hơn 0 phút.`;
+  }
+
+  const invalidCleaningRow = rows.find((row) => row.isCleaning && Number(row.deadlineMinutes || 0) > LUNCH_BREAK_MAX_MINUTES_PER_DAY);
+  if (invalidCleaningRow) {
+    return `Công việc #${invalidCleaningRow.index + 1}: phiếu Dọn dẹp vệ sinh không được lớn hơn ${LUNCH_BREAK_MAX_MINUTES_PER_DAY} phút.`;
+  }
+
+  const zeroCleaningRow = rows.find((row) => row.isCleaning && Number(row.deadlineMinutes || 0) <= 0);
+  if (zeroCleaningRow) {
+    return `Công việc #${zeroCleaningRow.index + 1}: thời gian Dọn dẹp vệ sinh phải lớn hơn 0 phút.`;
   }
 
   return null;
@@ -360,24 +390,39 @@ function validateLunchBreakRowsForDispatch(rows) {
   const basicError = validateLunchBreakBasicRows(rows);
   if (basicError) return basicError;
 
-  const plannedActiveKeys = new Set();
+  const plannedLunchKeys = new Set();
+  const plannedCleaningKeys = new Set();
 
   for (const row of rows) {
-    if (!row.isLunchBreak || !row.assignedToUid) continue;
+    if (!row.assignedToUid) continue;
 
     const employeeName = row.assignedEmployee?.name || row.assignedEmployee?.email || "nhân viên này";
     const activeKey = row.assignedToUid;
     const ignoredTaskId = row.taskId || "";
 
-    if (plannedActiveKeys.has(activeKey)) {
-      return `${employeeName} đã có 1 phiếu Nghỉ trưa trong chính lượt giao này. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.`;
+    if (row.isLunchBreak) {
+      if (plannedLunchKeys.has(activeKey)) {
+        return `${employeeName} đã có 1 phiếu Nghỉ trưa trong chính lượt giao này. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.`;
+      }
+
+      if (employeeHasActiveLunchBreak(row.assignedToUid, ignoredTaskId)) {
+        return `${employeeName} đang có phiếu Nghỉ trưa chưa báo hoàn thành. Chỉ tạo phiếu nghỉ trưa mới sau khi nhân viên đã bấm Hoàn thành.`;
+      }
+
+      plannedLunchKeys.add(activeKey);
     }
 
-    if (employeeHasActiveLunchBreak(row.assignedToUid, ignoredTaskId)) {
-      return `${employeeName} đang có phiếu Nghỉ trưa chưa báo hoàn thành. Chỉ tạo phiếu nghỉ trưa mới sau khi nhân viên đã bấm Hoàn thành.`;
-    }
+    if (row.isCleaning) {
+      if (plannedCleaningKeys.has(activeKey)) {
+        return `${employeeName} đã có 1 phiếu Dọn dẹp vệ sinh trong chính lượt giao này. Mỗi nhân viên chỉ được có 1 phiếu Dọn dẹp vệ sinh đang chạy.`;
+      }
 
-    plannedActiveKeys.add(activeKey);
+      if (employeeHasActiveCleaningTask(row.assignedToUid, ignoredTaskId)) {
+        return `${employeeName} đang có phiếu Dọn dẹp vệ sinh chưa báo hoàn thành. Chỉ tạo phiếu mới sau khi phiếu Dọn dẹp vệ sinh trước đã hoàn thành.`;
+      }
+
+      plannedCleaningKeys.add(activeKey);
+    }
   }
 
   return null;
@@ -401,9 +446,28 @@ function validateLunchBreakAssignment(task, employeeUid) {
   return null;
 }
 
+function validateCleaningAssignment(task, employeeUid) {
+  if (!isCleaningTask(task) || !employeeUid) return null;
+
+  const employee = state.employees.find((item) => item.uid === employeeUid);
+  const employeeName = employee?.name || employee?.email || "Nhân viên này";
+  const deadlineMinutes = Number(task.deadlineMinutes || 0);
+
+  if (deadlineMinutes <= 0 || deadlineMinutes > LUNCH_BREAK_MAX_MINUTES_PER_DAY) {
+    return `Phiếu Dọn dẹp vệ sinh chỉ được từ 1 đến ${LUNCH_BREAK_MAX_MINUTES_PER_DAY} phút.`;
+  }
+
+  if (employeeHasActiveCleaningTask(employeeUid, task.id)) {
+    return `${employeeName} đang có phiếu Dọn dẹp vệ sinh chưa hoàn thành. Chỉ chọn lại nhân viên sau khi phiếu Dọn dẹp vệ sinh trước đã hoàn thành.`;
+  }
+
+  return null;
+}
+
 function getActiveTaskStatusFromFlags(value = {}) {
   if (value.isLunchBreak) return "lunch_break";
   if (value.isHotel) return "hotel";
+  if (value.isCleaning) return "cleaning";
   return "doing";
 }
 
@@ -467,6 +531,7 @@ function statusLabel(status) {
     queued: "Đang chờ đến lượt",
     lunch_break: "Nghỉ trưa",
     hotel: "Hotel",
+    cleaning: "Dọn dẹp vệ sinh",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
@@ -485,6 +550,7 @@ function getDisplayStatus(task) {
   if (task.status === "submitted") return "submitted";
   if (task.status === "lunch_break" || (task.isLunchBreak && task.status === "doing")) return "lunch_break";
   if (task.status === "hotel" || (task.isHotel && task.status === "doing")) return "hotel";
+  if (task.status === "cleaning" || (task.isCleaning && task.status === "doing")) return "cleaning";
 
   // Công việc đã giao nhưng nhân viên chưa tới lượt (vẫn còn đang trong thời gian
   // quy định của (các) công việc được giao trước đó cho chính người này).
@@ -521,6 +587,7 @@ function taskCardClass(displayStatus) {
     queued: "is-queued",
     lunch_break: "is-lunch-break",
     hotel: "is-hotel",
+    cleaning: "is-cleaning",
     doing: "",
     near_due: "is-near-due",
     overdue: "is-overdue",
@@ -1938,8 +2005,10 @@ let photoRequirementTouched = false;
 
 const LUNCH_BREAK_AUTO_TITLE = "Phiếu nghỉ trưa";
 const HOTEL_AUTO_TITLE = "Làm hotel";
+const CLEANING_AUTO_TITLE = "Dọn dẹp vệ sinh";
 const LEGACY_LUNCH_BREAK_AUTO_TITLES = ["Nghỉ trưa", LUNCH_BREAK_AUTO_TITLE];
 const LEGACY_HOTEL_AUTO_TITLES = ["Hotel", HOTEL_AUTO_TITLE];
+const LEGACY_CLEANING_AUTO_TITLES = [CLEANING_AUTO_TITLE, "Dọn dẹp Vệ Sinh"];
 const HOTEL_BASE_PET_COUNT = 10;
 const HOTEL_BASE_MINUTES = 30;
 const HOTEL_EXTRA_MINUTES_PER_PET = 2;
@@ -2036,9 +2105,14 @@ function createTaskRowElement(prefill = null) {
         <input type="checkbox" class="row-hotel" />
         Hotel
       </label>
+      <label class="checkbox-line cleaning-line">
+        <input type="checkbox" class="row-cleaning" />
+        Dọn dẹp Vệ Sinh
+      </label>
     </div>
     <p class="small-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
     <p class="small-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>10 bé</strong> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <strong>30 phút</strong>. Cứ <strong>mỗi 1 bé vào</strong> ở thêm thì sẽ cộng thêm thời gian cho <strong>2 phút</strong>.</p>
+    <p class="small-note cleaning-note hidden">Phiếu Dọn dẹp vệ sinh tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Dọn dẹp vệ sinh đang chạy.</p>
     <div class="two-col">
       <label>
         Số giờ
@@ -2072,6 +2146,10 @@ function createTaskRowElement(prefill = null) {
 
     if (prefill.isHotel) {
       wrapper.querySelector(".row-hotel").checked = true;
+    }
+
+    if (prefill.isCleaning) {
+      wrapper.querySelector(".row-cleaning").checked = true;
     }
   }
 
@@ -2117,22 +2195,32 @@ function syncLunchBreakRowControls(row, changedInput = null) {
 
   const lunchCheckbox = row.querySelector(".row-lunch-break");
   const hotelCheckbox = row.querySelector(".row-hotel");
+  const cleaningCheckbox = row.querySelector(".row-cleaning");
   const hoursInput = row.querySelector(".row-hours");
   const minutesInput = row.querySelector(".row-minutes");
   const titleInput = row.querySelector(".row-title");
   const lunchNote = row.querySelector(".lunch-break-note");
   const hotelNote = row.querySelector(".hotel-note");
+  const cleaningNote = row.querySelector(".cleaning-note");
 
   const lunchChanged = Boolean(changedInput?.matches?.(".row-lunch-break"));
   const hotelChanged = Boolean(changedInput?.matches?.(".row-hotel"));
+  const cleaningChanged = Boolean(changedInput?.matches?.(".row-cleaning"));
 
-  // Hai loại đặc biệt không được chọn cùng lúc.
-  if (lunchChanged && lunchCheckbox?.checked && hotelCheckbox) {
-    hotelCheckbox.checked = false;
+  // Các loại đặc biệt không được chọn cùng lúc.
+  if (lunchChanged && lunchCheckbox?.checked) {
+    if (hotelCheckbox) hotelCheckbox.checked = false;
+    if (cleaningCheckbox) cleaningCheckbox.checked = false;
   }
 
-  if (hotelChanged && hotelCheckbox?.checked && lunchCheckbox) {
-    lunchCheckbox.checked = false;
+  if (hotelChanged && hotelCheckbox?.checked) {
+    if (lunchCheckbox) lunchCheckbox.checked = false;
+    if (cleaningCheckbox) cleaningCheckbox.checked = false;
+  }
+
+  if (cleaningChanged && cleaningCheckbox?.checked) {
+    if (lunchCheckbox) lunchCheckbox.checked = false;
+    if (hotelCheckbox) hotelCheckbox.checked = false;
   }
 
   if (lunchChanged && titleInput) {
@@ -2155,15 +2243,27 @@ function syncLunchBreakRowControls(row, changedInput = null) {
     }
   }
 
+  if (cleaningChanged && titleInput) {
+    if (cleaningCheckbox?.checked) {
+      titleInput.value = CLEANING_AUTO_TITLE;
+      setWorkOrderNameForSpecialTask(CLEANING_AUTO_TITLE);
+    } else if (isAutoSpecialTitle(titleInput.value, LEGACY_CLEANING_AUTO_TITLES)) {
+      titleInput.value = "";
+      clearWorkOrderNameIfAutoSpecial(LEGACY_CLEANING_AUTO_TITLES);
+    }
+  }
+
   const isLunch = Boolean(lunchCheckbox?.checked);
   const isHotel = Boolean(hotelCheckbox?.checked);
+  const isCleaning = Boolean(cleaningCheckbox?.checked);
 
   lunchNote?.classList.toggle("hidden", !isLunch);
   hotelNote?.classList.toggle("hidden", !isHotel);
+  cleaningNote?.classList.toggle("hidden", !isCleaning);
   if (!hoursInput || !minutesInput) return;
 
-  if (isLunch) {
-    if (!titleInput.value.trim()) titleInput.value = LUNCH_BREAK_AUTO_TITLE;
+  if (isLunch || isCleaning) {
+    if (!titleInput.value.trim()) titleInput.value = isLunch ? LUNCH_BREAK_AUTO_TITLE : CLEANING_AUTO_TITLE;
 
     const totalMinutes = (Number(hoursInput.value || 0) * 60) + Number(minutesInput.value || 0);
     const nextMinutes = Math.min(Math.max(totalMinutes || 30, 1), LUNCH_BREAK_MAX_MINUTES_PER_DAY);
@@ -2278,10 +2378,10 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   const row = event.target.closest(".task-row");
   if (!row) return;
 
-  if (event.target.matches(".row-lunch-break, .row-hotel, .row-hours, .row-minutes")) {
+  if (event.target.matches(".row-lunch-break, .row-hotel, .row-cleaning, .row-hours, .row-minutes")) {
     syncLunchBreakRowControls(row, event.target);
 
-    if (event.target.matches(".row-lunch-break, .row-hotel")) {
+    if (event.target.matches(".row-lunch-break, .row-hotel, .row-cleaning")) {
       syncPhotoRequirementDefaultFromTaskTypes();
     }
   }
@@ -2336,6 +2436,7 @@ function openEditWorkOrderModal(workOrderId) {
         assignedToUid: task.assignedToUid,
         isLunchBreak: Boolean(task.isLunchBreak),
         isHotel: Boolean(task.isHotel),
+        isCleaning: Boolean(task.isCleaning),
         hotelPetCount: Number(task.hotelPetCount || 0),
         hours: Math.floor(deadlineMinutes / 60),
         minutes: deadlineMinutes % 60
@@ -2369,6 +2470,7 @@ function readTaskRowsData() {
     const assignedToUid = row.querySelector(".row-assignee").value;
     const isLunchBreak = Boolean(row.querySelector(".row-lunch-break")?.checked);
     const isHotel = Boolean(row.querySelector(".row-hotel")?.checked);
+    const isCleaning = Boolean(row.querySelector(".row-cleaning")?.checked);
     const hotelPetCount = 0;
     const hotelAllowedMinutes = 0;
     const hours = Number(row.querySelector(".row-hours").value || 0);
@@ -2386,6 +2488,7 @@ function readTaskRowsData() {
       deadlineMinutes,
       isLunchBreak,
       isHotel,
+      isCleaning,
       hotelPetCount,
       hotelAllowedMinutes
     };
@@ -2402,7 +2505,7 @@ function validateTaskRows(rows) {
 
     if (!row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
     if (row.assignedToUid && !row.assignedEmployee) return `${rowLabel}: nhân viên được chọn không hợp lệ.`;
-    if (row.isLunchBreak && row.isHotel) return `${rowLabel}: chỉ được chọn Nghỉ trưa hoặc Hotel, không chọn cả hai.`;
+    if ([row.isLunchBreak, row.isHotel, row.isCleaning].filter(Boolean).length > 1) return `${rowLabel}: chỉ được chọn một trong các loại Nghỉ trưa, Hotel hoặc Dọn dẹp Vệ Sinh.`;
     if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
     if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
   }
@@ -2634,6 +2737,7 @@ async function persistWorkOrder(dispatch, button) {
         deadlineMinutes,
         isLunchBreak: Boolean(row.isLunchBreak),
         isHotel: Boolean(row.isHotel),
+        isCleaning: Boolean(row.isCleaning),
         hotelPetCount: row.isHotel ? Number(row.hotelPetCount || 0) : 0,
         hotelAllowedMinutes: row.isHotel ? Number(row.hotelAllowedMinutes || 0) : 0,
         deadlineAt: null,
@@ -2649,10 +2753,10 @@ async function persistWorkOrder(dispatch, button) {
         resultType: null,
         differenceMinutes: null,
         differencePercent: null,
-        // Phiếu Nghỉ trưa là thời gian nghỉ nên không bắt buộc đăng hình.
+        // Phiếu Nghỉ trưa và Dọn dẹp vệ sinh không bắt buộc đăng hình.
         // Phiếu Hotel vẫn áp dụng đúng cài đặt bắt buộc đăng hình của Admin.
-        photoRequired: row.isLunchBreak ? false : photoOptions.photoRequired,
-        requiredPhotoCount: row.isLunchBreak ? 0 : photoOptions.requiredPhotoCount,
+        photoRequired: (row.isLunchBreak || row.isCleaning) ? false : photoOptions.photoRequired,
+        requiredPhotoCount: (row.isLunchBreak || row.isCleaning) ? 0 : photoOptions.requiredPhotoCount,
         photos: [],
         photoCount: 0,
         lastPhotoUploadedAt: null
@@ -2775,6 +2879,7 @@ async function dispatchWorkOrder(workOrderId, button) {
     deadlineMinutes: Number(task.deadlineMinutes || 0),
     isLunchBreak: Boolean(task.isLunchBreak),
     isHotel: Boolean(task.isHotel),
+    isCleaning: Boolean(task.isCleaning),
     hotelPetCount: Number(task.hotelPetCount || 0),
     hotelAllowedMinutes: Number(task.hotelAllowedMinutes || 0)
   })));
@@ -3224,6 +3329,7 @@ function getAdminBaseFilteredTasks(computedTasks) {
 function getCompletedTaskGroup(task) {
   if (isLunchBreakTask(task)) return "lunch_break";
   if (isHotelTask(task)) return "hotel";
+  if (isCleaningTask(task)) return "cleaning";
   return "normal";
 }
 
@@ -3247,7 +3353,8 @@ function getCompletedTypeFilterLabel(value) {
   const labels = {
     normal: "Công việc bình thường",
     lunch_break: "Đã nghỉ trưa",
-    hotel: "Hotel đã làm"
+    hotel: "Hotel đã làm",
+    cleaning: "Đã dọn dẹp vệ sinh"
   };
 
   return labels[value] || "";
@@ -3258,9 +3365,9 @@ function getCompletedReportTitle(filterValue) {
     return "Báo cáo tổng kết các task Công việc bình thường đã hoàn thành";
   }
 
-  return filterValue === "lunch_break"
-    ? "Báo cáo tổng thời gian các task Nghỉ trưa đã hoàn thành"
-    : "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
+  if (filterValue === "lunch_break") return "Báo cáo tổng thời gian các task Nghỉ trưa đã hoàn thành";
+  if (filterValue === "cleaning") return "Báo cáo tổng thời gian các task Dọn dẹp vệ sinh đã hoàn thành";
+  return "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
 }
 
 function getCompletedNormalTaskStats(task) {
@@ -3491,7 +3598,7 @@ function renderCompletedTypeReport(tasks, scope = "admin") {
 
   const shouldShowReport =
     statusFilter === "completed" &&
-    ["normal", "lunch_break", "hotel"].includes(completedTypeFilter);
+    ["normal", "lunch_break", "hotel", "cleaning"].includes(completedTypeFilter);
 
   if (!shouldShowReport) {
     reportEl.classList.add("hidden");
@@ -3617,7 +3724,8 @@ function isTaskBlockingEmployeeForSummary(task) {
     "near_due",
     "overdue",
     "redo",
-    "lunch_break"
+    "lunch_break",
+    "cleaning"
   ].includes(displayStatus);
 }
 
@@ -3714,6 +3822,7 @@ function renderAdminTasks() {
     doing: baseFiltered.filter((task) => (
       task.displayStatus === "doing" ||
       task.displayStatus === "lunch_break" ||
+      task.displayStatus === "cleaning" ||
       task.displayStatus === "near_due" ||
       task.displayStatus === "redo"
     )).length,
@@ -3935,8 +4044,8 @@ function canAdminReassignTask(task, mode, displayStatus = null) {
   const visibleStatus = displayStatus || getDisplayStatus(task);
 
   return (
-    ["waiting_assignee", "doing", "lunch_break", "hotel", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
-    && ["waiting_assignee", "doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status)
+    ["waiting_assignee", "doing", "lunch_break", "hotel", "cleaning", "near_due", "queued", "overdue", "redo"].includes(visibleStatus)
+    && ["waiting_assignee", "doing", "lunch_break", "hotel", "cleaning", "redo", "overdue"].includes(task.status)
   );
 }
 
@@ -4032,7 +4141,7 @@ function renderTaskCard(task, mode) {
 
   const canEmployeeSubmit =
     mode === "employee" &&
-    ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status) &&
+    ["doing", "lunch_break", "hotel", "cleaning", "redo", "overdue"].includes(task.status) &&
     task.status !== "completed" &&
     task.status !== "submitted" &&
     displayStatus !== "queued";
@@ -4091,11 +4200,13 @@ function renderTaskCard(task, mode) {
       ${renderTimeExtensionBox(task)}
       ${renderAssigneeHistoryBox(task)}
       ${renderLunchBreakHistoryBox(task)}
+      ${renderCleaningHistoryBox(task)}
       ${renderResultBox(task)}
       ${renderTaskActions(task, {
         canEmployeeSubmit,
         canAdminReview,
         canAdminEndLunchBreak: canAdminEndLunchBreak(task, mode),
+        canAdminEndCleaning: canAdminEndCleaning(task, mode),
         canAdminExtendTime: canAdminExtendTaskTime(task, mode),
         canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
         submitPhotoReady: hasEnoughRequiredPhotos(task)
@@ -4221,6 +4332,33 @@ function renderLunchBreakHistoryBox(task) {
   `;
 }
 
+function getCleaningActualMinutes(task) {
+  return getLunchBreakActualMinutes(task);
+}
+
+function renderCleaningHistoryBox(task) {
+  if (!isCleaningTask(task) || task.status !== "completed") return "";
+
+  const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+  const actualMinutes = getCleaningActualMinutes(task);
+  const finishedAt = formatFullDateTime(task.approvedAt || task.submittedAt);
+
+  return `
+    <div class="extension-box cleaning-history-box">
+      <div class="extension-box-head">
+        <strong>Lịch sử dọn dẹp vệ sinh</strong>
+        <span>${escapeHtml(finishedAt)}</span>
+      </div>
+      <ul class="extension-list">
+        <li>
+          <strong>${escapeHtml(employeeName)} đã dọn dẹp vệ sinh được ${actualMinutes} phút</strong>
+          <span>Thời gian tính từ lúc bắt đầu dọn dẹp vệ sinh đến khi hoàn thành.</span>
+        </li>
+      </ul>
+    </div>
+  `;
+}
+
 function renderPhotoReportBox(task, mode) {
   const photoCount = getTaskPhotoCount(task);
   const required = taskRequiresPhotos(task);
@@ -4252,7 +4390,7 @@ function renderPhotoReportBox(task, mode) {
 }
 
 function renderResultBox(task) {
-  if (isLunchBreakTask(task)) return "";
+  if (isLunchBreakTask(task) || isCleaningTask(task)) return "";
   if (task.status !== "completed" || !task.resultType) return "";
 
   if (isHotelTask(task)) {
@@ -4289,6 +4427,13 @@ function canAdminEndLunchBreak(task, mode) {
     && task.status === "lunch_break";
 }
 
+function canAdminEndCleaning(task, mode) {
+  return mode === "admin"
+    && state.profile?.role === "admin"
+    && isCleaningTask(task)
+    && task.status === "cleaning";
+}
+
 function canAdminExtendTaskTime(task, mode) {
   return mode === "admin" && ["doing", "hotel", "redo", "overdue"].includes(task.status);
 }
@@ -4297,8 +4442,8 @@ function canEmployeeUploadTaskPhotos(task, mode, displayStatus = null) {
   if (mode !== "employee") return false;
   if (!task?.id || task.assignedToUid !== state.user?.uid) return false;
   const visibleStatus = displayStatus || getDisplayStatus(task);
-  return ["doing", "lunch_break", "hotel", "redo", "overdue", "near_due"].includes(visibleStatus)
-    && ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status);
+  return ["doing", "lunch_break", "hotel", "cleaning", "redo", "overdue", "near_due"].includes(visibleStatus)
+    && ["doing", "lunch_break", "hotel", "cleaning", "redo", "overdue"].includes(task.status);
 }
 
 function renderTimeExtensionBox(task) {
@@ -4369,6 +4514,14 @@ function renderTaskActions(task, permissions) {
     `);
   }
 
+  if (permissions.canAdminEndCleaning) {
+    buttons.push(`
+      <button class="btn primary" data-action="end-cleaning" data-task-id="${escapeHtml(task.id)}">
+        Kết thúc
+      </button>
+    `);
+  }
+
   if (permissions.canAdminReview) {
     buttons.push(`
       <button class="btn secondary" data-action="approve-task" data-task-id="${escapeHtml(task.id)}">
@@ -4423,6 +4576,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "end-lunch-break") {
     await endLunchBreakTask(taskId, button);
+  }
+
+  if (action === "end-cleaning") {
+    await endCleaningTask(taskId, button);
   }
 
   if (action === "redo-task") {
@@ -4727,6 +4884,9 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
 
       const lunchAssignmentError = validateLunchBreakAssignment(task, newEmployee.uid);
       if (lunchAssignmentError) throw new Error(lunchAssignmentError);
+
+      const cleaningAssignmentError = validateCleaningAssignment(task, newEmployee.uid);
+      if (cleaningAssignmentError) throw new Error(cleaningAssignmentError);
     }
 
     setButtonLoading(els.confirmReassignEmployeeBtn, true, releaseToWaiting ? "Đang tạm dừng..." : "Đang đổi...");
@@ -5326,6 +5486,71 @@ async function endLunchBreakTask(taskId, button) {
   } catch (error) {
     console.error(error);
     toast(error.message || "Không kết thúc được phiếu Nghỉ trưa.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function endCleaningTask(taskId, button) {
+  setButtonLoading(button, true, "Đang kết thúc...");
+
+  try {
+    const taskSnap = await getDoc(doc(db, "tasks", taskId));
+
+    if (!taskSnap.exists()) {
+      throw new Error("Không tìm thấy phiếu Dọn dẹp vệ sinh.");
+    }
+
+    const task = {
+      id: taskSnap.id,
+      ...taskSnap.data()
+    };
+
+    if (!isCleaningTask(task) || task.status !== "cleaning") {
+      throw new Error("Chỉ có thể kết thúc trực tiếp task đang ở trạng thái Dọn dẹp vệ sinh.");
+    }
+
+    const result = calculateResultAt(task, new Date());
+
+    await updateDoc(doc(db, "tasks", taskId), {
+      status: "completed",
+      submittedAt: serverTimestamp(),
+      approvedAt: serverTimestamp(),
+      actualMinutes: result.actualMinutes,
+      resultType: result.resultType,
+      differenceMinutes: result.differenceMinutes,
+      differencePercent: result.differencePercent
+    });
+
+    await reflowQueuedTasksForEmployee(task.assignedToUid, taskId);
+
+    const notifications = [
+      {
+        recipientUid: state.user.uid,
+        type: "task_approved_admin",
+        title: "Đã kết thúc dọn dẹp vệ sinh",
+        message: `Bạn đã kết thúc phiếu Dọn dẹp vệ sinh “${task.title}” của ${task.assignedToName || "nhân viên"}.`,
+        taskId,
+        taskTitle: task.title
+      }
+    ];
+
+    if (task.assignedToUid) {
+      notifications.unshift({
+        recipientUid: task.assignedToUid,
+        type: "task_approved",
+        title: "Phiếu Dọn dẹp vệ sinh đã kết thúc",
+        message: `Admin đã kết thúc phiếu Dọn dẹp vệ sinh “${task.title}”.`,
+        taskId,
+        taskTitle: task.title
+      });
+    }
+
+    await createNotifications(notifications);
+    toast("Đã kết thúc phiếu Dọn dẹp vệ sinh và chuyển sang trạng thái Đã hoàn thành.", "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không kết thúc được phiếu Dọn dẹp vệ sinh.", "error");
   } finally {
     setButtonLoading(button, false);
   }
