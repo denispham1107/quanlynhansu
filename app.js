@@ -3588,12 +3588,13 @@ function isTaskBlockingEmployeeForSummary(task) {
 
   const displayStatus = task.displayStatus || getDisplayStatus(task);
 
+  // Nhân viên đang “Chờ đến lượt” vẫn được xem là chưa được giao việc
+  // trong phần tổng kết nhân viên, vì task đó chưa bắt đầu chiếm thời gian làm thực tế.
   return [
     "doing",
     "near_due",
     "overdue",
     "redo",
-    "queued",
     "lunch_break",
     "hotel"
   ].includes(displayStatus);
