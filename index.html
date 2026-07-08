@@ -308,6 +308,95 @@
       }
     }
 
+
+
+    /* Làm nổi bật phiếu Chưa giao việc để Admin dễ phân biệt với phiếu đã giao */
+    .ticket-group.is-draft-ticket {
+      position: relative;
+      overflow: hidden;
+      border: 1.5px dashed rgba(245, 158, 11, 0.55) !important;
+      background:
+        radial-gradient(circle at top left, rgba(251, 191, 36, 0.20), transparent 34%),
+        linear-gradient(135deg, #fff7ed 0%, #fffdf7 46%, #f5f3ff 100%) !important;
+      box-shadow: 0 18px 46px rgba(245, 158, 11, 0.12), 0 12px 32px rgba(124, 58, 237, 0.08) !important;
+    }
+
+    .ticket-group.is-draft-ticket::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 7px;
+      background: linear-gradient(180deg, #f59e0b, #7c3aed);
+      opacity: 0.95;
+      pointer-events: none;
+    }
+
+    .ticket-group.is-draft-ticket .ticket-group-header,
+    .ticket-group.is-draft-ticket .ticket-actions,
+    .ticket-group.is-draft-ticket .ticket-tasks {
+      position: relative;
+      z-index: 1;
+    }
+
+    .ticket-badge.is-draft-badge {
+      border: 0 !important;
+      background: linear-gradient(135deg, #f59e0b, #7c3aed) !important;
+      color: #ffffff !important;
+      box-shadow: 0 10px 22px rgba(245, 158, 11, 0.22);
+      letter-spacing: 0.01em;
+    }
+
+    .task-card.is-draft {
+      position: relative;
+      border-left-color: #f59e0b !important;
+      border-left-width: 8px !important;
+      background:
+        radial-gradient(circle at top right, rgba(124, 58, 237, 0.10), transparent 34%),
+        linear-gradient(135deg, #fffaf0 0%, #ffffff 48%, #f8f5ff 100%) !important;
+      box-shadow: 0 18px 42px rgba(245, 158, 11, 0.13), 0 10px 26px rgba(37, 99, 235, 0.08) !important;
+      outline: 1px solid rgba(245, 158, 11, 0.28);
+      outline-offset: -1px;
+    }
+
+    .task-card.is-draft::after {
+      content: "Chưa giao";
+      position: absolute;
+      right: 22px;
+      bottom: 18px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255, 237, 213, 0.92);
+      color: #9a3412;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.01em;
+      pointer-events: none;
+    }
+
+    .task-card.is-draft .task-title {
+      color: #7c2d12 !important;
+    }
+
+    .task-card.is-draft .meta-box,
+    .task-card.is-draft .photo-report-box {
+      border-color: #fed7aa !important;
+      background: rgba(255, 255, 255, 0.78) !important;
+    }
+
+    .status-pill.status-draft {
+      border: 1px solid rgba(245, 158, 11, 0.35) !important;
+      background: linear-gradient(135deg, #fef3c7, #ede9fe) !important;
+      color: #9a3412 !important;
+      box-shadow: 0 8px 18px rgba(245, 158, 11, 0.16);
+    }
+
+    @media (max-width: 640px) {
+      .task-card.is-draft::after {
+        right: 14px;
+        bottom: 14px;
+      }
+    }
+
     .photo-requirement-box {
       display: grid;
       gap: 12px;
