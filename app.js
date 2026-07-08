@@ -3693,8 +3693,25 @@ function groupTasksByWorkOrder(tasks) {
 
 // Thêm các phiếu nháp CHƯA có công việc nào (0 dòng) vào danh sách hiển thị — nếu chỉ dựa
 // vào tasks thì những phiếu này sẽ không xuất hiện ở đâu cả (vì chưa có task nào tham chiếu tới).
+function isDraftTicketGroup(group) {
+  return !group.tasks.length || group.tasks.every((task) => task.status === "draft");
+}
+
+function sortTicketGroupsForDisplay(groups) {
+  return groups.sort((a, b) => {
+    const aIsDraft = isDraftTicketGroup(a);
+    const bIsDraft = isDraftTicketGroup(b);
+
+    // Luôn ưu tiên hiển thị toàn bộ phiếu Chưa giao việc ở trên cùng,
+    // sau đó mới tới các phiếu có trạng thái khác.
+    if (aIsDraft !== bIsDraft) return aIsDraft ? -1 : 1;
+
+    return b.createdAtMs - a.createdAtMs;
+  });
+}
+
 function withEmptyDraftGroups(groups, showEmptyDrafts) {
-  if (!showEmptyDrafts) return groups.sort((a, b) => b.createdAtMs - a.createdAtMs);
+  if (!showEmptyDrafts) return sortTicketGroupsForDisplay(groups);
 
   const coveredWorkOrderIds = new Set(state.tasks.map((task) => task.workOrderId).filter(Boolean));
 
@@ -3708,7 +3725,7 @@ function withEmptyDraftGroups(groups, showEmptyDrafts) {
       createdAtMs: timestampToDate(wo.createdAt)?.getTime() || 0
     }));
 
-  return [...groups, ...emptyDraftGroups].sort((a, b) => b.createdAtMs - a.createdAtMs);
+  return sortTicketGroupsForDisplay([...groups, ...emptyDraftGroups]);
 }
 
 function renderTicketGroup(group, mode = "admin") {
