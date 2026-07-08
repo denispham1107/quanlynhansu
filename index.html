@@ -308,15 +308,14 @@
       position: fixed;
       right: max(28px, calc(env(safe-area-inset-right, 0px) + 28px));
       bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 28px));
-      width: 44px;
-      height: 44px;
+      width: 52px;
+      height: 52px;
       border: 0;
       border-radius: 999px;
-      background: linear-gradient(135deg, rgba(37, 99, 235, 0.82), rgba(124, 58, 237, 0.82));
+      background: linear-gradient(135deg, rgba(37, 99, 235, 0.76), rgba(124, 58, 237, 0.76));
       color: #ffffff;
       box-shadow: 0 12px 28px rgba(37, 99, 235, 0.24), 0 0 0 4px rgba(255, 255, 255, 0.72);
-      display: grid;
-      place-items: center;
+      display: block;
       font-size: 0;
       line-height: 1;
       cursor: pointer;
@@ -326,15 +325,27 @@
       transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease, background 0.18s ease;
     }
 
-    .floating-create-task-btn::before {
-      content: "+";
+    .floating-create-task-btn::before,
+    .floating-create-task-btn::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
       display: block;
-      width: 100%;
-      text-align: center;
-      font-size: 25px;
-      line-height: 1;
-      font-weight: 900;
-      transform: translateY(-1px);
+      border-radius: 999px;
+      background: #ffffff;
+      pointer-events: none;
+    }
+
+    .floating-create-task-btn::before {
+      width: 18px;
+      height: 4px;
+    }
+
+    .floating-create-task-btn::after {
+      width: 4px;
+      height: 18px;
     }
 
     .floating-create-task-btn:hover,
@@ -353,13 +364,19 @@
       .floating-create-task-btn {
         right: max(18px, calc(env(safe-area-inset-right, 0px) + 18px));
         bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px));
-        width: 40px;
-        height: 40px;
+        width: 48px;
+        height: 48px;
         box-shadow: 0 10px 24px rgba(37, 99, 235, 0.26), 0 0 0 4px rgba(255, 255, 255, 0.76);
       }
 
       .floating-create-task-btn::before {
-        font-size: 23px;
+        width: 17px;
+        height: 4px;
+      }
+
+      .floating-create-task-btn::after {
+        width: 4px;
+        height: 17px;
       }
     }
 
