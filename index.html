@@ -752,8 +752,7 @@
     }
 
     .lunch-break-line,
-    .hotel-line,
-    .cleaning-line {
+    .hotel-line {
       width: fit-content;
       padding: 10px 12px;
       border-radius: 14px;
@@ -771,15 +770,8 @@
       color: #1d4ed8;
     }
 
-    .cleaning-line {
-      border: 1px dashed #fed7aa;
-      background: #fff7ed;
-      color: #c2410c;
-    }
-
     .lunch-break-note,
-    .hotel-note,
-    .cleaning-note {
+    .hotel-note {
       margin: -4px 0 0;
     }
 
@@ -834,10 +826,6 @@
       color: #1d4ed8;
     }
 
-    .cleaning-note {
-      color: #c2410c;
-    }
-
     .status-lunch_break {
       background: #ccfbf1;
       color: #0f766e;
@@ -848,21 +836,12 @@
       color: #1d4ed8;
     }
 
-    .status-cleaning {
-      background: #ffedd5;
-      color: #c2410c;
-    }
-
     .task-card.is-lunch-break {
       border-left-color: #14b8a6;
     }
 
     .task-card.is-hotel {
       border-left-color: #2563eb;
-    }
-
-    .task-card.is-cleaning {
-      border-left-color: #f97316;
     }
 
     @media (max-width: 640px) {
@@ -1193,7 +1172,6 @@
               <option value="waiting_assignee">Chờ chọn người</option>
               <option value="lunch_break">Nghỉ trưa</option>
               <option value="hotel">Hotel</option>
-              <option value="cleaning">Dọn dẹp Vệ Sinh</option>
               <option value="doing">Đang làm</option>
               <option value="near_due">Gần hết giờ</option>
               <option value="overdue">Quá hạn</option>
@@ -1206,7 +1184,6 @@
               <option value="normal">Công việc bình thường</option>
               <option value="lunch_break">Đã nghỉ trưa</option>
               <option value="hotel">Hotel đã làm</option>
-              <option value="cleaning">Đã dọn dẹp vệ sinh</option>
             </select>
             <select id="adminEmployeeFilter" aria-label="Lọc nhân viên">
               <option value="all">Tất cả nhân viên</option>
@@ -1335,7 +1312,6 @@
               <option value="waiting_assignee">Chờ chọn người</option>
               <option value="lunch_break">Nghỉ trưa</option>
               <option value="hotel">Hotel</option>
-              <option value="cleaning">Dọn dẹp Vệ Sinh</option>
               <option value="doing">Đang làm</option>
               <option value="near_due">Gần hết giờ</option>
               <option value="overdue">Quá hạn</option>
@@ -1348,7 +1324,6 @@
               <option value="normal">Công việc bình thường</option>
               <option value="lunch_break">Đã nghỉ trưa</option>
               <option value="hotel">Hotel đã làm</option>
-              <option value="cleaning">Đã dọn dẹp vệ sinh</option>
             </select>
             <select id="employeeDateMode" aria-label="Lọc thời gian công việc của tôi">
               <option value="all">Tất cả ngày</option>
