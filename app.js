@@ -121,6 +121,7 @@ const els = {
   createEmployeeForm: $("#createEmployeeForm"),
   employeeList: $("#employeeList"),
   openTaskModalBtn: $("#openTaskModalBtn"),
+  floatingCreateTaskBtn: $("#floatingCreateTaskBtn"),
   openWorkTemplatePageBtn: $("#openWorkTemplatePageBtn"),
   openEmployeeManagerPageBtn: $("#openEmployeeManagerPageBtn"),
   exportDataBtn: $("#exportDataBtn"),
@@ -2150,7 +2151,7 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   toast(`Đã áp dụng thời gian ${formatMinutes(Number(template.deadlineMinutes || 0))} cho công việc “${template.name}”.`, "success");
 });
 
-els.openTaskModalBtn.addEventListener("click", () => {
+function openCreateWorkOrderModal() {
   state.editingWorkOrderId = null;
   $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
   els.workOrderName.value = "";
@@ -2158,7 +2159,10 @@ els.openTaskModalBtn.addEventListener("click", () => {
   resetPhotoRequirementControls();
 
   els.taskModal.classList.remove("hidden");
-});
+}
+
+els.openTaskModalBtn?.addEventListener("click", openCreateWorkOrderModal);
+els.floatingCreateTaskBtn?.addEventListener("click", openCreateWorkOrderModal);
 
 function openEditWorkOrderModal(workOrderId) {
   const tasksInGroup = state.tasks
@@ -2902,65 +2906,26 @@ els.adminCompletedTypeFilter?.addEventListener("change", (event) => {
 els.adminCompletedTypeReport?.addEventListener("change", (event) => {
   const target = event.target;
 
-  // Chỉ lưu tạm lựa chọn trên form. Báo cáo Hotel chỉ được chốt/lưu khi Admin bấm nút OK.
   if (target?.matches?.("[data-admin-hotel-hygiene]")) {
     updateAdminHotelReportDraft({ hygiene: target.value || "pending" });
+    renderAdminTasks();
+    scheduleSaveAdminHotelDailyReport();
   }
 
   if (target?.matches?.("[data-admin-hotel-end-pet-count]")) {
     updateAdminHotelReportDraft({ endPetCount: target.value });
+    renderAdminTasks();
+    scheduleSaveAdminHotelDailyReport();
   }
 });
 
 els.adminCompletedTypeReport?.addEventListener("input", (event) => {
   const target = event.target;
 
-  // Chỉ lưu tạm số lượng bé trên form. Không tự hiển thị thông báo và không tự lưu báo cáo.
   if (target?.matches?.("[data-admin-hotel-end-pet-count]")) {
     updateAdminHotelReportDraft({ endPetCount: target.value });
-  }
-});
-
-els.adminCompletedTypeReport?.addEventListener("click", async (event) => {
-  const target = event.target;
-
-  if (!target?.matches?.("[data-admin-hotel-report-ok]")) return;
-
-  const dateKey = getAdminHotelReportDateKey();
-
-  if (!dateKey) {
-    toast("Vui lòng chọn Hôm nay hoặc Chọn 1 ngày trước khi lưu tổng kết Hotel.", "error");
-    return;
-  }
-
-  const reportBox = els.adminCompletedTypeReport;
-  const hygieneEl = reportBox?.querySelector?.("[data-admin-hotel-hygiene]");
-  const petCountEl = reportBox?.querySelector?.("[data-admin-hotel-end-pet-count]");
-  const endPetCountValue = petCountEl?.value || "";
-
-  if (!normalizeHotelPetCount(endPetCountValue)) {
-    toast("Vui lòng nhập số lượng bé ở hotel cuối ngày trước khi bấm OK.", "error");
-    petCountEl?.focus?.();
-    return;
-  }
-
-  updateAdminHotelReportDraft({
-    hygiene: hygieneEl?.value || "pending",
-    endPetCount: endPetCountValue
-  });
-
-  const button = target;
-  setButtonLoading(button, true, "Đang lưu...");
-
-  try {
-    await saveAdminHotelDailyReport();
     renderAdminTasks();
-    toast("Đã lưu tổng kết Hotel trong ngày.", "success");
-  } catch (error) {
-    console.error(error);
-    toast("Không lưu được tổng kết Hotel trong ngày. Kiểm tra Firestore Rules hotelDailyReports.", "error");
-  } finally {
-    setButtonLoading(button, false);
+    scheduleSaveAdminHotelDailyReport();
   }
 });
 
@@ -3266,7 +3231,7 @@ async function saveAdminHotelDailyReport() {
   const payload = buildAdminHotelDailyReportPayload();
   if (!payload.dateKey) return;
 
-  const reportData = {
+  await setDoc(doc(db, "hotelDailyReports", payload.dateKey), {
     id: payload.dateKey,
     date: payload.dateKey,
     hygiene: payload.hygiene,
@@ -3281,35 +3246,18 @@ async function saveAdminHotelDailyReport() {
       minutes: Number(item.minutes || 0)
     })),
     updatedByUid: state.user?.uid || "",
-    updatedByName: state.profile?.name || state.user?.email || "Admin"
-  };
-
-  await setDoc(doc(db, "hotelDailyReports", payload.dateKey), {
-    ...reportData,
+    updatedByName: state.profile?.name || state.user?.email || "Admin",
     updatedAt: serverTimestamp()
   }, { merge: true });
-
-  state.hotelDailyReports = [
-    ...state.hotelDailyReports.filter((report) => report.id !== payload.dateKey && report.date !== payload.dateKey),
-    {
-      ...reportData,
-      updatedAt: new Date()
-    }
-  ];
-
-  return reportData;
 }
 
 function renderAdminHotelReportControls() {
-  const dateKey = getAdminHotelReportDateKey();
-  const saved = getSavedHotelDailyReport(dateKey);
-  const draft = getAdminHotelReportDraft(dateKey);
-  const hygieneValue = draft.hygiene || "pending";
-  const endPetCountRaw = draft.endPetCount ?? "";
-  const savedEndPetCount = normalizeHotelPetCount(saved?.endPetCount);
-  const savedAllowedMinutes = Number(saved?.allowedMinutes || 0);
-  const savedTimeStatusText = saved?.timeStatusText || "Chưa lưu kết quả Hotel";
-  const savedHygieneText = saved?.hygieneText || getHotelHygieneStatusText(saved?.hygiene || "pending");
+  const payload = buildAdminHotelDailyReportPayload();
+  const hygieneValue = payload.hygiene || "pending";
+  const endPetCountRaw = payload.endPetCountRaw ?? "";
+  const endPetCount = payload.endPetCount;
+  const allowedMinutes = payload.allowedMinutes;
+  const timeStatusText = payload.timeStatusText;
 
   return `
     <label class="hotel-report-control">
@@ -3324,10 +3272,9 @@ function renderAdminHotelReportControls() {
       <span>Số lượng bé ở hotel cuối ngày</span>
       <input data-admin-hotel-end-pet-count type="number" min="1" max="500" step="1" value="${escapeHtml(endPetCountRaw)}" placeholder="Nhập số bé" />
     </label>
-    <button type="button" class="hotel-report-ok-btn" data-admin-hotel-report-ok>OK</button>
-    <span class="hotel-report-hygiene-status">${escapeHtml(savedHygieneText)}</span>
-    <span class="hotel-report-end-time">Thời gian làm hotel: ${savedEndPetCount ? escapeHtml(formatMinutes(savedAllowedMinutes)) : "--"}</span>
-    <span class="hotel-report-time-status">${escapeHtml(savedTimeStatusText)}</span>
+    <span class="hotel-report-hygiene-status">${escapeHtml(getHotelHygieneStatusText(hygieneValue))}</span>
+    <span class="hotel-report-end-time">Thời gian làm hotel: ${endPetCount ? escapeHtml(formatMinutes(allowedMinutes)) : "--"}</span>
+    <span class="hotel-report-time-status">${escapeHtml(timeStatusText)}</span>
   `;
 }
 
@@ -3383,31 +3330,20 @@ function renderCompletedTypeReport(tasks, scope = "admin") {
     totalsByEmployee.set(employeeName, current + getCompletedTaskActualMinutes(task));
   });
 
-  let rows = Array.from(totalsByEmployee.entries())
+  const rows = Array.from(totalsByEmployee.entries())
     .sort((a, b) => a[0].localeCompare(b[0], "vi"))
     .map(([name, minutes]) => `<span>${escapeHtml(name)}: ${escapeHtml(formatMinutes(minutes))}</span>`)
     .join("");
 
-  const isAdminHotelReport = scope === "admin" && completedTypeFilter === "hotel";
-  const adminHotelControls = isAdminHotelReport ? renderAdminHotelReportControls() : "";
-
-  if (isAdminHotelReport) {
-    const savedReport = getSavedHotelDailyReport(getAdminHotelReportDateKey());
-
-    rows = Array.isArray(savedReport?.employeeTotals)
-      ? savedReport.employeeTotals
-        .slice()
-        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "vi"))
-        .map((item) => `<span>${escapeHtml(item.name || "Nhân viên")}: ${escapeHtml(formatMinutes(Number(item.minutes || 0)))}</span>`)
-        .join("")
-      : "";
-  }
+  const adminHotelControls = scope === "admin" && completedTypeFilter === "hotel"
+    ? renderAdminHotelReportControls()
+    : "";
 
   reportEl.classList.remove("hidden");
   reportEl.innerHTML = `
     <strong>${escapeHtml(getCompletedReportTitle(completedTypeFilter))}</strong>
     ${adminHotelControls}
-    ${rows || (isAdminHotelReport ? "<span>Chưa bấm OK để lưu kết quả Hotel</span>" : "<span>Chưa có dữ liệu phù hợp</span>")}
+    ${rows || "<span>Chưa có dữ liệu phù hợp</span>"}
   `;
 }
 
