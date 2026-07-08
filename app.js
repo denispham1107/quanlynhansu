@@ -2689,18 +2689,19 @@ async function persistWorkOrder(dispatch, button) {
 
     await batch.commit();
 
-    if (dispatch) {
-      notificationItems.push({
-        recipientUid: state.user.uid,
-        type: "task_assigned_admin",
-        title: "Đã tạo phiếu công việc",
-        message: `Bạn đã tạo phiếu “${workOrderName}” với ${rows.length} công việc.`,
-        taskId: createdTaskRefs[0].id,
-        taskTitle: workOrderName
-      });
+    const adminWorkOrderNotification = {
+      recipientUid: state.user.uid,
+      type: dispatch ? "task_assigned_admin" : "work_order_draft_saved",
+      title: dispatch ? "Đã tạo phiếu công việc" : "Đã lưu phiếu chưa giao việc",
+      message: dispatch
+        ? `Bạn đã tạo phiếu “${workOrderName}” với ${rows.length} công việc.`
+        : `Bạn đã lưu phiếu “${workOrderName}” với ${rows.length} công việc ở trạng thái Chưa giao việc.`,
+      taskId: createdTaskRefs[0]?.id || null,
+      taskTitle: workOrderName
+    };
 
-      await createNotifications(notificationItems);
-    }
+    notificationItems.push(adminWorkOrderNotification);
+    await createNotifications(notificationItems);
 
     state.editingWorkOrderId = null;
     els.workOrderName.value = "";
