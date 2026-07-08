@@ -855,6 +855,94 @@
     }
 
 
+    .employee-status-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+      margin: 14px 0 18px;
+    }
+
+    .employee-status-summary.hidden {
+      display: none !important;
+    }
+
+    .employee-status-card {
+      border: 1px solid #dbeafe;
+      border-radius: 18px;
+      padding: 12px 14px;
+      background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.06);
+    }
+
+    .employee-status-card strong {
+      display: block;
+      color: #0f172a;
+      font-size: 14px;
+      line-height: 1.35;
+      margin-bottom: 8px;
+    }
+
+    .employee-status-card .employee-status-names {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: #475569;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .employee-status-chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-weight: 800;
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+
+    .employee-status-empty {
+      color: #64748b;
+      font-weight: 700;
+    }
+
+    .employee-status-card.is-free {
+      border-color: #bbf7d0;
+      background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+    }
+
+    .employee-status-card.is-free .employee-status-chip {
+      background: #dcfce7;
+      color: #15803d;
+    }
+
+    .employee-status-card.is-hotel {
+      border-color: #bfdbfe;
+      background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
+    }
+
+    .employee-status-card.is-hotel .employee-status-chip {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
+    .employee-status-card.is-lunch {
+      border-color: #99f6e4;
+      background: linear-gradient(135deg, #f0fdfa 0%, #ffffff 100%);
+    }
+
+    .employee-status-card.is-lunch .employee-status-chip {
+      background: #ccfbf1;
+      color: #0f766e;
+    }
+
+    @media (max-width: 768px) {
+      .employee-status-summary {
+        grid-template-columns: 1fr;
+      }
+    }
+
+
     .completed-subfilter.hidden,
     .completed-type-report.hidden {
       display: none !important;
@@ -1072,6 +1160,7 @@
           <div>
             <h3>Tất cả công việc</h3>
             <p class="muted">Admin thấy toàn bộ công việc của shop.</p>
+            <div id="adminEmployeeStatusSummary" class="employee-status-summary hidden"></div>
           </div>
           <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
         </div>

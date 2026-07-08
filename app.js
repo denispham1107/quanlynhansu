@@ -161,6 +161,7 @@ const els = {
   adminDateTo: $("#adminDateTo"),
   adminClearDateFilter: $("#adminClearDateFilter"),
   adminDateSummary: $("#adminDateSummary"),
+  adminEmployeeStatusSummary: $("#adminEmployeeStatusSummary"),
   adminTaskList: $("#adminTaskList"),
   employeeStatusFilter: $("#employeeStatusFilter"),
   employeeCompletedTypeFilter: $("#employeeCompletedTypeFilter"),
@@ -1202,6 +1203,7 @@ function setupAdminDashboard() {
 
       renderEmployees();
       renderEmployeeSelects();
+      renderAdminTasks();
     },
     handleSnapshotError
   );
@@ -3576,11 +3578,112 @@ function taskMatchesStatusFilter(task, statusFilter) {
   return task.displayStatus === statusFilter || task.status === statusFilter;
 }
 
+
+function getEmployeeSummaryName(employee) {
+  return employee?.name || employee?.email || "Chưa đặt tên";
+}
+
+function isTaskBlockingEmployeeForSummary(task) {
+  if (!task?.assignedToUid) return false;
+
+  const displayStatus = task.displayStatus || getDisplayStatus(task);
+
+  return [
+    "doing",
+    "near_due",
+    "overdue",
+    "redo",
+    "queued",
+    "lunch_break",
+    "hotel"
+  ].includes(displayStatus);
+}
+
+function renderEmployeeStatusNameChips(employees) {
+  if (!employees.length) {
+    return '<span class="employee-status-empty">Không có</span>';
+  }
+
+  return employees
+    .map((employee) => `<span class="employee-status-chip">${escapeHtml(getEmployeeSummaryName(employee))}</span>`)
+    .join("");
+}
+
+function renderAdminEmployeeStatusSummary(computedTasks = []) {
+  const summaryEl = els.adminEmployeeStatusSummary;
+  if (!summaryEl) return;
+
+  const employees = [...state.employees].sort((a, b) => getEmployeeSummaryName(a).localeCompare(getEmployeeSummaryName(b), "vi"));
+
+  if (!employees.length) {
+    summaryEl.classList.remove("hidden");
+    summaryEl.innerHTML = `
+      <div class="employee-status-card is-free">
+        <strong>Tổng số bạn nhân viên đang chưa được giao việc: 0</strong>
+        <div class="employee-status-names"><span class="employee-status-empty">Chưa có nhân viên</span></div>
+      </div>
+      <div class="employee-status-card is-hotel">
+        <strong>Tổng số bạn nhân viên đang làm hotel: 0</strong>
+        <div class="employee-status-names"><span class="employee-status-empty">Không có</span></div>
+      </div>
+      <div class="employee-status-card is-lunch">
+        <strong>Tổng số bạn nhân viên đang nghỉ trưa: 0</strong>
+        <div class="employee-status-names"><span class="employee-status-empty">Không có</span></div>
+      </div>
+    `;
+    return;
+  }
+
+  const busyEmployeeUids = new Set();
+  const hotelEmployeeUids = new Set();
+  const lunchEmployeeUids = new Set();
+
+  computedTasks.forEach((task) => {
+    if (!task?.assignedToUid) return;
+
+    const displayStatus = task.displayStatus || getDisplayStatus(task);
+
+    if (isTaskBlockingEmployeeForSummary(task)) {
+      busyEmployeeUids.add(task.assignedToUid);
+    }
+
+    if (displayStatus === "hotel") {
+      hotelEmployeeUids.add(task.assignedToUid);
+    }
+
+    if (displayStatus === "lunch_break") {
+      lunchEmployeeUids.add(task.assignedToUid);
+    }
+  });
+
+  const freeEmployees = employees.filter((employee) => !busyEmployeeUids.has(employee.uid));
+  const hotelEmployees = employees.filter((employee) => hotelEmployeeUids.has(employee.uid));
+  const lunchEmployees = employees.filter((employee) => lunchEmployeeUids.has(employee.uid));
+
+  summaryEl.classList.remove("hidden");
+  summaryEl.innerHTML = `
+    <div class="employee-status-card is-free">
+      <strong>Tổng số bạn nhân viên đang chưa được giao việc: ${freeEmployees.length}</strong>
+      <div class="employee-status-names">${renderEmployeeStatusNameChips(freeEmployees)}</div>
+    </div>
+    <div class="employee-status-card is-hotel">
+      <strong>Tổng số bạn nhân viên đang làm hotel: ${hotelEmployees.length}</strong>
+      <div class="employee-status-names">${renderEmployeeStatusNameChips(hotelEmployees)}</div>
+    </div>
+    <div class="employee-status-card is-lunch">
+      <strong>Tổng số bạn nhân viên đang nghỉ trưa: ${lunchEmployees.length}</strong>
+      <div class="employee-status-names">${renderEmployeeStatusNameChips(lunchEmployees)}</div>
+    </div>
+  `;
+}
+
 function renderAdminTasks() {
   const computed = state.tasks.map((task) => ({
     ...task,
     displayStatus: getDisplayStatus(task)
   }));
+
+  renderAdminEmployeeStatusSummary(computed);
 
   const baseFiltered = getAdminBaseFilteredTasks(computed);
 
