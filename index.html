@@ -205,6 +205,63 @@
       }
     }
 
+
+
+    /* Fix modal Tạo phiếu công việc trên desktop: rộng hơn, căn giữa và bo tròn đủ 4 góc */
+    @media (min-width: 769px) {
+      #taskModal:not(.hidden) {
+        position: fixed !important;
+        inset: 0 !important;
+        box-sizing: border-box !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 36px 48px !important;
+        overflow: hidden !important;
+        z-index: 10000 !important;
+      }
+
+      #taskModal .modal-backdrop {
+        position: fixed !important;
+        inset: 0 !important;
+      }
+
+      #taskModal .modal-card {
+        position: relative !important;
+        width: min(1088px, calc(100vw - 96px)) !important;
+        max-width: min(1088px, calc(100vw - 96px)) !important;
+        max-height: calc(100vh - 72px) !important;
+        margin: 0 auto !important;
+        box-sizing: border-box !important;
+        border-radius: 30px !important;
+        overflow: auto !important;
+        overflow-x: hidden !important;
+        background: #ffffff !important;
+        background-clip: padding-box !important;
+        clip-path: inset(0 round 30px) !important;
+        scrollbar-gutter: stable;
+      }
+
+      #taskModal .modal-header {
+        border-radius: 30px 30px 0 0 !important;
+      }
+
+      #taskModal .modal-card::-webkit-scrollbar {
+        width: 12px;
+      }
+
+      #taskModal .modal-card::-webkit-scrollbar-track {
+        margin: 28px 0;
+        background: transparent;
+      }
+
+      #taskModal .modal-card::-webkit-scrollbar-thumb {
+        border: 3px solid transparent;
+        border-radius: 999px;
+        background-clip: content-box;
+      }
+    }
+
     .photo-requirement-box {
       display: grid;
       gap: 12px;
