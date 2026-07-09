@@ -3316,11 +3316,29 @@ function getCompletedReportTitle(filterValue) {
     : "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
 }
 
+function hasTaskTimeExtensions(task) {
+  const extensions = Array.isArray(task.timeExtensions) ? task.timeExtensions : [];
+
+  return Number(task.timeExtensionTotalMinutes || 0) > 0
+    || Number(task.timeExtensionCount || 0) > 0
+    || extensions.some((item) => Number(item?.minutes || 0) > 0);
+}
+
+function shouldCountExtendedTaskAsOnTime(task, actualMinutes, deadlineMinutes) {
+  return hasTaskTimeExtensions(task)
+    && Number(actualMinutes || 0) > 0
+    && Number(deadlineMinutes || 0) > 0
+    && Number(actualMinutes || 0) <= Number(deadlineMinutes || 0);
+}
+
 function getCompletedNormalTaskStats(task) {
   const deadlineMinutes = Number(task.deadlineMinutes || 0);
-  const actualMinutes = Number(task.actualMinutes || 0) > 0
+  const rawActualMinutes = Number(task.actualMinutes || 0) > 0
     ? Number(task.actualMinutes || 0)
     : getCompletedTaskActualMinutes(task);
+  const actualMinutes = shouldCountExtendedTaskAsOnTime(task, rawActualMinutes, deadlineMinutes)
+    ? deadlineMinutes
+    : rawActualMinutes;
 
   return {
     deadlineMinutes: Math.max(0, deadlineMinutes),
@@ -4464,22 +4482,46 @@ function renderResultBox(task) {
     `;
   }
 
+  const displayResult = normalizeTaskResultForDisplay(task);
   let summary = "Hoàn thành đúng thời gian quy định.";
   let className = "result-box";
 
-  if (task.resultType === "faster") {
-    summary = `Nhanh hơn ${task.differenceMinutes} phút (${task.differencePercent}%).`;
-  } else if (task.resultType === "slower") {
-    summary = `Chậm hơn ${task.differenceMinutes} phút (${task.differencePercent}%).`;
+  if (displayResult.resultType === "faster") {
+    summary = `Nhanh hơn ${displayResult.differenceMinutes} phút (${displayResult.differencePercent}%).`;
+  } else if (displayResult.resultType === "slower") {
+    summary = `Chậm hơn ${displayResult.differenceMinutes} phút (${displayResult.differencePercent}%).`;
     className = "result-box slower";
   }
 
   return `
     <div class="${className}">
       <strong>Kết quả: ${summary}</strong>
-      <span>Thời gian thực tế: ${formatMinutes(task.actualMinutes)} • Thời gian quy định: ${formatMinutes(task.deadlineMinutes)}</span>
+      <span>Thời gian thực tế: ${formatMinutes(displayResult.actualMinutes)} • Thời gian quy định: ${formatMinutes(displayResult.deadlineMinutes)}</span>
     </div>
   `;
+}
+
+function normalizeTaskResultForDisplay(task) {
+  const deadlineMinutes = Number(task.deadlineMinutes || 0);
+  const actualMinutes = Number(task.actualMinutes || 0);
+
+  if (shouldCountExtendedTaskAsOnTime(task, actualMinutes, deadlineMinutes)) {
+    return {
+      actualMinutes,
+      deadlineMinutes,
+      resultType: "on_time",
+      differenceMinutes: 0,
+      differencePercent: 0
+    };
+  }
+
+  return {
+    actualMinutes,
+    deadlineMinutes,
+    resultType: task.resultType || "on_time",
+    differenceMinutes: Number(task.differenceMinutes || 0),
+    differencePercent: Number(task.differencePercent || 0)
+  };
 }
 
 function canAdminEndLunchBreak(task, mode) {
@@ -5630,13 +5672,23 @@ function calculateResultAt(task, completedAt) {
     throw new Error("Thời gian quy định không hợp lệ.");
   }
 
-  const differenceMinutes = Math.abs(deadlineMinutes - actualMinutes);
-  const differencePercent = Number(((differenceMinutes / deadlineMinutes) * 100).toFixed(1));
-
   let resultType = "on_time";
 
-  if (actualMinutes < deadlineMinutes) resultType = "faster";
-  if (actualMinutes > deadlineMinutes) resultType = "slower";
+  // Nếu task đã được Admin “Thêm giờ”, thời gian quy định mới là tổng thời gian sau khi cộng thêm.
+  // Nhân viên hoàn thành trong hoặc trước hạn mới sẽ được ghi nhận là đúng giờ,
+  // không tính là nhanh hơn theo mốc thời gian cũ trước khi được thêm giờ.
+  if (actualMinutes > deadlineMinutes) {
+    resultType = "slower";
+  } else if (actualMinutes < deadlineMinutes && !hasTaskTimeExtensions(task)) {
+    resultType = "faster";
+  }
+
+  const differenceMinutes = resultType === "on_time"
+    ? 0
+    : Math.abs(deadlineMinutes - actualMinutes);
+  const differencePercent = resultType === "on_time"
+    ? 0
+    : Number(((differenceMinutes / deadlineMinutes) * 100).toFixed(1));
 
   return {
     actualMinutes,
