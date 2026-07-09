@@ -3525,7 +3525,7 @@ function renderAdminHotelReportControls() {
       </select>
     </label>
     <label class="hotel-report-control hotel-report-pet-control">
-      <span>Số lượng bé ở hotel cuối ngày</span>
+      <span>Số lượng bé ở hotel khi cho ăn và vệ sinh</span>
       <input data-admin-hotel-end-pet-count type="number" min="1" max="500" step="1" value="${escapeHtml(endPetCountRaw)}" placeholder="Nhập số bé" />
     </label>
     <button type="button" class="hotel-report-ok-btn" data-admin-hotel-report-ok>OK</button>
