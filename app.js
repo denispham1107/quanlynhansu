@@ -4321,6 +4321,84 @@ function renderPhotoReportBox(task, mode) {
   `;
 }
 
+function closePhotoRequirementEditor(editorEl, resolveValue, value = null) {
+  if (!editorEl) return;
+  editorEl.remove();
+  if (typeof resolveValue === "function") resolveValue(value);
+}
+
+function openPhotoRequirementEditor({ task, currentRequired, currentCount, photoCount }) {
+  return new Promise((resolve) => {
+    document.querySelector(".photo-requirement-editor-backdrop")?.remove();
+
+    const editorEl = document.createElement("div");
+    editorEl.className = "photo-requirement-editor-backdrop";
+    editorEl.innerHTML = `
+      <div class="photo-requirement-editor-card" role="dialog" aria-modal="true" aria-label="Chỉnh số lượng ảnh báo cáo">
+        <button class="photo-requirement-editor-close" type="button" data-photo-requirement-close aria-label="Đóng">×</button>
+        <span class="photo-requirement-editor-eyebrow">Ảnh báo cáo</span>
+        <h2>Chỉnh số lượng ảnh bắt buộc</h2>
+        <p class="photo-requirement-editor-desc">
+          Task: <strong>${escapeHtml(task.title || "Công việc")}</strong><br>
+          Hiện tại: <strong>${escapeHtml(currentRequired ? `${currentCount} hình` : "không bắt buộc đăng hình")}</strong> • Nhân viên đã đăng: <strong>${photoCount} hình</strong>
+        </p>
+        <label class="photo-requirement-editor-label">
+          Số lượng ảnh bắt buộc mới
+          <input id="photoRequirementEditInput" type="number" min="0" max="100" step="1" value="${escapeHtml(String(currentRequired ? currentCount : 0))}" inputmode="numeric" />
+        </label>
+        <small class="photo-requirement-editor-note">Nhập <strong>0</strong> nếu muốn tắt bắt buộc đăng hình. Số lượng hợp lệ từ 0 đến 100.</small>
+        <div class="photo-requirement-editor-actions">
+          <button class="btn ghost" type="button" data-photo-requirement-close>Hủy</button>
+          <button class="btn primary" type="button" data-photo-requirement-save>Lưu cập nhật</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(editorEl);
+
+    const inputEl = editorEl.querySelector("#photoRequirementEditInput");
+    const saveBtn = editorEl.querySelector("[data-photo-requirement-save]");
+
+    const close = (value = null) => closePhotoRequirementEditor(editorEl, resolve, value);
+
+    editorEl.querySelectorAll("[data-photo-requirement-close]").forEach((button) => {
+      button.addEventListener("click", () => close(null));
+    });
+
+    editorEl.addEventListener("click", (event) => {
+      if (event.target === editorEl) close(null);
+    });
+
+    editorEl.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close(null);
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveBtn?.click();
+      }
+    });
+
+    saveBtn?.addEventListener("click", () => {
+      const nextCount = Number(String(inputEl?.value || "").trim());
+
+      if (!Number.isInteger(nextCount) || nextCount < 0 || nextCount > 100) {
+        showToast("Số lượng ảnh phải là số nguyên từ 0 đến 100.");
+        inputEl?.focus();
+        return;
+      }
+
+      close(nextCount);
+    });
+
+    setTimeout(() => {
+      inputEl?.focus();
+      inputEl?.select();
+    }, 30);
+  });
+}
+
 async function editTaskPhotoRequirement(taskId) {
   if (!isAdminProfile()) return;
 
@@ -4339,24 +4417,14 @@ async function editTaskPhotoRequirement(taskId) {
   const currentRequired = taskRequiresPhotos(task);
   const currentCount = getTaskRequiredPhotoCount(task);
   const photoCount = getTaskPhotoCount(task);
-  const rawValue = window.prompt(
-    [
-      `Nhập số lượng ảnh bắt buộc mới cho task “${task.title || "Công việc"}”.`,
-      `Hiện tại: ${currentRequired ? `${currentCount} hình` : "không bắt buộc đăng hình"}.`,
-      `Nhân viên đã đăng: ${photoCount} hình.`,
-      "Nhập 0 nếu muốn bỏ bắt buộc đăng hình."
-    ].join("\n"),
-    String(currentRequired ? currentCount : 0)
-  );
+  const nextCount = await openPhotoRequirementEditor({
+    task,
+    currentRequired,
+    currentCount,
+    photoCount
+  });
 
-  if (rawValue === null) return;
-
-  const nextCount = Number(String(rawValue).trim());
-
-  if (!Number.isInteger(nextCount) || nextCount < 0 || nextCount > 100) {
-    showToast("Số lượng ảnh phải là số nguyên từ 0 đến 100.");
-    return;
-  }
+  if (nextCount === null || nextCount === undefined) return;
 
   const nextRequired = nextCount > 0;
 
@@ -4508,6 +4576,19 @@ function renderTaskActions(task, permissions) {
 
   return `<div class="task-actions">${buttons.join("")}</div>`;
 }
+
+// Bắt riêng thao tác bấm vào toàn bộ ô “Ảnh báo cáo” của Admin.
+// Dùng capture để tránh bị các listener khác nuốt sự kiện trên desktop/mobile.
+document.addEventListener("click", async (event) => {
+  const photoRequirementTarget = event.target.closest?.('[data-action="edit-photo-requirement"]');
+
+  if (!photoRequirementTarget) return;
+  if (event.target.closest?.('[data-action="view-task-photos"]')) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  await editTaskPhotoRequirement(photoRequirementTarget.dataset.taskId);
+}, true);
 
 // Event delegation cho các nút trong task card, ticket-group và notification list.
 document.addEventListener("click", async (event) => {

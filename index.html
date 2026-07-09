@@ -746,6 +746,123 @@
 
 
 
+    .photo-requirement-editor-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(8px);
+    }
+
+    .photo-requirement-editor-card {
+      position: relative;
+      width: min(520px, 100%);
+      border: 1px solid #bfdbfe;
+      border-radius: 28px;
+      background: #ffffff;
+      padding: 26px;
+      box-shadow: 0 26px 80px rgba(15, 23, 42, 0.25);
+    }
+
+    .photo-requirement-editor-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 44px;
+      height: 44px;
+      border: 0;
+      border-radius: 16px;
+      background: #eef2f7;
+      color: #0f172a;
+      font-size: 28px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .photo-requirement-editor-eyebrow {
+      display: inline-flex;
+      width: fit-content;
+      border: 1px solid #93c5fd;
+      border-radius: 999px;
+      padding: 7px 12px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .photo-requirement-editor-card h2 {
+      margin: 14px 52px 8px 0;
+      color: #0f172a;
+      font-size: clamp(24px, 4vw, 32px);
+      line-height: 1.1;
+    }
+
+    .photo-requirement-editor-desc {
+      margin: 0 0 16px;
+      color: #475569;
+      line-height: 1.55;
+    }
+
+    .photo-requirement-editor-label {
+      display: grid;
+      gap: 8px;
+      color: #0f172a;
+      font-weight: 900;
+    }
+
+    .photo-requirement-editor-label input {
+      width: 100%;
+      border: 1px solid #cfe0f7;
+      border-radius: 18px;
+      padding: 15px 16px;
+      outline: none;
+      font: inherit;
+      font-size: 18px;
+    }
+
+    .photo-requirement-editor-label input:focus {
+      border-color: #60a5fa;
+      box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.18);
+    }
+
+    .photo-requirement-editor-note {
+      display: block;
+      margin-top: 10px;
+      color: #64748b;
+      line-height: 1.45;
+    }
+
+    .photo-requirement-editor-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 22px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 560px) {
+      .photo-requirement-editor-backdrop {
+        align-items: flex-end;
+        padding: 12px;
+      }
+
+      .photo-requirement-editor-card {
+        border-radius: 24px;
+        padding: 22px;
+      }
+
+      .photo-requirement-editor-actions .btn {
+        flex: 1;
+      }
+    }
+
     /* Trang Danh sách nhân viên riêng cho Admin */
     .employee-manager-grid {
       display: grid;
