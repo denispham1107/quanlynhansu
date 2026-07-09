@@ -4297,12 +4297,20 @@ function renderPhotoReportBox(task, mode) {
     : "Nhân viên có thể hoàn thành mà không cần đăng hình";
 
   const canView = photoCount > 0 && (mode === "admin" || mode === "employee");
+  const editableByAdmin = mode === "admin" && !["completed"].includes(task.status);
+  const titleText = editableByAdmin
+    ? "Admin bấm để chỉnh số lượng ảnh báo cáo bắt buộc"
+    : "";
 
   return `
-    <div class="photo-report-box ${required && !enough ? "is-missing" : ""}">
+    <div
+      class="photo-report-box ${required && !enough ? "is-missing" : ""} ${editableByAdmin ? "is-admin-editable" : ""}"
+      ${editableByAdmin ? `data-action="edit-photo-requirement" data-task-id="${escapeHtml(task.id)}" role="button" tabindex="0" title="${escapeHtml(titleText)}"` : ""}
+    >
       <div>
         <strong>Ảnh báo cáo</strong>
         <span>${escapeHtml(summary)} • ${escapeHtml(statusText)}</span>
+        ${editableByAdmin ? `<small class="photo-report-hint">Admin có thể bấm vào ô này để chỉnh số lượng ảnh bắt buộc.</small>` : ""}
       </div>
       ${canView ? `
         <button class="btn ghost small" data-action="view-task-photos" data-task-id="${escapeHtml(task.id)}" type="button">
@@ -4311,6 +4319,57 @@ function renderPhotoReportBox(task, mode) {
       ` : ""}
     </div>
   `;
+}
+
+async function editTaskPhotoRequirement(taskId) {
+  if (!isAdminProfile()) return;
+
+  const task = state.tasks.find((item) => item.id === taskId);
+
+  if (!task) {
+    showToast("Không tìm thấy task công việc cần chỉnh ảnh báo cáo.");
+    return;
+  }
+
+  if (task.status === "completed") {
+    showToast("Task đã hoàn thành, không cần chỉnh số lượng ảnh báo cáo nữa.");
+    return;
+  }
+
+  const currentRequired = taskRequiresPhotos(task);
+  const currentCount = getTaskRequiredPhotoCount(task);
+  const photoCount = getTaskPhotoCount(task);
+  const rawValue = window.prompt(
+    [
+      `Nhập số lượng ảnh bắt buộc mới cho task “${task.title || "Công việc"}”.`,
+      `Hiện tại: ${currentRequired ? `${currentCount} hình` : "không bắt buộc đăng hình"}.`,
+      `Nhân viên đã đăng: ${photoCount} hình.`,
+      "Nhập 0 nếu muốn bỏ bắt buộc đăng hình."
+    ].join("\n"),
+    String(currentRequired ? currentCount : 0)
+  );
+
+  if (rawValue === null) return;
+
+  const nextCount = Number(String(rawValue).trim());
+
+  if (!Number.isInteger(nextCount) || nextCount < 0 || nextCount > 100) {
+    showToast("Số lượng ảnh phải là số nguyên từ 0 đến 100.");
+    return;
+  }
+
+  const nextRequired = nextCount > 0;
+
+  await updateDoc(doc(db, "tasks", task.id), {
+    photoRequired: nextRequired,
+    requiredPhotoCount: nextRequired ? nextCount : 0
+  });
+
+  showToast(
+    nextRequired
+      ? `Đã cập nhật yêu cầu ảnh báo cáo thành ${nextCount} hình.`
+      : "Đã tắt bắt buộc đăng hình cho task này."
+  );
 }
 
 function renderResultBox(task) {
@@ -4475,6 +4534,10 @@ document.addEventListener("click", async (event) => {
     openPhotoReportModal(taskId);
   }
 
+  if (action === "edit-photo-requirement") {
+    await editTaskPhotoRequirement(taskId);
+  }
+
   if (action === "submit-task") {
     await submitTask(taskId, button);
   }
@@ -4526,6 +4589,13 @@ document.addEventListener("keydown", async (event) => {
   if (notificationTarget) {
     event.preventDefault();
     await openNotificationTarget(notificationTarget.dataset.notificationId);
+    return;
+  }
+
+  const photoRequirementTarget = event.target.closest('[data-action="edit-photo-requirement"]');
+  if (photoRequirementTarget) {
+    event.preventDefault();
+    await editTaskPhotoRequirement(photoRequirementTarget.dataset.taskId);
   }
 });
 
