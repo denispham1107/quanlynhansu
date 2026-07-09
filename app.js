@@ -4297,7 +4297,7 @@ function renderPhotoReportBox(task, mode) {
     : "Nhân viên có thể hoàn thành mà không cần đăng hình";
 
   const canView = photoCount > 0 && (mode === "admin" || mode === "employee");
-  const editableByAdmin = mode === "admin" && !["completed"].includes(task.status);
+  const editableByAdmin = state.profile?.role === "admin" && !["completed"].includes(task.status);
   const titleText = editableByAdmin
     ? "Admin bấm để chỉnh số lượng ảnh báo cáo bắt buộc"
     : "";
@@ -4310,12 +4310,21 @@ function renderPhotoReportBox(task, mode) {
       <div>
         <strong>Ảnh báo cáo</strong>
         <span>${escapeHtml(summary)} • ${escapeHtml(statusText)}</span>
-        ${editableByAdmin ? `<small class="photo-report-hint">Admin có thể bấm vào ô này để chỉnh số lượng ảnh bắt buộc.</small>` : ""}
+        ${editableByAdmin ? `<small class="photo-report-hint">Admin bấm vào ô này hoặc nút “Chỉnh số ảnh” để sửa số lượng ảnh bắt buộc.</small>` : ""}
       </div>
-      ${canView ? `
-        <button class="btn ghost small" data-action="view-task-photos" data-task-id="${escapeHtml(task.id)}" type="button">
-          Xem hình (${photoCount})
-        </button>
+      ${(editableByAdmin || canView) ? `
+        <div class="photo-report-actions">
+          ${editableByAdmin ? `
+            <button class="btn secondary small photo-requirement-edit-btn" data-action="edit-photo-requirement" data-task-id="${escapeHtml(task.id)}" type="button">
+              Chỉnh số ảnh
+            </button>
+          ` : ""}
+          ${canView ? `
+            <button class="btn ghost small" data-action="view-task-photos" data-task-id="${escapeHtml(task.id)}" type="button">
+              Xem hình (${photoCount})
+            </button>
+          ` : ""}
+        </div>
       ` : ""}
     </div>
   `;
@@ -4400,7 +4409,10 @@ function openPhotoRequirementEditor({ task, currentRequired, currentCount, photo
 }
 
 async function editTaskPhotoRequirement(taskId) {
-  if (!isAdminProfile()) return;
+  if (state.profile?.role !== "admin") {
+    showToast("Chỉ Admin mới được chỉnh số lượng ảnh báo cáo.");
+    return;
+  }
 
   const task = state.tasks.find((item) => item.id === taskId);
 
@@ -4580,13 +4592,15 @@ function renderTaskActions(task, permissions) {
 // Bắt riêng thao tác bấm vào toàn bộ ô “Ảnh báo cáo” của Admin.
 // Dùng capture để tránh bị các listener khác nuốt sự kiện trên desktop/mobile.
 document.addEventListener("click", async (event) => {
-  const photoRequirementTarget = event.target.closest?.('[data-action="edit-photo-requirement"]');
+  const targetEl = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const photoRequirementTarget = targetEl?.closest?.('[data-action="edit-photo-requirement"]');
 
   if (!photoRequirementTarget) return;
-  if (event.target.closest?.('[data-action="view-task-photos"]')) return;
+  if (targetEl?.closest?.('[data-action="view-task-photos"]')) return;
 
   event.preventDefault();
   event.stopPropagation();
+  event.__photoRequirementHandled = true;
   await editTaskPhotoRequirement(photoRequirementTarget.dataset.taskId);
 }, true);
 
@@ -4616,6 +4630,8 @@ document.addEventListener("click", async (event) => {
   }
 
   if (action === "edit-photo-requirement") {
+    if (event.__photoRequirementHandled) return;
+    event.preventDefault();
     await editTaskPhotoRequirement(taskId);
   }
 
@@ -4673,7 +4689,8 @@ document.addEventListener("keydown", async (event) => {
     return;
   }
 
-  const photoRequirementTarget = event.target.closest('[data-action="edit-photo-requirement"]');
+  const keyTargetEl = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const photoRequirementTarget = keyTargetEl?.closest?.('[data-action="edit-photo-requirement"]');
   if (photoRequirementTarget) {
     event.preventDefault();
     await editTaskPhotoRequirement(photoRequirementTarget.dataset.taskId);
