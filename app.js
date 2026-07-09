@@ -3697,6 +3697,10 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
         <strong>Tổng số bạn nhân viên đang chưa được giao việc: 0</strong>
         <div class="employee-status-names"><span class="employee-status-empty">Chưa có nhân viên</span></div>
       </div>
+      <div class="employee-status-card is-assigned">
+        <strong>Tổng số bạn nhân viên đã được giao việc: 0</strong>
+        <div class="employee-status-names"><span class="employee-status-empty">Không có</span></div>
+      </div>
       <div class="employee-status-card is-hotel">
         <strong>Tổng số bạn nhân viên đang làm hotel: 0</strong>
         <div class="employee-status-names"><span class="employee-status-empty">Không có</span></div>
@@ -3732,6 +3736,7 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   });
 
   const freeEmployees = employees.filter((employee) => !busyEmployeeUids.has(employee.uid));
+  const assignedEmployees = employees.filter((employee) => busyEmployeeUids.has(employee.uid));
   const hotelEmployees = employees.filter((employee) => hotelEmployeeUids.has(employee.uid));
   const lunchEmployees = employees.filter((employee) => lunchEmployeeUids.has(employee.uid));
 
@@ -3740,6 +3745,10 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
     <div class="employee-status-card is-free">
       <strong>Tổng số bạn nhân viên đang chưa được giao việc: ${freeEmployees.length}</strong>
       <div class="employee-status-names">${renderEmployeeStatusNameChips(freeEmployees)}</div>
+    </div>
+    <div class="employee-status-card is-assigned">
+      <strong>Tổng số bạn nhân viên đã được giao việc: ${assignedEmployees.length}</strong>
+      <div class="employee-status-names">${renderEmployeeStatusNameChips(assignedEmployees)}</div>
     </div>
     <div class="employee-status-card is-hotel">
       <strong>Tổng số bạn nhân viên đang làm hotel: ${hotelEmployees.length}</strong>
