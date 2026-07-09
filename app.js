@@ -1938,8 +1938,12 @@ let photoRequirementTouched = false;
 
 const LUNCH_BREAK_AUTO_TITLE = "Phiếu nghỉ trưa";
 const HOTEL_AUTO_TITLE = "Làm hotel";
+const SHIP_AUTO_TITLE = "Đi ship";
+const CLEANING_AUTO_TITLE = "Dọn dẹp vệ sinh";
 const LEGACY_LUNCH_BREAK_AUTO_TITLES = ["Nghỉ trưa", LUNCH_BREAK_AUTO_TITLE];
 const LEGACY_HOTEL_AUTO_TITLES = ["Hotel", HOTEL_AUTO_TITLE];
+const LEGACY_SHIP_AUTO_TITLES = [SHIP_AUTO_TITLE];
+const LEGACY_CLEANING_AUTO_TITLES = [CLEANING_AUTO_TITLE];
 const HOTEL_BASE_PET_COUNT = 10;
 const HOTEL_BASE_MINUTES = 30;
 const HOTEL_EXTRA_MINUTES_PER_PET = 2;
@@ -2036,6 +2040,14 @@ function createTaskRowElement(prefill = null) {
         <input type="checkbox" class="row-hotel" />
         Hotel
       </label>
+      <label class="checkbox-line ship-line">
+        <input type="checkbox" class="row-ship" />
+        Ship
+      </label>
+      <label class="checkbox-line cleaning-line">
+        <input type="checkbox" class="row-cleaning" />
+        Dọn dẹp vệ sinh
+      </label>
     </div>
     <p class="small-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
     <p class="small-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>10 bé</strong> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <strong>30 phút</strong>. Cứ <strong>mỗi 1 bé vào</strong> ở thêm thì sẽ cộng thêm thời gian cho <strong>2 phút</strong>.</p>
@@ -2117,6 +2129,8 @@ function syncLunchBreakRowControls(row, changedInput = null) {
 
   const lunchCheckbox = row.querySelector(".row-lunch-break");
   const hotelCheckbox = row.querySelector(".row-hotel");
+  const shipCheckbox = row.querySelector(".row-ship");
+  const cleaningCheckbox = row.querySelector(".row-cleaning");
   const hoursInput = row.querySelector(".row-hours");
   const minutesInput = row.querySelector(".row-minutes");
   const titleInput = row.querySelector(".row-title");
@@ -2125,14 +2139,32 @@ function syncLunchBreakRowControls(row, changedInput = null) {
 
   const lunchChanged = Boolean(changedInput?.matches?.(".row-lunch-break"));
   const hotelChanged = Boolean(changedInput?.matches?.(".row-hotel"));
+  const shipChanged = Boolean(changedInput?.matches?.(".row-ship"));
+  const cleaningChanged = Boolean(changedInput?.matches?.(".row-cleaning"));
 
-  // Hai loại đặc biệt không được chọn cùng lúc.
-  if (lunchChanged && lunchCheckbox?.checked && hotelCheckbox) {
-    hotelCheckbox.checked = false;
+  // Các loại checkbox đặc biệt không được chọn cùng lúc để tránh tự điền nhầm tên phiếu/công việc.
+  if (lunchChanged && lunchCheckbox?.checked) {
+    if (hotelCheckbox) hotelCheckbox.checked = false;
+    if (shipCheckbox) shipCheckbox.checked = false;
+    if (cleaningCheckbox) cleaningCheckbox.checked = false;
   }
 
-  if (hotelChanged && hotelCheckbox?.checked && lunchCheckbox) {
-    lunchCheckbox.checked = false;
+  if (hotelChanged && hotelCheckbox?.checked) {
+    if (lunchCheckbox) lunchCheckbox.checked = false;
+    if (shipCheckbox) shipCheckbox.checked = false;
+    if (cleaningCheckbox) cleaningCheckbox.checked = false;
+  }
+
+  if (shipChanged && shipCheckbox?.checked) {
+    if (lunchCheckbox) lunchCheckbox.checked = false;
+    if (hotelCheckbox) hotelCheckbox.checked = false;
+    if (cleaningCheckbox) cleaningCheckbox.checked = false;
+  }
+
+  if (cleaningChanged && cleaningCheckbox?.checked) {
+    if (lunchCheckbox) lunchCheckbox.checked = false;
+    if (hotelCheckbox) hotelCheckbox.checked = false;
+    if (shipCheckbox) shipCheckbox.checked = false;
   }
 
   if (lunchChanged && titleInput) {
@@ -2152,6 +2184,24 @@ function syncLunchBreakRowControls(row, changedInput = null) {
     } else if (isAutoSpecialTitle(titleInput.value, LEGACY_HOTEL_AUTO_TITLES)) {
       titleInput.value = "";
       clearWorkOrderNameIfAutoSpecial(LEGACY_HOTEL_AUTO_TITLES);
+    }
+  }
+
+  if (shipChanged) {
+    if (shipCheckbox?.checked) {
+      setWorkOrderNameForSpecialTask(SHIP_AUTO_TITLE);
+    } else {
+      clearWorkOrderNameIfAutoSpecial(LEGACY_SHIP_AUTO_TITLES);
+    }
+  }
+
+  if (cleaningChanged && titleInput) {
+    if (cleaningCheckbox?.checked) {
+      titleInput.value = CLEANING_AUTO_TITLE;
+      setWorkOrderNameForSpecialTask(CLEANING_AUTO_TITLE);
+    } else if (isAutoSpecialTitle(titleInput.value, LEGACY_CLEANING_AUTO_TITLES)) {
+      titleInput.value = "";
+      clearWorkOrderNameIfAutoSpecial(LEGACY_CLEANING_AUTO_TITLES);
     }
   }
 
@@ -2185,12 +2235,15 @@ function syncLunchBreakRowControls(row, changedInput = null) {
     return;
   }
 
+  if (cleaningCheckbox?.checked && titleInput && !titleInput.value.trim()) {
+    titleInput.value = CLEANING_AUTO_TITLE;
+  }
+
   hoursInput.max = 168;
   minutesInput.min = 0;
   minutesInput.max = 59;
   if (Number(minutesInput.value || 0) < 0) minutesInput.value = 0;
 }
-
 function resetTaskRows() {
   els.taskRowsContainer.innerHTML = "";
   addTaskRow();
@@ -2278,10 +2331,10 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   const row = event.target.closest(".task-row");
   if (!row) return;
 
-  if (event.target.matches(".row-lunch-break, .row-hotel, .row-hours, .row-minutes")) {
+  if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning, .row-hours, .row-minutes")) {
     syncLunchBreakRowControls(row, event.target);
 
-    if (event.target.matches(".row-lunch-break, .row-hotel")) {
+    if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning")) {
       syncPhotoRequirementDefaultFromTaskTypes();
     }
   }

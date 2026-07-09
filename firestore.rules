@@ -21,7 +21,19 @@ service cloud.firestore {
     }
 
     function isValidTaskStatus(status) {
-      return status in ["waiting_assignee", "doing", "submitted", "completed", "redo", "overdue"];
+      return status in ["waiting_assignee", "doing", "lunch_break", "hotel", "submitted", "completed", "redo", "overdue"];
+    }
+
+    function dataIsLunchBreak(data) {
+      return data.keys().hasAny(["isLunchBreak"]) && data.isLunchBreak == true;
+    }
+
+    function dataIsHotel(data) {
+      return data.keys().hasAny(["isHotel"]) && data.isHotel == true;
+    }
+
+    function dataIsNormalWork(data) {
+      return !dataIsLunchBreak(data) && !dataIsHotel(data);
     }
 
     function taskDoc(taskId) {
@@ -30,6 +42,20 @@ service cloud.firestore {
 
     function workOrderDoc(workOrderId) {
       return /databases/$(database)/documents/workOrders/$(workOrderId);
+    }
+
+    // Cho phép các task cũ tạo trước khi có tính năng bắt buộc đăng hình
+    // vẫn được nhân viên bấm Hoàn thành nếu chưa có field photoRequired.
+    function isTaskPhotoRequirementSatisfied(taskData) {
+      return !taskData.keys().hasAny(["photoRequired"])
+        || taskData.photoRequired == false
+        || (
+          taskData.photoRequired == true
+          && taskData.keys().hasAll(["photoCount", "requiredPhotoCount"])
+          && taskData.photoCount is int
+          && taskData.requiredPhotoCount is int
+          && taskData.photoCount >= taskData.requiredPhotoCount
+        );
     }
 
     // Client tạo queueStartAt bằng thời gian trên máy người dùng, còn request.time
@@ -53,13 +79,17 @@ service cloud.firestore {
         "task_time_extended_admin",
         "task_reassigned",
         "task_reassigned_removed",
-        "task_reassigned_admin"
+        "task_reassigned_admin",
+        "work_order_draft_saved"
       ];
     }
 
     match /users/{userId} {
       // Admin đọc tất cả user; nhân viên chỉ đọc hồ sơ của chính mình.
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+
+      // Admin được nhập/khôi phục dữ liệu users từ file backup JSON.
+      allow create, update: if isAdmin();
 
       // Admin tạo hồ sơ user sau khi tạo tài khoản bằng Firebase Auth.
       // Admin đầu tiên nên tạo thủ công theo hướng dẫn, trước khi bật rules chặt này.
@@ -87,6 +117,9 @@ service cloud.firestore {
       // Admin đọc toàn bộ phiếu. Nhân viên cũng được đọc metadata phiếu
       // (tên phiếu, tổng số công việc) để tiêu đề phiếu hiển thị giống trang Admin.
       allow read: if isAdmin() || signedIn();
+
+      // Admin được nhập/khôi phục dữ liệu phiếu từ file backup JSON.
+      allow create, update: if isAdmin();
 
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly([
@@ -123,6 +156,9 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (signedIn() && resource.data.assignedToUid == request.auth.uid);
 
+      // Admin được nhập/khôi phục dữ liệu task từ file backup JSON.
+      allow create, update: if isAdmin();
+
       // Chỉ Admin được giao việc. Cho phép tạo ở trạng thái "draft" (chưa giao việc,
       // thông tin có thể chưa đầy đủ) hoặc "doing" (đã giao việc chính thức, bắt đầu đếm giờ).
       allow create: if isAdmin()
@@ -141,6 +177,10 @@ service cloud.firestore {
           "rowIndex",
           "createdAt",
           "deadlineMinutes",
+          "isLunchBreak",
+          "isHotel",
+          "hotelPetCount",
+          "hotelAllowedMinutes",
           "deadlineAt",
           "dispatchedAt",
           "queueStartAt",
@@ -188,6 +228,24 @@ service cloud.firestore {
         && request.resource.data.deadlineMinutes is int
         && request.resource.data.deadlineMinutes >= 0
         && request.resource.data.deadlineMinutes <= 10080
+        && request.resource.data.isLunchBreak is bool
+        && request.resource.data.isHotel is bool
+        && !(request.resource.data.isLunchBreak == true && request.resource.data.isHotel == true)
+        && request.resource.data.hotelPetCount is int
+        && request.resource.data.hotelPetCount >= 0
+        && request.resource.data.hotelPetCount <= 500
+        && request.resource.data.hotelAllowedMinutes is int
+        && request.resource.data.hotelAllowedMinutes >= 0
+        && request.resource.data.hotelAllowedMinutes <= 10080
+        && (
+          request.resource.data.isHotel == true
+          || (request.resource.data.hotelPetCount == 0
+            && request.resource.data.hotelAllowedMinutes == 0)
+        )
+        && (
+          !request.resource.data.isLunchBreak
+          || (request.resource.data.deadlineMinutes > 0 && request.resource.data.deadlineMinutes <= 30)
+        )
         && request.resource.data.accumulatedWorkedMs is int
         && request.resource.data.accumulatedWorkedMs >= 0
         && (
@@ -239,7 +297,12 @@ service cloud.firestore {
             && request.resource.data.remainingMsAtPause == null
           )
           || (
-            request.resource.data.status == "doing"
+            request.resource.data.status in ["doing", "lunch_break", "hotel"]
+            && (
+              (dataIsLunchBreak(request.resource.data) && request.resource.data.status == "lunch_break")
+              || (dataIsHotel(request.resource.data) && request.resource.data.status == "hotel")
+              || (dataIsNormalWork(request.resource.data) && request.resource.data.status == "doing")
+            )
             && request.resource.data.title.size() > 0
             && request.resource.data.assignedToUid != ""
             && request.resource.data.deadlineMinutes > 0
@@ -256,7 +319,7 @@ service cloud.firestore {
       // Ảnh thật lưu ở Firebase Storage; Firestore chỉ lưu metadata + số lượng.
       allow update: if signedIn()
         && resource.data.assignedToUid == request.auth.uid
-        && resource.data.status in ["doing", "redo", "overdue"]
+        && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["photos", "photoCount", "lastPhotoUploadedAt"])
         && request.resource.data.photos is list
         && request.resource.data.photos.size() <= 200
@@ -270,25 +333,23 @@ service cloud.firestore {
       // Không được tự chuyển sang completed, không được sửa nội dung/deadline/người nhận.
       allow update: if signedIn()
         && resource.data.assignedToUid == request.auth.uid
-        && resource.data.status in ["doing", "redo", "overdue"]
+        && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "submittedAt"])
         && request.resource.data.status == "submitted"
         && request.resource.data.submittedAt == request.time
-        && (
-          !resource.data.photoRequired
-          || (
-            resource.data.photoCount is int
-            && resource.data.requiredPhotoCount is int
-            && resource.data.photoCount >= resource.data.requiredPhotoCount
-          )
-        );
+        && isTaskPhotoRequirementSatisfied(resource.data);
 
       // Admin bấm "Giao việc" cho 1 phiếu đang ở trạng thái nháp: chuyển task draft -> doing,
       // bắt đầu tính hạn hoàn thành từ thời điểm này (có thể xếp hàng nếu nhân viên còn việc khác).
       allow update: if isAdmin()
         && resource.data.status == "draft"
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "dispatchedAt", "queueStartAt", "deadlineAt"])
-        && request.resource.data.status == "doing"
+        && request.resource.data.status in ["doing", "lunch_break", "hotel"]
+        && (
+          (dataIsLunchBreak(resource.data) && request.resource.data.status == "lunch_break")
+          || (dataIsHotel(resource.data) && request.resource.data.status == "hotel")
+          || (dataIsNormalWork(resource.data) && request.resource.data.status == "doing")
+        )
         && request.resource.data.assignedToUid != ""
         && request.resource.data.deadlineMinutes > 0
         && request.resource.data.dispatchedAt == request.time
@@ -300,7 +361,7 @@ service cloud.firestore {
       // - Nếu task đang chạy: chỉ đổi assignedToUid/assignedToName, giữ nguyên toàn bộ mốc thời gian.
       // - Nếu task đang chờ đến lượt (queueStartAt > request.time): đổi người và cho task bắt đầu ngay như mới giao.
       allow update: if isAdmin()
-        && resource.data.status in ["doing", "redo", "overdue"]
+        && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
         && request.resource.data.id == resource.data.id
         && request.resource.data.assignedByUid == resource.data.assignedByUid
         && request.resource.data.assignedToUid != resource.data.assignedToUid
@@ -332,7 +393,12 @@ service cloud.firestore {
               "queueStartAt",
               "deadlineAt"
             ])
-            && request.resource.data.status == "doing"
+            && request.resource.data.status in ["doing", "lunch_break", "hotel"]
+            && (
+              (dataIsLunchBreak(resource.data) && request.resource.data.status == "lunch_break")
+              || (dataIsHotel(resource.data) && request.resource.data.status == "hotel")
+              || (dataIsNormalWork(resource.data) && request.resource.data.status == "doing")
+            )
             && request.resource.data.dispatchedAt == request.time
             && isValidQueueStartAt(request.resource.data.queueStartAt)
             && request.resource.data.deadlineAt is timestamp
@@ -378,6 +444,9 @@ service cloud.firestore {
       // Mỗi người chỉ đọc thông báo gửi cho chính mình. Admin có thể đọc tất cả để hỗ trợ kiểm tra lỗi.
       allow read: if isAdmin()
         || (signedIn() && resource.data.recipientUid == request.auth.uid);
+
+      // Admin được nhập/khôi phục thông báo từ file backup JSON.
+      allow create, update: if isAdmin();
 
       // Admin tạo thông báo khi giao việc, xác nhận hoàn thành, yêu cầu làm lại.
       // Nhân viên chỉ được tạo thông báo "đã báo hoàn thành" gửi về đúng Admin giao việc.
@@ -428,9 +497,55 @@ service cloud.firestore {
         || (signedIn() && resource.data.recipientUid == request.auth.uid);
     }
 
+
+    match /hotelDailyReports/{reportId} {
+      // Admin lưu và xem tổng kết Hotel từng ngày.
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    match /workTemplates/{templateId} {
+      // Admin quản lý danh sách công việc mẫu kèm thời gian hoàn thành.
+      allow read: if isAdmin();
+
+      // Admin được nhập/khôi phục danh sách công việc mẫu từ file backup JSON.
+      allow create, update: if isAdmin();
+
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          "id",
+          "name",
+          "searchText",
+          "deadlineMinutes",
+          "createdByUid",
+          "createdByName",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.id == templateId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.searchText is string
+        && request.resource.data.searchText.size() > 0
+        && request.resource.data.searchText.size() <= 160
+        && request.resource.data.deadlineMinutes is int
+        && request.resource.data.deadlineMinutes > 0
+        && request.resource.data.deadlineMinutes <= 10080
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdByName is string
+        && request.resource.data.createdByName.size() > 0
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == null;
+
+      allow update, delete: if isAdmin();
+    }
+
     match /timeExtensionReasons/{reasonId} {
       // Admin quản lý danh sách mục đích thêm giờ; nhân viên có thể đọc để hiển thị thống nhất nếu cần.
       allow read: if signedIn();
+
+      // Admin được nhập/khôi phục mục đích thêm giờ từ file backup JSON.
+      allow create, update: if isAdmin();
 
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly([
