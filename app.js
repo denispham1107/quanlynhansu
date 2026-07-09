@@ -3336,7 +3336,13 @@ function getCompletedNormalTaskStats(task) {
   const rawActualMinutes = Number(task.actualMinutes || 0) > 0
     ? Number(task.actualMinutes || 0)
     : getCompletedTaskActualMinutes(task);
-  const actualMinutes = shouldCountExtendedTaskAsOnTime(task, rawActualMinutes, deadlineMinutes)
+
+  // Nếu task đã được ghi nhận là đúng thời gian, báo cáo năng lực tổng hợp cũng phải tính là 100%.
+  // Trường hợp thường gặp: Admin đã “Thêm giờ”, nhân viên hoàn thành trước hạn mới.
+  // Khi đó resultType của task là on_time, nên không được cộng thành năng lực >100% theo thời gian thực tế ngắn hơn hạn mới.
+  const isStoredOnTime = task.resultType === "on_time";
+  const isExtendedOnTime = shouldCountExtendedTaskAsOnTime(task, rawActualMinutes, deadlineMinutes);
+  const actualMinutes = (isStoredOnTime || isExtendedOnTime)
     ? deadlineMinutes
     : rawActualMinutes;
 
