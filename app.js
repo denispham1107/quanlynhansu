@@ -4175,7 +4175,6 @@ function getInitialCountdownText(task) {
       : `Chờ chọn người - chưa bắt đầu`;
   }
   if (task.status === "completed") return "Đã hoàn thành";
-  if (task.status === "submitted") return "Chờ Admin duyệt";
 
   const queueStart = timestampToDate(task.queueStartAt);
   if (queueStart && Date.now() < queueStart.getTime()) {
@@ -5453,11 +5452,15 @@ async function approveTask(taskId, button) {
       throw new Error("Công việc chưa ở trạng thái chờ xác nhận.");
     }
 
-    const result = calculateResult(task);
+    // Tính kết quả tại thời điểm Admin bấm duyệt, không lấy thời điểm nhân viên bấm "Hoàn thành".
+    // Như vậy khi task đang ở trạng thái "Chờ Admin xác nhận", đồng hồ vẫn chạy bình thường
+    // cho đến lúc Admin duyệt và kết quả nhanh/chậm phản ánh đúng thời gian duyệt thực tế.
+    const approvedDate = new Date();
+    const result = calculateResultAt(task, approvedDate);
 
     await updateDoc(doc(db, "tasks", taskId), {
       status: "completed",
-      approvedAt: serverTimestamp(),
+      approvedAt: Timestamp.fromDate(approvedDate),
       actualMinutes: result.actualMinutes,
       resultType: result.resultType,
       differenceMinutes: result.differenceMinutes,
@@ -5601,13 +5604,13 @@ async function requestRedo(taskId, button) {
 }
 
 function calculateResult(task) {
-  const submittedAt = timestampToDate(task.submittedAt);
+  const completedAt = timestampToDate(task.approvedAt) || timestampToDate(task.submittedAt);
 
-  if (!submittedAt) {
-    throw new Error("Thiếu thời gian nhân viên báo hoàn thành.");
+  if (!completedAt) {
+    throw new Error("Thiếu thời gian hoàn thành.");
   }
 
-  return calculateResultAt(task, submittedAt);
+  return calculateResultAt(task, completedAt);
 }
 
 function calculateResultAt(task, completedAt) {
@@ -5669,11 +5672,6 @@ function updateCountdowns() {
 
     if (rawStatus === "completed") {
       countdown.textContent = "Đã hoàn thành";
-      return;
-    }
-
-    if (rawStatus === "submitted") {
-      countdown.textContent = "Chờ Admin duyệt";
       return;
     }
 
