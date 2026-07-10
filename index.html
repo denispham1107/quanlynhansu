@@ -544,6 +544,29 @@
       padding: 22px;
     }
 
+    .download-photo-zip-btn {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.96), rgba(37, 99, 235, 0.96)) !important;
+      color: #ffffff !important;
+      box-shadow: 0 14px 28px rgba(16, 185, 129, 0.20);
+    }
+
+    .download-photo-zip-btn:hover,
+    .download-photo-zip-btn:focus-visible {
+      filter: brightness(1.03);
+      transform: translateY(-1px);
+    }
+
+    .download-photo-zip-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
+      transform: none;
+      filter: none;
+    }
+
+    .photo-report-page .download-photo-zip-btn.hidden {
+      display: none !important;
+    }
+
     @media (min-width: 1024px) {
       .photo-report-page-card .photo-report-grid {
         grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -1811,6 +1834,7 @@
           <p id="photoReportSummary" class="small-note">Đã đăng 0 hình</p>
         </div>
         <div class="hero-actions">
+          <button id="downloadPhotoZipBtn" class="btn primary large download-photo-zip-btn hidden" type="button">⬇ Tải</button>
           <button id="backFromPhotoReportBtn" class="btn ghost large" type="button">← Quay lại</button>
         </div>
       </section>
@@ -1867,6 +1891,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

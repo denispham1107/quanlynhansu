@@ -207,7 +207,8 @@ const els = {
   photoReportModal: $("#photoReportModal"),
   photoReportTaskTitle: $("#photoReportTaskTitle"),
   photoReportSummary: $("#photoReportSummary"),
-  photoReportGrid: $("#photoReportGrid")
+  photoReportGrid: $("#photoReportGrid"),
+  downloadPhotoZipBtn: $("#downloadPhotoZipBtn")
 };
 
 function escapeHtml(value = "") {
@@ -294,6 +295,34 @@ function sanitizeStorageFileName(fileName = "image") {
 
   return name || "image";
 }
+function makeUniqueZipFileName(existingNames, fileName = "image") {
+  const safeName = sanitizeStorageFileName(fileName || "image");
+  const dotIndex = safeName.lastIndexOf(".");
+  const baseName = dotIndex > 0 ? safeName.slice(0, dotIndex) : safeName;
+  const extension = dotIndex > 0 ? safeName.slice(dotIndex) : ".jpg";
+  let candidate = `${baseName}${extension}`;
+  let counter = 2;
+
+  while (existingNames.has(candidate.toLowerCase())) {
+    candidate = `${baseName}-${counter}${extension}`;
+    counter += 1;
+  }
+
+  existingNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
+function downloadBlobFile(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
 
 function getTaskPhotos(task) {
   return Array.isArray(task?.photos) ? task.photos.filter((item) => item?.url) : [];
@@ -4854,6 +4883,8 @@ function closePhotoReportModal() {
 function backFromPhotoReportPage() {
   state.photoReportTaskId = null;
   if (els.photoReportGrid) els.photoReportGrid.innerHTML = "";
+  els.downloadPhotoZipBtn?.classList.add("hidden");
+  if (els.downloadPhotoZipBtn) els.downloadPhotoZipBtn.disabled = false;
   els.photoReportView?.classList.add("hidden");
   els.photoReportModal?.classList.add("hidden");
 
@@ -4872,6 +4903,76 @@ $$('[data-close-photo-modal]').forEach((button) => {
 });
 
 els.backFromPhotoReportBtn?.addEventListener("click", backFromPhotoReportPage);
+els.downloadPhotoZipBtn?.addEventListener("click", async () => {
+  await downloadCurrentPhotoReportZip();
+});
+
+async function downloadCurrentPhotoReportZip() {
+  if (state.profile?.role !== "admin") {
+    toast("Chỉ Admin mới được tải toàn bộ ảnh báo cáo.", "error");
+    return;
+  }
+
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  const photos = getTaskPhotos(task);
+
+  if (!task || !photos.length) {
+    toast("Không có ảnh báo cáo để tải.", "error");
+    return;
+  }
+
+  if (!window.JSZip) {
+    toast("Chưa tải được thư viện tạo file ZIP. Vui lòng tải lại trang rồi thử lại.", "error");
+    return;
+  }
+
+  const button = els.downloadPhotoZipBtn;
+  setButtonLoading(button, true, "Đang nén...");
+
+  try {
+    const zip = new window.JSZip();
+    const folderName = sanitizeStorageFileName(`anh-bao-cao-${task.title || task.id}`);
+    const folder = zip.folder(folderName) || zip;
+    const usedNames = new Set();
+    let successCount = 0;
+    const failedPhotos = [];
+
+    for (const [index, photo] of photos.entries()) {
+      try {
+        const response = await fetch(photo.url, { mode: "cors" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const blob = await response.blob();
+        const photoName = photo.name || `anh-bao-cao-${index + 1}.jpg`;
+        const fileName = makeUniqueZipFileName(usedNames, `${String(index + 1).padStart(2, "0")}-${photoName}`);
+        folder.file(fileName, blob);
+        successCount += 1;
+      } catch (error) {
+        console.error("Không tải được ảnh để nén ZIP", photo, error);
+        failedPhotos.push(photo.name || `Ảnh ${index + 1}`);
+      }
+    }
+
+    if (!successCount) {
+      throw new Error("Không tải được ảnh nào để tạo file ZIP.");
+    }
+
+    if (failedPhotos.length) {
+      folder.file("anh-khong-tai-duoc.txt", failedPhotos.join("\n"));
+    }
+
+    const zipBlob = await zip.generateAsync({ type: "blob" });
+    const fileName = sanitizeStorageFileName(`${folderName}-${new Date().toISOString().slice(0, 10)}.zip`);
+    downloadBlobFile(zipBlob, fileName);
+
+    toast(`Đã tạo file ZIP với ${successCount}/${photos.length} hình.`, failedPhotos.length ? "warning" : "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không tạo được file ZIP ảnh báo cáo.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
 
 function renderPhotoReportPageContent(task) {
   if (!task) return;
@@ -4905,6 +5006,12 @@ function renderPhotoReportPageContent(task) {
         </a>
       `).join("")
       : `Chưa có hình báo cáo.`;
+  }
+
+  if (els.downloadPhotoZipBtn) {
+    const canDownload = state.profile?.role === "admin" && photos.length > 0;
+    els.downloadPhotoZipBtn.classList.toggle("hidden", !canDownload);
+    els.downloadPhotoZipBtn.disabled = !canDownload;
   }
 }
 
