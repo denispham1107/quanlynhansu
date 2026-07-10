@@ -4908,24 +4908,117 @@ els.downloadPhotoZipBtn?.addEventListener("click", async () => {
   await downloadCurrentPhotoReportZip();
 });
 
-async function getPhotoBlobForZip(photo) {
-  const storagePath = getStoragePathFromPhoto(photo);
+const PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS = 15000;
 
-  if (storagePath) {
+function withPhotoDownloadTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(message || "Tải ảnh quá lâu, hệ thống sẽ thử cách khác."));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
+}
+
+function assertUsablePhotoBlob(blob) {
+  if (!(blob instanceof Blob)) {
+    throw new Error("Dữ liệu tải về không phải file ảnh.");
+  }
+
+  if (Number(blob.size || 0) <= 0) {
+    throw new Error("File ảnh tải về bị rỗng.");
+  }
+
+  return blob;
+}
+
+async function fetchPhotoBlobByUrl(url) {
+  if (!url) throw new Error("Ảnh không có link tải.");
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      mode: "cors",
+      credentials: "omit",
+      cache: "no-store",
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return assertUsablePhotoBlob(await response.blob());
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function getPhotoBlobByStorageSdk(storagePath) {
+  if (!storagePath) throw new Error("Ảnh không có storagePath.");
+
+  return assertUsablePhotoBlob(await withPhotoDownloadTimeout(
+    getBlob(storageRef(storage, storagePath)),
+    PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS,
+    "Firebase Storage SDK tải ảnh quá lâu."
+  ));
+}
+
+async function getFreshPhotoUrlFromStorage(storagePath) {
+  if (!storagePath) throw new Error("Ảnh không có storagePath.");
+
+  return await withPhotoDownloadTimeout(
+    getDownloadURL(storageRef(storage, storagePath)),
+    PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS,
+    "Không lấy được link ảnh mới từ Firebase Storage."
+  );
+}
+
+async function firstSuccessfulPhotoDownload(attempts) {
+  const errors = [];
+
+  for (const attempt of attempts) {
     try {
-      return await getBlob(storageRef(storage, storagePath));
+      const blob = await attempt();
+      return assertUsablePhotoBlob(blob);
     } catch (error) {
-      console.warn("Không tải được ảnh bằng Firebase Storage SDK, thử tải bằng URL", storagePath, error);
+      errors.push(error?.message || String(error));
+      console.warn("Một cách tải ảnh bị lỗi, thử cách tiếp theo:", error);
     }
   }
 
-  if (!photo?.url) {
+  throw new Error(errors.join(" | ") || "Không tải được ảnh.");
+}
+
+async function getPhotoBlobForZip(photo) {
+  const storagePath = getStoragePathFromPhoto(photo);
+  const url = String(photo?.url || "");
+  const attempts = [];
+
+  // Ưu tiên URL vì đây chính là link đang dùng để hiển thị ảnh trên trang.
+  if (url) {
+    attempts.push(() => fetchPhotoBlobByUrl(url));
+  }
+
+  // Nếu URL bị trình duyệt chặn, thử đọc trực tiếp bằng Firebase Storage SDK.
+  if (storagePath) {
+    attempts.push(() => getPhotoBlobByStorageSdk(storagePath));
+    attempts.push(async () => {
+      const freshUrl = await getFreshPhotoUrlFromStorage(storagePath);
+      return await fetchPhotoBlobByUrl(freshUrl);
+    });
+  }
+
+  if (!attempts.length) {
     throw new Error("Ảnh không có đường dẫn tải.");
   }
 
-  const response = await fetch(photo.url, { mode: "cors", credentials: "omit" });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return await response.blob();
+  return await firstSuccessfulPhotoDownload(attempts);
 }
 
 async function downloadCurrentPhotoReportZip() {
@@ -4971,7 +5064,7 @@ async function downloadCurrentPhotoReportZip() {
         successCount += 1;
       } catch (error) {
         console.error("Không tải được ảnh để nén ZIP", photo, error);
-        failedPhotos.push(photo.name || `Ảnh ${index + 1}`);
+        failedPhotos.push(`${photo.name || `Ảnh ${index + 1}`}: ${error?.message || "Không rõ lỗi"}`);
       }
     }
 
