@@ -563,8 +563,28 @@
       filter: none;
     }
 
-    .photo-report-page .download-photo-zip-btn.hidden {
+    .photo-report-page .download-photo-zip-btn.hidden,
+    .photo-report-page .share-photo-report-btn.hidden {
       display: none !important;
+    }
+
+    .share-photo-report-btn {
+      background: linear-gradient(135deg, rgba(124, 58, 237, 0.94), rgba(14, 165, 233, 0.94)) !important;
+      color: #ffffff !important;
+      box-shadow: 0 14px 28px rgba(124, 58, 237, 0.18);
+    }
+
+    .share-photo-report-btn:hover,
+    .share-photo-report-btn:focus-visible {
+      filter: brightness(1.04);
+      transform: translateY(-1px);
+    }
+
+    .share-photo-report-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
+      transform: none;
+      filter: none;
     }
 
     @media (min-width: 1024px) {
@@ -1835,6 +1855,7 @@
         </div>
         <div class="hero-actions">
           <button id="downloadPhotoZipBtn" class="btn primary large download-photo-zip-btn hidden" type="button">⬇ Tải</button>
+          <button id="sharePhotoReportBtn" class="btn primary large share-photo-report-btn hidden" type="button">↗ Chia sẻ</button>
           <button id="backFromPhotoReportBtn" class="btn ghost large" type="button">← Quay lại</button>
         </div>
       </section>

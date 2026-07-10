@@ -78,6 +78,9 @@ const state = {
   notifications: [],
   knownNotificationIds: new Set(),
   notificationsReady: false,
+  photoShareFile: null,
+  photoShareTaskId: null,
+  photoShareFileName: "",
   unsubs: [],
   editingWorkOrderId: null,
   editingWorkTemplateId: null,
@@ -210,7 +213,8 @@ const els = {
   photoReportTaskTitle: $("#photoReportTaskTitle"),
   photoReportSummary: $("#photoReportSummary"),
   photoReportGrid: $("#photoReportGrid"),
-  downloadPhotoZipBtn: $("#downloadPhotoZipBtn")
+  downloadPhotoZipBtn: $("#downloadPhotoZipBtn"),
+  sharePhotoReportBtn: $("#sharePhotoReportBtn")
 };
 
 function escapeHtml(value = "") {
@@ -5023,8 +5027,13 @@ function closePhotoReportModal() {
 function backFromPhotoReportPage() {
   state.photoReportTaskId = null;
   if (els.photoReportGrid) els.photoReportGrid.innerHTML = "";
+  state.photoShareFile = null;
+  state.photoShareTaskId = null;
+  state.photoShareFileName = "";
   els.downloadPhotoZipBtn?.classList.add("hidden");
   if (els.downloadPhotoZipBtn) els.downloadPhotoZipBtn.disabled = false;
+  els.sharePhotoReportBtn?.classList.add("hidden");
+  if (els.sharePhotoReportBtn) els.sharePhotoReportBtn.disabled = false;
   els.photoReportView?.classList.add("hidden");
   els.photoReportModal?.classList.add("hidden");
 
@@ -5045,6 +5054,10 @@ $$('[data-close-photo-modal]').forEach((button) => {
 els.backFromPhotoReportBtn?.addEventListener("click", backFromPhotoReportPage);
 els.downloadPhotoZipBtn?.addEventListener("click", async () => {
   await downloadCurrentPhotoReportZip();
+});
+
+els.sharePhotoReportBtn?.addEventListener("click", async () => {
+  await shareCurrentPhotoReport();
 });
 
 const PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS = 20000;
@@ -5337,6 +5350,89 @@ async function getPhotoBlobForZip(photo) {
 
   throw new Error(errors.join(" | ") || "Không tải được ảnh.");
 }
+function getPhotoReportZipMeta(task) {
+  const folderName = sanitizeStorageFileName(`anh-bao-cao-${task?.title || task?.id || "cong-viec"}`);
+  const fileName = sanitizeStorageFileName(`${folderName}-${new Date().toISOString().slice(0, 10)}.zip`);
+  return { folderName, fileName };
+}
+
+async function createPhotoReportZipBlob(task, photos, onProgress = null) {
+  if (!window.JSZip) {
+    throw new Error("Chưa tải được thư viện tạo file ZIP. Vui lòng tải lại trang rồi thử lại.");
+  }
+
+  const zip = new window.JSZip();
+  const { folderName, fileName } = getPhotoReportZipMeta(task);
+  const folder = zip.folder(folderName) || zip;
+  const usedNames = new Set();
+  const failedPhotos = [];
+  const downloadedFiles = new Array(photos.length);
+  let nextIndex = 0;
+  let finishedCount = 0;
+  let successCount = 0;
+  const parallelLimit = Math.max(1, Math.min(PHOTO_ZIP_FAST_PARALLEL_LIMIT, photos.length));
+
+  const updateProgress = (message) => {
+    if (typeof onProgress === "function") onProgress(message);
+  };
+
+  const worker = async () => {
+    while (nextIndex < photos.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const photo = photos[index];
+
+      try {
+        const blob = await getPhotoBlobForZip(photo);
+        const photoName = photo.name || `anh-bao-cao-${index + 1}.jpg`;
+        const fileNameInZip = makeUniqueZipFileName(usedNames, `${String(index + 1).padStart(2, "0")}-${photoName}`);
+        downloadedFiles[index] = { fileName: fileNameInZip, blob };
+        successCount += 1;
+      } catch (error) {
+        console.error("Không tải được ảnh để nén ZIP", photo, error);
+        failedPhotos.push(`${photo.name || `Ảnh ${index + 1}`}: ${error?.message || "Không rõ lỗi"}`);
+      } finally {
+        finishedCount += 1;
+        updateProgress(`Đang tải ${finishedCount}/${photos.length}...`);
+        await new Promise((resolve) => window.requestAnimationFrame(resolve));
+      }
+    }
+  };
+
+  updateProgress(`Đang tải 0/${photos.length}...`);
+  await Promise.all(Array.from({ length: parallelLimit }, () => worker()));
+
+  if (!successCount) {
+    throw new Error("Không tải được ảnh nào để tạo file ZIP. Hãy kiểm tra CORS của bucket và Storage Rules.");
+  }
+
+  downloadedFiles.forEach((file) => {
+    if (!file) return;
+    // Ảnh JPG/PNG đã được nén sẵn, dùng STORE để gom file nhanh hơn thay vì nén lại.
+    folder.file(file.fileName, file.blob, { binary: true, compression: "STORE" });
+  });
+
+  if (failedPhotos.length) {
+    folder.file("anh-khong-tai-duoc.txt", failedPhotos.join("\n"), { compression: "STORE" });
+  }
+
+  updateProgress("Đang tạo ZIP 0%...");
+  const zipBlob = await zip.generateAsync(
+    { type: "blob", compression: "STORE", streamFiles: true },
+    (metadata) => {
+      updateProgress(`Đang tạo ZIP ${Math.round(metadata.percent || 0)}%...`);
+    }
+  );
+
+  return {
+    zipBlob,
+    fileName,
+    successCount,
+    totalCount: photos.length,
+    failedPhotos
+  };
+}
+
 async function downloadCurrentPhotoReportZip() {
   if (state.profile?.role !== "admin") {
     toast("Chỉ Admin mới được tải toàn bộ ảnh báo cáo.", "error");
@@ -5351,92 +5447,117 @@ async function downloadCurrentPhotoReportZip() {
     return;
   }
 
-  if (!window.JSZip) {
-    toast("Chưa tải được thư viện tạo file ZIP. Vui lòng tải lại trang rồi thử lại.", "error");
-    return;
-  }
-
   const button = els.downloadPhotoZipBtn;
   setButtonLoading(button, true, "Đang chuẩn bị...");
 
   try {
-    const zip = new window.JSZip();
-    const folderName = sanitizeStorageFileName(`anh-bao-cao-${task.title || task.id}`);
-    const folder = zip.folder(folderName) || zip;
-    const usedNames = new Set();
-    const failedPhotos = [];
-    const downloadedFiles = new Array(photos.length);
-    let nextIndex = 0;
-    let finishedCount = 0;
-    let successCount = 0;
-    const parallelLimit = Math.max(1, Math.min(PHOTO_ZIP_FAST_PARALLEL_LIMIT, photos.length));
-
-    const updateDownloadProgress = () => {
-      if (button) {
-        button.textContent = `Đang tải ${finishedCount}/${photos.length}...`;
-      }
-    };
-
-    const worker = async () => {
-      while (nextIndex < photos.length) {
-        const index = nextIndex;
-        nextIndex += 1;
-        const photo = photos[index];
-
-        try {
-          const blob = await getPhotoBlobForZip(photo);
-          const photoName = photo.name || `anh-bao-cao-${index + 1}.jpg`;
-          const fileName = makeUniqueZipFileName(usedNames, `${String(index + 1).padStart(2, "0")}-${photoName}`);
-          downloadedFiles[index] = { fileName, blob };
-          successCount += 1;
-        } catch (error) {
-          console.error("Không tải được ảnh để nén ZIP", photo, error);
-          failedPhotos.push(`${photo.name || `Ảnh ${index + 1}`}: ${error?.message || "Không rõ lỗi"}`);
-        } finally {
-          finishedCount += 1;
-          updateDownloadProgress();
-          await new Promise((resolve) => window.requestAnimationFrame(resolve));
-        }
-      }
-    };
-
-    updateDownloadProgress();
-    await Promise.all(Array.from({ length: parallelLimit }, () => worker()));
-
-    if (!successCount) {
-      throw new Error("Không tải được ảnh nào để tạo file ZIP. Hãy kiểm tra CORS của bucket và Storage Rules.");
-    }
-
-    downloadedFiles.forEach((file) => {
-      if (!file) return;
-      // Ảnh JPG/PNG đã được nén sẵn, dùng STORE để gom file nhanh hơn thay vì nén lại.
-      folder.file(file.fileName, file.blob, { binary: true, compression: "STORE" });
+    const result = await createPhotoReportZipBlob(task, photos, (message) => {
+      if (button) button.textContent = message;
     });
 
-    if (failedPhotos.length) {
-      folder.file("anh-khong-tai-duoc.txt", failedPhotos.join("\n"), { compression: "STORE" });
-    }
-
-    if (button) button.textContent = "Đang tạo ZIP 0%...";
-
-    const zipBlob = await zip.generateAsync(
-      { type: "blob", compression: "STORE", streamFiles: true },
-      (metadata) => {
-        if (button) {
-          button.textContent = `Đang tạo ZIP ${Math.round(metadata.percent || 0)}%...`;
-        }
-      }
-    );
-
-    const fileName = sanitizeStorageFileName(`${folderName}-${new Date().toISOString().slice(0, 10)}.zip`);
-    downloadBlobFile(zipBlob, fileName);
-
-    toast(`Đã tạo file ZIP với ${successCount}/${photos.length} hình.`, failedPhotos.length ? "warning" : "success");
+    downloadBlobFile(result.zipBlob, result.fileName);
+    toast(`Đã tạo file ZIP với ${result.successCount}/${result.totalCount} hình.`, result.failedPhotos.length ? "warning" : "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không tạo được file ZIP ảnh báo cáo.", "error");
   } finally {
     setButtonLoading(button, false);
+  }
+}
+
+async function sharePreparedPhotoZipFile(file, task, photos) {
+  if (!navigator.share) {
+    throw new Error("Trình duyệt này chưa hỗ trợ nút Chia sẻ.");
+  }
+
+  const shareTitle = `Ảnh báo cáo - ${task?.title || "Công việc"}`;
+  const shareText = `${task?.title || "Công việc"} • ${photos.length} hình báo cáo`;
+  const shareData = {
+    title: shareTitle,
+    text: shareText,
+    files: [file]
+  };
+
+  if (navigator.canShare && navigator.canShare(shareData)) {
+    await navigator.share(shareData);
+    return "file";
+  }
+
+  const firstPhotoUrl = photos.find((photo) => photo?.url)?.url || window.location.href;
+  await navigator.share({
+    title: shareTitle,
+    text: `${shareText}\n${firstPhotoUrl}`,
+    url: firstPhotoUrl
+  });
+  return "link";
+}
+
+async function shareCurrentPhotoReport() {
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  const photos = getTaskPhotos(task);
+
+  if (!task || !photos.length) {
+    toast("Không có ảnh báo cáo để chia sẻ.", "error");
+    return;
+  }
+
+  if (!navigator.share) {
+    toast("Trình duyệt này chưa hỗ trợ chia sẻ. Bạn có thể dùng nút Tải ZIP rồi gửi file qua Zalo.", "error");
+    return;
+  }
+
+  const button = els.sharePhotoReportBtn;
+
+  // Nếu ZIP đã được chuẩn bị sẵn, lần bấm này sẽ mở bảng chia sẻ ngay để tránh lỗi mất quyền thao tác người dùng trên iOS/Android.
+  if (state.photoShareFile && state.photoShareTaskId === task.id) {
+    setButtonLoading(button, true, "Đang mở chia sẻ...");
+    try {
+      const mode = await sharePreparedPhotoZipFile(state.photoShareFile, task, photos);
+      toast(mode === "file" ? "Đã mở bảng chia sẻ file ZIP." : "Thiết bị không chia sẻ được file ZIP, đã mở chia sẻ link ảnh.", "success");
+    } catch (error) {
+      console.error(error);
+      if (error?.name !== "AbortError") {
+        toast(error.message || "Không mở được bảng chia sẻ.", "error");
+      }
+    } finally {
+      setButtonLoading(button, false);
+    }
+    return;
+  }
+
+  setButtonLoading(button, true, "Đang chuẩn bị...");
+
+  try {
+    const result = await createPhotoReportZipBlob(task, photos, (message) => {
+      if (button) button.textContent = message;
+    });
+
+    const file = new File([result.zipBlob], result.fileName, { type: "application/zip" });
+    state.photoShareFile = file;
+    state.photoShareTaskId = task.id;
+    state.photoShareFileName = result.fileName;
+
+    try {
+      const mode = await sharePreparedPhotoZipFile(file, task, photos);
+      toast(mode === "file" ? "Đã mở bảng chia sẻ file ZIP." : "Thiết bị không chia sẻ được file ZIP, đã mở chia sẻ link ảnh.", "success");
+    } catch (shareError) {
+      console.error(shareError);
+      if (shareError?.name === "AbortError") return;
+
+      // Một số trình duyệt mobile yêu cầu bấm chia sẻ sau khi file đã chuẩn bị xong.
+      if (button) button.textContent = "Chia sẻ ZIP";
+      toast("Đã chuẩn bị xong file ZIP. Bấm nút Chia sẻ thêm một lần nữa để mở Zalo/app chia sẻ.", "warning");
+    }
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không chuẩn bị được file chia sẻ.", "error");
+  } finally {
+    if (!state.photoShareFile || state.photoShareTaskId !== task.id) {
+      setButtonLoading(button, false);
+    } else if (button && button.disabled) {
+      button.disabled = false;
+      if (!button.textContent.includes("Chia sẻ")) button.textContent = "↗ Chia sẻ";
+    }
   }
 }
 function renderPhotoReportPageContent(task) {
@@ -5478,6 +5599,17 @@ function renderPhotoReportPageContent(task) {
     els.downloadPhotoZipBtn.classList.toggle("hidden", !canDownload);
     els.downloadPhotoZipBtn.disabled = !canDownload;
   }
+
+  if (els.sharePhotoReportBtn) {
+    const canShare = Boolean(navigator.share) && photos.length > 0;
+    els.sharePhotoReportBtn.classList.toggle("hidden", !canShare);
+    els.sharePhotoReportBtn.disabled = !canShare;
+    if (!canShare) {
+      state.photoShareFile = null;
+      state.photoShareTaskId = null;
+      state.photoShareFileName = "";
+    }
+  }
 }
 
 function refreshPhotoReportPageIfOpen() {
@@ -5496,6 +5628,9 @@ function openPhotoReportPage(taskId) {
   }
 
   state.photoReportTaskId = taskId;
+  state.photoShareFile = null;
+  state.photoShareTaskId = null;
+  state.photoShareFileName = "";
   state.photoReportReturnView = state.profile?.role === "employee" ? "employee" : "admin";
 
   hideMainContentForPhotoReport();
