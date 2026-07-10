@@ -426,6 +426,40 @@ function todayInputValue() {
   return toLocalDateInputValue(new Date());
 }
 
+function yesterdayInputValue() {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return toLocalDateInputValue(date);
+}
+
+function getMonthDateRange(monthOffset = 0) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + monthOffset + 1, 0);
+
+  return {
+    from: toLocalDateInputValue(start),
+    to: toLocalDateInputValue(end)
+  };
+}
+
+function getDateRangeByMode(mode) {
+  if (mode === "today") {
+    const today = todayInputValue();
+    return { from: today, to: today };
+  }
+
+  if (mode === "yesterday") {
+    const yesterday = yesterdayInputValue();
+    return { from: yesterday, to: yesterday };
+  }
+
+  if (mode === "current_month") return getMonthDateRange(0);
+  if (mode === "previous_month") return getMonthDateRange(-1);
+
+  return { from: "", to: "" };
+}
+
 function getTaskDateValue(task) {
   if (task.taskDate) return task.taskDate;
   return toLocalDateInputValue(timestampToDate(task.createdAt));
@@ -968,6 +1002,8 @@ function bindDateFilterControls(scope) {
   modeEl.value = currentFilter.mode || "today";
   if ((currentFilter.mode || "today") === "today" && singleEl && !currentFilter.single) {
     singleEl.value = todayInputValue();
+  } else if ((currentFilter.mode || "today") === "yesterday" && singleEl && !currentFilter.single) {
+    singleEl.value = yesterdayInputValue();
   } else if (singleEl) {
     singleEl.value = currentFilter.single || "";
   }
@@ -975,15 +1011,26 @@ function bindDateFilterControls(scope) {
   if (toEl) toEl.value = currentFilter.to || "";
 
   const onChange = () => {
-    if (modeEl.value === "today" && singleEl && !singleEl.value) {
+    const mode = modeEl.value;
+    const autoRange = getDateRangeByMode(mode);
+
+    if (mode === "today" && singleEl) {
       singleEl.value = todayInputValue();
     }
 
+    if (mode === "yesterday" && singleEl) {
+      singleEl.value = yesterdayInputValue();
+    }
+
+    if (["current_month", "previous_month"].includes(mode) && singleEl) {
+      singleEl.value = "";
+    }
+
     state[`${prefix}DateFilter`] = {
-      mode: modeEl.value,
-      single: modeEl.value === "today" ? todayInputValue() : (singleEl?.value || ""),
-      from: fromEl?.value || "",
-      to: toEl?.value || ""
+      mode,
+      single: ["today", "yesterday"].includes(mode) ? autoRange.from : (singleEl?.value || ""),
+      from: ["current_month", "previous_month"].includes(mode) ? autoRange.from : (fromEl?.value || ""),
+      to: ["current_month", "previous_month"].includes(mode) ? autoRange.to : (toEl?.value || "")
     };
 
     refreshDateFilterVisibility(scope);
@@ -993,10 +1040,22 @@ function bindDateFilterControls(scope) {
   };
 
   modeEl.addEventListener("change", () => {
-    if (modeEl.value === "today") {
-      const today = todayInputValue();
-      if (singleEl) singleEl.value = today;
+    const mode = modeEl.value;
+
+    if (mode === "today" && singleEl) {
+      singleEl.value = todayInputValue();
     }
+
+    if (mode === "yesterday" && singleEl) {
+      singleEl.value = yesterdayInputValue();
+    }
+
+    if (["current_month", "previous_month"].includes(mode)) {
+      if (singleEl) singleEl.value = "";
+      if (fromEl) fromEl.value = "";
+      if (toEl) toEl.value = "";
+    }
+
     onChange();
   });
 
@@ -1032,6 +1091,18 @@ function refreshDateFilterVisibility(scope) {
 
 function getDateFilterSummary(filter) {
   if (filter.mode === "today") return `Đang hiển thị công việc giao hôm nay (${formatDateOnly(todayInputValue())}).`;
+  if (filter.mode === "yesterday") return `Đang hiển thị công việc giao hôm qua (${formatDateOnly(yesterdayInputValue())}).`;
+
+  if (filter.mode === "current_month") {
+    const range = getMonthDateRange(0);
+    return `Đang hiển thị công việc trong tháng này (${formatDateOnly(range.from)} đến ${formatDateOnly(range.to)}).`;
+  }
+
+  if (filter.mode === "previous_month") {
+    const range = getMonthDateRange(-1);
+    return `Đang hiển thị công việc trong tháng trước (${formatDateOnly(range.from)} đến ${formatDateOnly(range.to)}).`;
+  }
+
   if (filter.mode === "single") return filter.single
     ? `Đang hiển thị công việc giao ngày ${formatDateOnly(filter.single)}.`
     : "Chọn ngày để lọc công việc.";
@@ -1050,6 +1121,13 @@ function isTaskInDateFilter(task, filter) {
 
   if (filter.mode === "all") return true;
   if (filter.mode === "today") return taskDate === todayInputValue();
+  if (filter.mode === "yesterday") return taskDate === yesterdayInputValue();
+
+  if (["current_month", "previous_month"].includes(filter.mode)) {
+    const range = filter.mode === "current_month" ? getMonthDateRange(0) : getMonthDateRange(-1);
+    return taskDate >= range.from && taskDate <= range.to;
+  }
+
   if (filter.mode === "single") return filter.single ? taskDate === filter.single : true;
 
   if (filter.mode === "range") {
