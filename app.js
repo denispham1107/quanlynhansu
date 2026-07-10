@@ -4908,7 +4908,7 @@ els.downloadPhotoZipBtn?.addEventListener("click", async () => {
   await downloadCurrentPhotoReportZip();
 });
 
-const PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS = 15000;
+const PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS = 20000;
 
 function withPhotoDownloadTimeout(promise, timeoutMs, message) {
   let timeoutId;
@@ -4935,28 +4935,146 @@ function assertUsablePhotoBlob(blob) {
   return blob;
 }
 
-async function fetchPhotoBlobByUrl(url) {
-  if (!url) throw new Error("Ảnh không có link tải.");
+function extractDownloadTokenFromUrl(url) {
+  try {
+    return new URL(String(url || "")).searchParams.get("token") || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function ensureFirebaseMediaUrl(url) {
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(String(url));
+
+    // Link Firebase Storage chuẩn cần alt=media để trả về nội dung ảnh thay vì metadata.
+    if (parsed.hostname.includes("firebasestorage.googleapis.com") && !parsed.searchParams.has("alt")) {
+      parsed.searchParams.set("alt", "media");
+    }
+
+    return parsed.toString();
+  } catch (_) {
+    return String(url || "");
+  }
+}
+
+function getStorageBucketName() {
+  return firebaseConfig.storageBucket || app?.options?.storageBucket || "";
+}
+
+function buildFirebaseStorageMediaUrl(storagePath, token = "") {
+  const bucket = getStorageBucketName();
+  if (!bucket || !storagePath) return "";
+
+  const url = new URL(`https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}`);
+  url.searchParams.set("alt", "media");
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
+}
+
+async function fetchPhotoBlobByUrl(url, options = {}) {
+  const finalUrl = ensureFirebaseMediaUrl(url);
+  if (!finalUrl) throw new Error("Ảnh không có link tải.");
 
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(finalUrl, {
+      method: "GET",
       mode: "cors",
       credentials: "omit",
       cache: "no-store",
-      signal: controller.signal
+      redirect: "follow",
+      signal: controller.signal,
+      headers: options.headers || undefined
     });
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
 
-    return assertUsablePhotoBlob(await response.blob());
+    const blob = assertUsablePhotoBlob(await response.blob());
+    const type = String(blob.type || "").toLowerCase();
+    if (type && !type.startsWith("image/") && !type.includes("octet-stream")) {
+      console.warn("File tải về không có content-type ảnh:", type);
+    }
+    return blob;
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+async function xhrPhotoBlobByUrl(url) {
+  const finalUrl = ensureFirebaseMediaUrl(url);
+  if (!finalUrl) throw new Error("Ảnh không có link tải.");
+
+  return await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", finalUrl, true);
+    xhr.responseType = "blob";
+    xhr.timeout = PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS;
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(assertUsablePhotoBlob(xhr.response));
+        } catch (error) {
+          reject(error);
+        }
+      } else {
+        reject(new Error(`XHR HTTP ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("XHR bị trình duyệt chặn hoặc lỗi mạng."));
+    xhr.ontimeout = () => reject(new Error("XHR tải ảnh quá lâu."));
+    xhr.send();
+  });
+}
+
+async function imageElementToBlobByUrl(url) {
+  const finalUrl = ensureFirebaseMediaUrl(url);
+  if (!finalUrl) throw new Error("Ảnh không có link tải.");
+
+  return await new Promise((resolve, reject) => {
+    const img = new Image();
+    const timeoutId = window.setTimeout(() => {
+      img.onload = null;
+      img.onerror = null;
+      reject(new Error("Image tải ảnh quá lâu."));
+    }, PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS);
+
+    img.crossOrigin = "anonymous";
+    img.referrerPolicy = "no-referrer";
+    img.onload = () => {
+      try {
+        window.clearTimeout(timeoutId);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx || !canvas.width || !canvas.height) {
+          throw new Error("Không tạo được canvas ảnh.");
+        }
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob((blob) => {
+          try {
+            resolve(assertUsablePhotoBlob(blob));
+          } catch (error) {
+            reject(error);
+          }
+        }, "image/jpeg", 0.95);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    img.onerror = () => {
+      window.clearTimeout(timeoutId);
+      reject(new Error("Image không tải được ảnh."));
+    };
+    img.src = finalUrl;
+  });
 }
 
 async function getPhotoBlobByStorageSdk(storagePath) {
@@ -4979,16 +5097,30 @@ async function getFreshPhotoUrlFromStorage(storagePath) {
   );
 }
 
+async function getCurrentFirebaseIdToken() {
+  try {
+    return await withPhotoDownloadTimeout(
+      auth.currentUser?.getIdToken?.() || Promise.resolve(""),
+      8000,
+      "Không lấy được token đăng nhập để tải ảnh."
+    );
+  } catch (error) {
+    console.warn("Không lấy được Firebase ID token", error);
+    return "";
+  }
+}
+
 async function firstSuccessfulPhotoDownload(attempts) {
   const errors = [];
 
   for (const attempt of attempts) {
     try {
-      const blob = await attempt();
+      const blob = await attempt.run();
       return assertUsablePhotoBlob(blob);
     } catch (error) {
-      errors.push(error?.message || String(error));
-      console.warn("Một cách tải ảnh bị lỗi, thử cách tiếp theo:", error);
+      const message = `${attempt.name}: ${error?.message || String(error)}`;
+      errors.push(message);
+      console.warn("Một cách tải ảnh bị lỗi, thử cách tiếp theo:", message, error);
     }
   }
 
@@ -4997,21 +5129,55 @@ async function firstSuccessfulPhotoDownload(attempts) {
 
 async function getPhotoBlobForZip(photo) {
   const storagePath = getStoragePathFromPhoto(photo);
-  const url = String(photo?.url || "");
+  const url = ensureFirebaseMediaUrl(String(photo?.url || ""));
+  const token = extractDownloadTokenFromUrl(url);
+  const mediaUrlFromPath = storagePath ? buildFirebaseStorageMediaUrl(storagePath, token) : "";
+  const freshUrl = storagePath ? await getFreshPhotoUrlFromStorage(storagePath).catch(() => "") : "";
+  const idToken = await getCurrentFirebaseIdToken();
   const attempts = [];
+  const addedUrls = new Set();
 
-  // Ưu tiên URL vì đây chính là link đang dùng để hiển thị ảnh trên trang.
-  if (url) {
-    attempts.push(() => fetchPhotoBlobByUrl(url));
-  }
+  const addUrlAttempts = (label, downloadUrl) => {
+    const finalUrl = ensureFirebaseMediaUrl(downloadUrl);
+    if (!finalUrl || addedUrls.has(finalUrl)) return;
+    addedUrls.add(finalUrl);
 
-  // Nếu URL bị trình duyệt chặn, thử đọc trực tiếp bằng Firebase Storage SDK.
-  if (storagePath) {
-    attempts.push(() => getPhotoBlobByStorageSdk(storagePath));
-    attempts.push(async () => {
-      const freshUrl = await getFreshPhotoUrlFromStorage(storagePath);
-      return await fetchPhotoBlobByUrl(freshUrl);
+    attempts.push({
+      name: `${label} bằng fetch`,
+      run: () => fetchPhotoBlobByUrl(finalUrl)
     });
+    attempts.push({
+      name: `${label} bằng XHR`,
+      run: () => xhrPhotoBlobByUrl(finalUrl)
+    });
+    attempts.push({
+      name: `${label} bằng canvas`,
+      run: () => imageElementToBlobByUrl(finalUrl)
+    });
+  };
+
+  addUrlAttempts("URL ảnh đã lưu", url);
+  addUrlAttempts("URL tạo từ storagePath", mediaUrlFromPath);
+  addUrlAttempts("URL mới từ Firebase", freshUrl);
+
+  if (storagePath) {
+    attempts.push({
+      name: "Firebase Storage SDK",
+      run: () => getPhotoBlobByStorageSdk(storagePath)
+    });
+
+    // Một số bucket cần token đăng nhập Firebase khi đọc qua REST API.
+    const authMediaUrl = buildFirebaseStorageMediaUrl(storagePath, token);
+    if (authMediaUrl && idToken) {
+      attempts.push({
+        name: "REST API kèm Firebase token",
+        run: () => fetchPhotoBlobByUrl(authMediaUrl, { headers: { Authorization: `Firebase ${idToken}` } })
+      });
+      attempts.push({
+        name: "REST API kèm Bearer token",
+        run: () => fetchPhotoBlobByUrl(authMediaUrl, { headers: { Authorization: `Bearer ${idToken}` } })
+      });
+    }
   }
 
   if (!attempts.length) {
