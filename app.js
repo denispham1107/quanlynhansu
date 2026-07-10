@@ -101,7 +101,8 @@ const state = {
   },
   extendTimeTaskId: null,
   reassignTaskId: null,
-  photoReportTaskId: null
+  photoReportTaskId: null,
+  photoReportReturnView: null
 };
 
 // =========================
@@ -201,6 +202,8 @@ const els = {
   confirmReassignEmployeeBtn: $("#confirmReassignEmployeeBtn"),
   photoRequiredCheckbox: $("#photoRequiredCheckbox"),
   requiredPhotoCount: $("#requiredPhotoCount"),
+  photoReportView: $("#photoReportView"),
+  backFromPhotoReportBtn: $("#backFromPhotoReportBtn"),
   photoReportModal: $("#photoReportModal"),
   photoReportTaskTitle: $("#photoReportTaskTitle"),
   photoReportSummary: $("#photoReportSummary"),
@@ -1243,6 +1246,7 @@ function showLogin() {
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
+  els.photoReportView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
   els.notificationPanel?.classList.add("hidden");
 }
@@ -1269,6 +1273,7 @@ function setupAdminDashboard() {
   els.adminView.classList.remove("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
+  els.photoReportView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
 
   const unsubUsers = onSnapshot(
@@ -1512,6 +1517,7 @@ function openWorkTemplatePage() {
 
   els.adminView.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
+  els.photoReportView?.classList.add("hidden");
   els.workTemplateView?.classList.remove("hidden");
   renderWorkTemplateList();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1522,6 +1528,7 @@ function openEmployeeManagerPage() {
 
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
+  els.photoReportView?.classList.add("hidden");
   els.employeeManagerView?.classList.remove("hidden");
   renderEmployees();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1530,6 +1537,7 @@ function openEmployeeManagerPage() {
 function backToAdminDashboard() {
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
+  els.photoReportView?.classList.add("hidden");
   els.adminView.classList.remove("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -3296,6 +3304,7 @@ function setupEmployeeDashboard() {
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
+  els.photoReportView?.classList.add("hidden");
   els.employeeView.classList.remove("hidden");
 
   // Chỉ query task của chính nhân viên đang đăng nhập.
@@ -3927,6 +3936,7 @@ function renderAdminTasks() {
     .join("");
 
   updateCountdowns();
+  refreshPhotoReportPageIfOpen();
 }
 
 function getWorkOrderMeta(workOrderId) {
@@ -4090,6 +4100,7 @@ function renderEmployeeTasks() {
     .join("");
 
   updateCountdowns();
+  refreshPhotoReportPageIfOpen();
 }
 
 function canAdminReassignTask(task, mode, displayStatus = null) {
@@ -4754,7 +4765,7 @@ document.addEventListener("click", async (event) => {
   }
 
   if (action === "view-task-photos") {
-    openPhotoReportModal(taskId);
+    openPhotoReportPage(taskId);
   }
 
   if (action === "edit-photo-requirement") {
@@ -4829,29 +4840,45 @@ document.addEventListener("keydown", async (event) => {
 // =========================
 // Ảnh báo cáo công việc
 // =========================
+function hideMainContentForPhotoReport() {
+  els.adminView?.classList.add("hidden");
+  els.employeeView?.classList.add("hidden");
+  els.workTemplateView?.classList.add("hidden");
+  els.employeeManagerView?.classList.add("hidden");
+}
+
 function closePhotoReportModal() {
+  backFromPhotoReportPage();
+}
+
+function backFromPhotoReportPage() {
   state.photoReportTaskId = null;
   if (els.photoReportGrid) els.photoReportGrid.innerHTML = "";
+  els.photoReportView?.classList.add("hidden");
   els.photoReportModal?.classList.add("hidden");
+
+  if (state.photoReportReturnView === "employee") {
+    els.employeeView?.classList.remove("hidden");
+  } else {
+    els.adminView?.classList.remove("hidden");
+  }
+
+  state.photoReportReturnView = null;
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 $$('[data-close-photo-modal]').forEach((button) => {
   button.addEventListener("click", closePhotoReportModal);
 });
 
-function openPhotoReportModal(taskId) {
-  const task = state.tasks.find((item) => item.id === taskId);
+els.backFromPhotoReportBtn?.addEventListener("click", backFromPhotoReportPage);
 
-  if (!task) {
-    toast("Không tìm thấy công việc cần xem hình.", "error");
-    return;
-  }
+function renderPhotoReportPageContent(task) {
+  if (!task) return;
 
   const photos = getTaskPhotos(task)
     .slice()
     .sort((a, b) => (timestampToDate(b.uploadedAt)?.getTime() || 0) - (timestampToDate(a.uploadedAt)?.getTime() || 0));
-
-  state.photoReportTaskId = taskId;
 
   if (els.photoReportTaskTitle) {
     els.photoReportTaskTitle.textContent = task.title || "Công việc";
@@ -4861,10 +4888,12 @@ function openPhotoReportModal(taskId) {
     const required = taskRequiresPhotos(task)
       ? `Bắt buộc ${getTaskRequiredPhotoCount(task)} hình`
       : "Không bắt buộc đăng hình";
-    els.photoReportSummary.textContent = `${required} • Đã đăng ${photos.length} hình`;
+    const employeeName = task.assignedToName || getEmployeeDisplayNameByUid(task.assignedToUid, "Nhân viên");
+    els.photoReportSummary.textContent = `${employeeName} • ${required} • Đã đăng ${photos.length} hình`;
   }
 
   if (els.photoReportGrid) {
+    els.photoReportGrid.classList.toggle("empty-box", photos.length === 0);
     els.photoReportGrid.innerHTML = photos.length
       ? photos.map((photo, index) => `
         <a class="photo-report-item" href="${escapeHtml(photo.url)}" target="_blank" rel="noopener">
@@ -4875,10 +4904,37 @@ function openPhotoReportModal(taskId) {
           </div>
         </a>
       `).join("")
-      : `<div class="empty-box">Chưa có hình báo cáo.</div>`;
+      : `Chưa có hình báo cáo.`;
+  }
+}
+
+function refreshPhotoReportPageIfOpen() {
+  if (!state.photoReportTaskId || els.photoReportView?.classList.contains("hidden")) return;
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  if (!task) return;
+  renderPhotoReportPageContent(task);
+}
+
+function openPhotoReportPage(taskId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+
+  if (!task) {
+    toast("Không tìm thấy công việc cần xem hình.", "error");
+    return;
   }
 
-  els.photoReportModal?.classList.remove("hidden");
+  state.photoReportTaskId = taskId;
+  state.photoReportReturnView = state.profile?.role === "employee" ? "employee" : "admin";
+
+  hideMainContentForPhotoReport();
+  renderPhotoReportPageContent(task);
+  els.photoReportView?.classList.remove("hidden");
+  els.photoReportModal?.classList.add("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function openPhotoReportModal(taskId) {
+  openPhotoReportPage(taskId);
 }
 
 function validateSelectedPhotoFiles(files) {

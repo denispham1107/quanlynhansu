@@ -516,6 +516,53 @@
       line-height: 1.35;
     }
 
+
+    /* Trang riêng xem Ảnh báo cáo: không còn hiển thị dạng popup đè lên trang chủ */
+    .photo-report-page .hero-panel {
+      align-items: flex-start;
+    }
+
+    .photo-report-page-card {
+      display: grid;
+      gap: 18px;
+      padding: 24px;
+      border: 1px dashed #bfdbfe;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 20px 44px rgba(37, 99, 235, 0.10);
+    }
+
+    .photo-report-page-card .photo-report-grid {
+      max-height: none;
+      overflow: visible;
+      padding: 0;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    }
+
+    .photo-report-page-card .photo-report-grid.empty-box {
+      display: block;
+      padding: 22px;
+    }
+
+    @media (min-width: 1024px) {
+      .photo-report-page-card .photo-report-grid {
+        grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      }
+    }
+
+    @media (max-width: 768px) {
+      .photo-report-page-card {
+        padding: 16px;
+        border-radius: 22px;
+      }
+
+      .photo-report-page-card .photo-report-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+      }
+    }
+
+
     /* Fix giao diện modal Ảnh báo cáo trên desktop: rộng hơn, căn giữa, bo tròn đủ 4 góc */
     @media (min-width: 769px) {
       #photoReportModal:not(.hidden) {
@@ -1754,22 +1801,24 @@
 
 
 
-  <!-- PHOTO REPORT MODAL -->
-  <div id="photoReportModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="photoReportModalTitle">
-    <div class="modal-backdrop" data-close-photo-modal></div>
-    <div class="modal-card">
-      <div class="modal-header">
+    <!-- PHOTO REPORT PAGE -->
+    <main id="photoReportView" class="page photo-report-page hidden">
+      <section class="hero-panel">
         <div>
           <p class="eyebrow">Ảnh báo cáo</p>
-          <h3 id="photoReportModalTitle">Hình ảnh nhân viên đã đăng</h3>
+          <h2 id="photoReportModalTitle">Hình ảnh nhân viên đã đăng</h2>
           <p id="photoReportTaskTitle" class="muted">Công việc</p>
           <p id="photoReportSummary" class="small-note">Đã đăng 0 hình</p>
         </div>
-        <button class="icon-btn" data-close-photo-modal aria-label="Đóng">×</button>
-      </div>
-      <div id="photoReportGrid" class="photo-report-grid empty-box">Chưa có hình báo cáo.</div>
-    </div>
-  </div>
+        <div class="hero-actions">
+          <button id="backFromPhotoReportBtn" class="btn ghost large" type="button">← Quay lại</button>
+        </div>
+      </section>
+
+      <section class="panel photo-report-page-card">
+        <div id="photoReportGrid" class="photo-report-grid empty-box">Chưa có hình báo cáo.</div>
+      </section>
+    </main>
 
   <!-- EXTEND TASK TIME MODAL -->
   <div id="extendTimeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="extendTimeModalTitle">
