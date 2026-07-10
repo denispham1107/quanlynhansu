@@ -4910,6 +4910,7 @@ els.downloadPhotoZipBtn?.addEventListener("click", async () => {
 });
 
 const PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS = 20000;
+const PHOTO_ZIP_FAST_PARALLEL_LIMIT = 6;
 
 function withPhotoDownloadTimeout(promise, timeoutMs, message) {
   let timeoutId;
@@ -5150,68 +5151,54 @@ async function getPhotoBlobForZip(photo) {
   const url = ensureFirebaseMediaUrl(String(photo?.url || ""));
   const token = extractDownloadTokenFromUrl(url);
   const mediaUrlFromPath = storagePath ? buildFirebaseStorageMediaUrl(storagePath, token) : "";
-  const freshUrl = storagePath ? await getFreshPhotoUrlFromStorage(storagePath).catch(() => "") : "";
-  const idToken = await getCurrentFirebaseIdToken();
-  const attempts = [];
-  const addedUrls = new Set();
+  const errors = [];
 
-  const addUrlAttempts = (label, downloadUrl) => {
-    const finalUrl = ensureFirebaseMediaUrl(downloadUrl);
-    if (!finalUrl || addedUrls.has(finalUrl)) return;
-    addedUrls.add(finalUrl);
-
-    attempts.push({
-      name: `${label} bằng fetch`,
-      run: () => fetchPhotoBlobByUrl(finalUrl)
-    });
-    attempts.push({
-      name: `${label} bằng XHR`,
-      run: () => xhrPhotoBlobByUrl(finalUrl)
-    });
-    attempts.push({
-      name: `${label} bằng canvas`,
-      run: () => imageElementToBlobByUrl(finalUrl)
-    });
+  const tryDownload = async (label, runner) => {
+    try {
+      return assertUsablePhotoBlob(await runner());
+    } catch (error) {
+      const message = `${label}: ${error?.message || String(error)}`;
+      errors.push(message);
+      console.warn("Một cách tải ảnh bị lỗi, thử cách tiếp theo:", message, error);
+      return null;
+    }
   };
 
-  addUrlAttempts("URL ảnh đã lưu", url);
-  addUrlAttempts("URL tạo từ storagePath", mediaUrlFromPath);
-  addUrlAttempts("URL mới từ Firebase", freshUrl);
+  // Sau khi bucket đã cấu hình CORS, cách nhanh nhất là tải trực tiếp URL đã lưu.
+  // Chỉ khi URL lỗi mới thử các cách dự phòng để không làm chậm toàn bộ quá trình tạo ZIP.
+  if (url) {
+    const blob = await tryDownload("URL ảnh đã lưu", () => fetchPhotoBlobByUrl(url));
+    if (blob) return blob;
+  }
+
+  if (mediaUrlFromPath && mediaUrlFromPath !== url) {
+    const blob = await tryDownload("URL tạo từ storagePath", () => fetchPhotoBlobByUrl(mediaUrlFromPath));
+    if (blob) return blob;
+  }
 
   if (storagePath) {
-    // Ưu tiên getBytes vì cách này đọc dữ liệu trực tiếp qua Firebase SDK,
-    // ổn định hơn getBlob/fetch trên một số trình duyệt khi tạo ZIP.
-    attempts.push({
-      name: "Firebase Storage SDK getBytes",
-      run: () => getPhotoBlobByStorageGetBytes(storagePath)
+    const bytesBlob = await tryDownload("Firebase Storage SDK getBytes", () => getPhotoBlobByStorageGetBytes(storagePath));
+    if (bytesBlob) return bytesBlob;
+
+    const sdkBlob = await tryDownload("Firebase Storage SDK getBlob", () => getPhotoBlobByStorageSdk(storagePath));
+    if (sdkBlob) return sdkBlob;
+
+    const freshUrl = await getFreshPhotoUrlFromStorage(storagePath).catch((error) => {
+      errors.push(`Không lấy được URL mới: ${error?.message || String(error)}`);
+      return "";
     });
 
-    attempts.push({
-      name: "Firebase Storage SDK getBlob",
-      run: () => getPhotoBlobByStorageSdk(storagePath)
-    });
+    if (freshUrl && freshUrl !== url && freshUrl !== mediaUrlFromPath) {
+      const blob = await tryDownload("URL mới từ Firebase", () => fetchPhotoBlobByUrl(freshUrl));
+      if (blob) return blob;
 
-    // Một số bucket cần token đăng nhập Firebase khi đọc qua REST API.
-    const authMediaUrl = buildFirebaseStorageMediaUrl(storagePath, token);
-    if (authMediaUrl && idToken) {
-      attempts.push({
-        name: "REST API kèm Firebase token",
-        run: () => fetchPhotoBlobByUrl(authMediaUrl, { headers: { Authorization: `Firebase ${idToken}` } })
-      });
-      attempts.push({
-        name: "REST API kèm Bearer token",
-        run: () => fetchPhotoBlobByUrl(authMediaUrl, { headers: { Authorization: `Bearer ${idToken}` } })
-      });
+      const xhrBlob = await tryDownload("URL mới từ Firebase bằng XHR", () => xhrPhotoBlobByUrl(freshUrl));
+      if (xhrBlob) return xhrBlob;
     }
   }
 
-  if (!attempts.length) {
-    throw new Error("Ảnh không có đường dẫn tải.");
-  }
-
-  return await firstSuccessfulPhotoDownload(attempts);
+  throw new Error(errors.join(" | ") || "Không tải được ảnh.");
 }
-
 async function downloadCurrentPhotoReportZip() {
   if (state.profile?.role !== "admin") {
     toast("Chỉ Admin mới được tải toàn bộ ảnh báo cáo.", "error");
@@ -5232,44 +5219,77 @@ async function downloadCurrentPhotoReportZip() {
   }
 
   const button = els.downloadPhotoZipBtn;
-  setButtonLoading(button, true, "Đang tải ảnh...");
+  setButtonLoading(button, true, "Đang chuẩn bị...");
 
   try {
     const zip = new window.JSZip();
     const folderName = sanitizeStorageFileName(`anh-bao-cao-${task.title || task.id}`);
     const folder = zip.folder(folderName) || zip;
     const usedNames = new Set();
-    let successCount = 0;
     const failedPhotos = [];
+    const downloadedFiles = new Array(photos.length);
+    let nextIndex = 0;
+    let finishedCount = 0;
+    let successCount = 0;
+    const parallelLimit = Math.max(1, Math.min(PHOTO_ZIP_FAST_PARALLEL_LIMIT, photos.length));
 
-    for (const [index, photo] of photos.entries()) {
-      try {
-        if (button) {
-          button.textContent = `Đang tải ${index + 1}/${photos.length}...`;
-        }
-
-        const blob = await getPhotoBlobForZip(photo);
-        const photoName = photo.name || `anh-bao-cao-${index + 1}.jpg`;
-        const fileName = makeUniqueZipFileName(usedNames, `${String(index + 1).padStart(2, "0")}-${photoName}`);
-        folder.file(fileName, blob);
-        successCount += 1;
-      } catch (error) {
-        console.error("Không tải được ảnh để nén ZIP", photo, error);
-        failedPhotos.push(`${photo.name || `Ảnh ${index + 1}`}: ${error?.message || "Không rõ lỗi"}`);
+    const updateDownloadProgress = () => {
+      if (button) {
+        button.textContent = `Đang tải ${finishedCount}/${photos.length}...`;
       }
-    }
+    };
+
+    const worker = async () => {
+      while (nextIndex < photos.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const photo = photos[index];
+
+        try {
+          const blob = await getPhotoBlobForZip(photo);
+          const photoName = photo.name || `anh-bao-cao-${index + 1}.jpg`;
+          const fileName = makeUniqueZipFileName(usedNames, `${String(index + 1).padStart(2, "0")}-${photoName}`);
+          downloadedFiles[index] = { fileName, blob };
+          successCount += 1;
+        } catch (error) {
+          console.error("Không tải được ảnh để nén ZIP", photo, error);
+          failedPhotos.push(`${photo.name || `Ảnh ${index + 1}`}: ${error?.message || "Không rõ lỗi"}`);
+        } finally {
+          finishedCount += 1;
+          updateDownloadProgress();
+          await new Promise((resolve) => window.requestAnimationFrame(resolve));
+        }
+      }
+    };
+
+    updateDownloadProgress();
+    await Promise.all(Array.from({ length: parallelLimit }, () => worker()));
 
     if (!successCount) {
-      throw new Error("Không tải được ảnh nào để tạo file ZIP. Nếu đã đúng Storage Rules thì nguyên nhân thường là CORS của bucket chưa cho phép website đọc ảnh để nén ZIP. Hãy kiểm tra CORS cho origin https://denispham1107.github.io.");
+      throw new Error("Không tải được ảnh nào để tạo file ZIP. Hãy kiểm tra CORS của bucket và Storage Rules.");
     }
 
-    if (button) button.textContent = "Đang nén...";
+    downloadedFiles.forEach((file) => {
+      if (!file) return;
+      // Ảnh JPG/PNG đã được nén sẵn, dùng STORE để gom file nhanh hơn thay vì nén lại.
+      folder.file(file.fileName, file.blob, { binary: true, compression: "STORE" });
+    });
 
     if (failedPhotos.length) {
-      folder.file("anh-khong-tai-duoc.txt", failedPhotos.join("\n"));
+      folder.file("anh-khong-tai-duoc.txt", failedPhotos.join("\n"), { compression: "STORE" });
     }
 
-    const zipBlob = await zip.generateAsync({ type: "blob" });
+    if (button) button.textContent = "Đang tạo ZIP 0%...";
+
+    const zipBlob = await zip.generateAsync(
+      { type: "blob", compression: "STORE", streamFiles: true },
+      (metadata) => {
+        if (button) {
+          button.textContent = `Đang tạo ZIP ${Math.round(metadata.percent || 0)}%...`;
+        }
+      }
+    );
+
     const fileName = sanitizeStorageFileName(`${folderName}-${new Date().toISOString().slice(0, 10)}.zip`);
     downloadBlobFile(zipBlob, fileName);
 
@@ -5281,7 +5301,6 @@ async function downloadCurrentPhotoReportZip() {
     setButtonLoading(button, false);
   }
 }
-
 function renderPhotoReportPageContent(task) {
   if (!task) return;
 
