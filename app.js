@@ -34,7 +34,8 @@ import {
   uploadBytes,
   getDownloadURL,
   deleteObject,
-  getBlob
+  getBlob,
+  getBytes
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
 // =========================
@@ -5077,6 +5078,23 @@ async function imageElementToBlobByUrl(url) {
   });
 }
 
+
+async function getPhotoBlobByStorageGetBytes(storagePath) {
+  if (!storagePath) throw new Error("Ảnh không có storagePath.");
+
+  const bytes = await withPhotoDownloadTimeout(
+    getBytes(storageRef(storage, storagePath), 50 * 1024 * 1024),
+    PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS,
+    "Firebase Storage getBytes tải ảnh quá lâu."
+  );
+
+  if (!bytes || !bytes.byteLength) {
+    throw new Error("Firebase Storage getBytes trả về dữ liệu rỗng.");
+  }
+
+  return assertUsablePhotoBlob(new Blob([bytes], { type: "image/jpeg" }));
+}
+
 async function getPhotoBlobByStorageSdk(storagePath) {
   if (!storagePath) throw new Error("Ảnh không có storagePath.");
 
@@ -5161,8 +5179,15 @@ async function getPhotoBlobForZip(photo) {
   addUrlAttempts("URL mới từ Firebase", freshUrl);
 
   if (storagePath) {
+    // Ưu tiên getBytes vì cách này đọc dữ liệu trực tiếp qua Firebase SDK,
+    // ổn định hơn getBlob/fetch trên một số trình duyệt khi tạo ZIP.
     attempts.push({
-      name: "Firebase Storage SDK",
+      name: "Firebase Storage SDK getBytes",
+      run: () => getPhotoBlobByStorageGetBytes(storagePath)
+    });
+
+    attempts.push({
+      name: "Firebase Storage SDK getBlob",
       run: () => getPhotoBlobByStorageSdk(storagePath)
     });
 
@@ -5235,7 +5260,7 @@ async function downloadCurrentPhotoReportZip() {
     }
 
     if (!successCount) {
-      throw new Error("Không tải được ảnh nào để tạo file ZIP. Vui lòng kiểm tra Storage rules hoặc thử tải lại trang rồi đăng nhập lại.");
+      throw new Error("Không tải được ảnh nào để tạo file ZIP. Nếu đã đúng Storage Rules thì nguyên nhân thường là CORS của bucket chưa cho phép website đọc ảnh để nén ZIP. Hãy kiểm tra CORS cho origin https://denispham1107.github.io.");
     }
 
     if (button) button.textContent = "Đang nén...";
