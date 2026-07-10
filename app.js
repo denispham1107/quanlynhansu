@@ -33,7 +33,8 @@ import {
   ref as storageRef,
   uploadBytes,
   getDownloadURL,
-  deleteObject
+  deleteObject,
+  getBlob
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
 // =========================
@@ -4907,6 +4908,26 @@ els.downloadPhotoZipBtn?.addEventListener("click", async () => {
   await downloadCurrentPhotoReportZip();
 });
 
+async function getPhotoBlobForZip(photo) {
+  const storagePath = getStoragePathFromPhoto(photo);
+
+  if (storagePath) {
+    try {
+      return await getBlob(storageRef(storage, storagePath));
+    } catch (error) {
+      console.warn("Không tải được ảnh bằng Firebase Storage SDK, thử tải bằng URL", storagePath, error);
+    }
+  }
+
+  if (!photo?.url) {
+    throw new Error("Ảnh không có đường dẫn tải.");
+  }
+
+  const response = await fetch(photo.url, { mode: "cors", credentials: "omit" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return await response.blob();
+}
+
 async function downloadCurrentPhotoReportZip() {
   if (state.profile?.role !== "admin") {
     toast("Chỉ Admin mới được tải toàn bộ ảnh báo cáo.", "error");
@@ -4927,7 +4948,7 @@ async function downloadCurrentPhotoReportZip() {
   }
 
   const button = els.downloadPhotoZipBtn;
-  setButtonLoading(button, true, "Đang nén...");
+  setButtonLoading(button, true, "Đang tải ảnh...");
 
   try {
     const zip = new window.JSZip();
@@ -4939,10 +4960,11 @@ async function downloadCurrentPhotoReportZip() {
 
     for (const [index, photo] of photos.entries()) {
       try {
-        const response = await fetch(photo.url, { mode: "cors" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (button) {
+          button.textContent = `Đang tải ${index + 1}/${photos.length}...`;
+        }
 
-        const blob = await response.blob();
+        const blob = await getPhotoBlobForZip(photo);
         const photoName = photo.name || `anh-bao-cao-${index + 1}.jpg`;
         const fileName = makeUniqueZipFileName(usedNames, `${String(index + 1).padStart(2, "0")}-${photoName}`);
         folder.file(fileName, blob);
@@ -4954,8 +4976,10 @@ async function downloadCurrentPhotoReportZip() {
     }
 
     if (!successCount) {
-      throw new Error("Không tải được ảnh nào để tạo file ZIP.");
+      throw new Error("Không tải được ảnh nào để tạo file ZIP. Vui lòng kiểm tra Storage rules hoặc thử tải lại trang rồi đăng nhập lại.");
     }
+
+    if (button) button.textContent = "Đang nén...";
 
     if (failedPhotos.length) {
       folder.file("anh-khong-tai-duoc.txt", failedPhotos.join("\n"));
