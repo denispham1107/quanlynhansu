@@ -5465,31 +5465,65 @@ async function downloadCurrentPhotoReportZip() {
   }
 }
 
-async function sharePreparedPhotoZipFile(file, task, photos) {
-  if (!navigator.share) {
-    throw new Error("Trình duyệt này chưa hỗ trợ nút Chia sẻ.");
-  }
+function isSharePermissionDeniedError(error) {
+  const name = String(error?.name || "").toLowerCase();
+  const message = String(error?.message || error || "").toLowerCase();
+  return name.includes("notallowed")
+    || name.includes("security")
+    || message.includes("permission denied")
+    || message.includes("not allowed")
+    || message.includes("permissions policy")
+    || message.includes("disallowed");
+}
 
+async function sharePreparedPhotoZipFile(file, task, photos) {
+  const safeFileName = file?.name || makePhotoZipFileName(task || {}, photos || []);
   const shareTitle = `Ảnh báo cáo - ${task?.title || "Công việc"}`;
   const shareText = `${task?.title || "Công việc"} • ${photos.length} hình báo cáo`;
-  const shareData = {
+  const firstPhotoUrl = photos.find((photo) => photo?.url)?.url || window.location.href;
+
+  const downloadInsteadOfShare = () => {
+    downloadBlobFile(file, safeFileName);
+    return "download";
+  };
+
+  if (!navigator.share) {
+    return downloadInsteadOfShare();
+  }
+
+  const fileShareData = {
     title: shareTitle,
     text: shareText,
     files: [file]
   };
 
-  if (navigator.canShare && navigator.canShare(shareData)) {
-    await navigator.share(shareData);
-    return "file";
+  const canTryFileShare = Boolean(navigator.canShare && navigator.canShare(fileShareData));
+  if (canTryFileShare) {
+    try {
+      await navigator.share(fileShareData);
+      return "file";
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      console.warn("Không chia sẻ được file ZIP, sẽ thử chia sẻ link hoặc tải xuống.", error);
+      if (isSharePermissionDeniedError(error)) {
+        return downloadInsteadOfShare();
+      }
+    }
   }
 
-  const firstPhotoUrl = photos.find((photo) => photo?.url)?.url || window.location.href;
-  await navigator.share({
-    title: shareTitle,
-    text: `${shareText}\n${firstPhotoUrl}`,
-    url: firstPhotoUrl
-  });
-  return "link";
+  try {
+    await navigator.share({
+      title: shareTitle,
+      text: `${shareText}
+${firstPhotoUrl}`,
+      url: firstPhotoUrl
+    });
+    return "link";
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    console.warn("Không chia sẻ được link ảnh, sẽ tải file ZIP xuống để gửi thủ công.", error);
+    return downloadInsteadOfShare();
+  }
 }
 
 async function shareCurrentPhotoReport() {
@@ -5513,7 +5547,13 @@ async function shareCurrentPhotoReport() {
     setButtonLoading(button, true, "Đang mở chia sẻ...");
     try {
       const mode = await sharePreparedPhotoZipFile(state.photoShareFile, task, photos);
-      toast(mode === "file" ? "Đã mở bảng chia sẻ file ZIP." : "Thiết bị không chia sẻ được file ZIP, đã mở chia sẻ link ảnh.", "success");
+      if (mode === "file") {
+        toast("Đã mở bảng chia sẻ file ZIP.", "success");
+      } else if (mode === "link") {
+        toast("Thiết bị không chia sẻ được file ZIP, đã mở chia sẻ link ảnh.", "warning");
+      } else if (mode === "download") {
+        toast("Trình duyệt không cho chia sẻ trực tiếp. Đã tải file ZIP, bạn có thể gửi qua Zalo thủ công.", "warning");
+      }
     } catch (error) {
       console.error(error);
       if (error?.name !== "AbortError") {
@@ -5539,7 +5579,13 @@ async function shareCurrentPhotoReport() {
 
     try {
       const mode = await sharePreparedPhotoZipFile(file, task, photos);
-      toast(mode === "file" ? "Đã mở bảng chia sẻ file ZIP." : "Thiết bị không chia sẻ được file ZIP, đã mở chia sẻ link ảnh.", "success");
+      if (mode === "file") {
+        toast("Đã mở bảng chia sẻ file ZIP.", "success");
+      } else if (mode === "link") {
+        toast("Thiết bị không chia sẻ được file ZIP, đã mở chia sẻ link ảnh.", "warning");
+      } else if (mode === "download") {
+        toast("Trình duyệt không cho chia sẻ trực tiếp. Đã tải file ZIP, bạn có thể gửi qua Zalo thủ công.", "warning");
+      }
     } catch (shareError) {
       console.error(shareError);
       if (shareError?.name === "AbortError") return;
