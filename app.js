@@ -4493,9 +4493,9 @@ function renderResultBox(task) {
   let className = "result-box";
 
   if (displayResult.resultType === "faster") {
-    summary = `Nhanh hơn ${displayResult.differenceMinutes} phút (${displayResult.differencePercent}%).`;
+    summary = `Nhanh hơn ${displayResult.differenceMinutes} phút (${formatPercent(displayResult.differencePercent)}%).`;
   } else if (displayResult.resultType === "slower") {
-    summary = `Chậm hơn ${displayResult.differenceMinutes} phút (${displayResult.differencePercent}%).`;
+    summary = `Chậm hơn ${displayResult.differenceMinutes} phút (${formatPercent(displayResult.differencePercent)}%).`;
     className = "result-box slower";
   }
 
@@ -4521,12 +4521,15 @@ function normalizeTaskResultForDisplay(task) {
     };
   }
 
+  const resultType = task.resultType || "on_time";
+  const differenceMinutes = Number(task.differenceMinutes || 0);
+
   return {
     actualMinutes,
     deadlineMinutes,
-    resultType: task.resultType || "on_time",
-    differenceMinutes: Number(task.differenceMinutes || 0),
-    differencePercent: Number(task.differencePercent || 0)
+    resultType,
+    differenceMinutes,
+    differencePercent: calculateResultDifferencePercent(resultType, differenceMinutes, deadlineMinutes, actualMinutes)
   };
 }
 
@@ -5612,9 +5615,38 @@ async function endLunchBreakTask(taskId, button) {
   }
 }
 
+function formatPercent(value) {
+  const numberValue = Number(value || 0);
+
+  if (!Number.isFinite(numberValue)) return "0";
+
+  return Number.isInteger(numberValue)
+    ? String(numberValue)
+    : String(Number(numberValue.toFixed(1)));
+}
+
+function calculateResultDifferencePercent(resultType, differenceMinutes, deadlineMinutes, actualMinutes) {
+  const diff = Number(differenceMinutes || 0);
+  const deadline = Number(deadlineMinutes || 0);
+  const actual = Number(actualMinutes || 0);
+
+  if (!diff || resultType === "on_time") return 0;
+
+  // Với công việc làm chậm, phần trăm hiển thị phải tính theo tổng thời gian thực tế,
+  // để trường hợp quy định 4 phút nhưng làm 8 phút sẽ hiển thị chậm hơn 4 phút (50%),
+  // không còn nhảy thành 100% gây hiểu nhầm.
+  const baseMinutes = resultType === "slower" ? actual : deadline;
+
+  if (baseMinutes <= 0) return 0;
+
+  return Number(((diff / baseMinutes) * 100).toFixed(1));
+}
+
 function taskResultShortText(result) {
-  if (result.resultType === "faster") return `nhanh hơn ${result.differenceMinutes} phút (${result.differencePercent}%)`;
-  if (result.resultType === "slower") return `chậm hơn ${result.differenceMinutes} phút (${result.differencePercent}%)`;
+  const percent = formatPercent(result.differencePercent);
+
+  if (result.resultType === "faster") return `nhanh hơn ${result.differenceMinutes} phút (${percent}%)`;
+  if (result.resultType === "slower") return `chậm hơn ${result.differenceMinutes} phút (${percent}%)`;
   return "đúng thời gian";
 }
 
@@ -5692,9 +5724,7 @@ function calculateResultAt(task, completedAt) {
   const differenceMinutes = resultType === "on_time"
     ? 0
     : Math.abs(deadlineMinutes - actualMinutes);
-  const differencePercent = resultType === "on_time"
-    ? 0
-    : Number(((differenceMinutes / deadlineMinutes) * 100).toFixed(1));
+  const differencePercent = calculateResultDifferencePercent(resultType, differenceMinutes, deadlineMinutes, actualMinutes);
 
   return {
     actualMinutes,
