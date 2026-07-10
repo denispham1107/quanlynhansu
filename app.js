@@ -325,6 +325,144 @@ function downloadBlobFile(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
+const PHOTO_UPLOAD_MAX_DIMENSION = 1600;
+const PHOTO_UPLOAD_JPEG_QUALITY = 0.82;
+const PHOTO_UPLOAD_MIN_OPTIMIZE_BYTES = 350 * 1024;
+
+function getOptimizedImageFileName(fileName = "image.jpg") {
+  const safeName = sanitizeStorageFileName(fileName || "image.jpg");
+  const dotIndex = safeName.lastIndexOf(".");
+  const baseName = dotIndex > 0 ? safeName.slice(0, dotIndex) : safeName;
+  return `${baseName || "image"}.jpg`;
+}
+
+function loadImageElementFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`Không đọc được hình “${file.name}”.`));
+    };
+
+    image.src = url;
+  });
+}
+
+function canvasToBlob(canvas, type = "image/jpeg", quality = PHOTO_UPLOAD_JPEG_QUALITY) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Không tối ưu được hình ảnh."));
+    }, type, quality);
+  });
+}
+
+async function optimizePhotoFileForUpload(file) {
+  const type = String(file?.type || "").toLowerCase();
+
+  // GIF thường có animation; SVG/HEIC có thể không vẽ lên canvas ổn định trên mọi trình duyệt.
+  if (!type.startsWith("image/") || type.includes("gif") || type.includes("svg") || type.includes("heic")) {
+    return {
+      file,
+      optimized: false,
+      originalName: file.name,
+      originalSize: Number(file.size || 0),
+      width: 0,
+      height: 0
+    };
+  }
+
+  // Hình quá nhỏ không cần tối ưu, tránh giảm chất lượng không cần thiết.
+  if (Number(file.size || 0) < PHOTO_UPLOAD_MIN_OPTIMIZE_BYTES) {
+    return {
+      file,
+      optimized: false,
+      originalName: file.name,
+      originalSize: Number(file.size || 0),
+      width: 0,
+      height: 0
+    };
+  }
+
+  const image = await loadImageElementFromFile(file);
+  const width = image.naturalWidth || image.width || 0;
+  const height = image.naturalHeight || image.height || 0;
+
+  if (!width || !height) {
+    return {
+      file,
+      optimized: false,
+      originalName: file.name,
+      originalSize: Number(file.size || 0),
+      width,
+      height
+    };
+  }
+
+  const scale = Math.min(1, PHOTO_UPLOAD_MAX_DIMENSION / Math.max(width, height));
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const ctx = canvas.getContext("2d", { alpha: false });
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, targetWidth, targetHeight);
+  ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+  const blob = await canvasToBlob(canvas, "image/jpeg", PHOTO_UPLOAD_JPEG_QUALITY);
+
+  // Chỉ dùng bản tối ưu nếu thật sự nhỏ hơn bản gốc.
+  if (!blob || blob.size >= Number(file.size || 0)) {
+    return {
+      file,
+      optimized: false,
+      originalName: file.name,
+      originalSize: Number(file.size || 0),
+      width,
+      height
+    };
+  }
+
+  const optimizedName = getOptimizedImageFileName(file.name);
+  const optimizedFile = new File([blob], optimizedName, {
+    type: "image/jpeg",
+    lastModified: Date.now()
+  });
+
+  return {
+    file: optimizedFile,
+    optimized: true,
+    originalName: file.name,
+    originalSize: Number(file.size || 0),
+    width: targetWidth,
+    height: targetHeight
+  };
+}
+
+function getOptimizationSummary(results = []) {
+  const optimizedItems = results.filter((item) => item?.optimized);
+  const originalTotal = results.reduce((sum, item) => sum + Number(item?.originalSize || item?.file?.size || 0), 0);
+  const finalTotal = results.reduce((sum, item) => sum + Number(item?.file?.size || 0), 0);
+  const savedBytes = Math.max(0, originalTotal - finalTotal);
+
+  return {
+    optimizedCount: optimizedItems.length,
+    originalTotal,
+    finalTotal,
+    savedBytes
+  };
+}
+
 
 function getTaskPhotos(task) {
   return Array.isArray(task?.photos) ? task.photos.filter((item) => item?.url) : [];
@@ -5415,15 +5553,27 @@ async function openPhotoUploadPicker(taskId, button) {
       return;
     }
 
-    setButtonLoading(button, true, "Đang đăng hình...");
+    setButtonLoading(button, true, "Đang tối ưu hình...");
 
     try {
       const now = new Date();
       const uploadedPhotos = [];
+      const optimizedResults = [];
 
-      for (const file of files) {
+      for (let index = 0; index < files.length; index += 1) {
+        if (button) button.textContent = `Đang tối ưu ${index + 1}/${files.length}...`;
+        optimizedResults.push(await optimizePhotoFileForUpload(files[index]));
+      }
+
+      const optimizationSummary = getOptimizationSummary(optimizedResults);
+
+      for (let index = 0; index < optimizedResults.length; index += 1) {
+        const item = optimizedResults[index];
+        const file = item.file;
+        if (button) button.textContent = `Đang đăng ${index + 1}/${optimizedResults.length}...`;
+
         const photoId = makeId("photo");
-        const safeName = sanitizeStorageFileName(file.name);
+        const safeName = sanitizeStorageFileName(file.name || item.originalName);
         const path = `task-photos/${task.id}/${Date.now()}-${photoId}-${safeName}`;
         const fileRef = storageRef(storage, path);
 
@@ -5431,7 +5581,10 @@ async function openPhotoUploadPicker(taskId, button) {
           contentType: file.type || "image/jpeg",
           customMetadata: {
             taskId: task.id,
-            uploadedByUid: state.user.uid
+            uploadedByUid: state.user.uid,
+            optimized: item.optimized ? "true" : "false",
+            originalName: item.originalName || file.name || safeName,
+            originalSize: String(item.originalSize || file.size || 0)
           }
         });
 
@@ -5440,10 +5593,15 @@ async function openPhotoUploadPicker(taskId, button) {
         uploadedPhotos.push({
           id: photoId,
           name: file.name || safeName,
+          originalName: item.originalName || file.name || safeName,
           url,
           storagePath: path,
           contentType: file.type || "image/jpeg",
           size: Number(file.size || 0),
+          originalSize: Number(item.originalSize || file.size || 0),
+          optimized: Boolean(item.optimized),
+          width: Number(item.width || 0),
+          height: Number(item.height || 0),
           uploadedAt: Timestamp.fromDate(now),
           uploadedByUid: state.user.uid,
           uploadedByName: state.profile?.name || state.profile?.email || "Nhân viên"
@@ -5458,7 +5616,10 @@ async function openPhotoUploadPicker(taskId, button) {
         lastPhotoUploadedAt: serverTimestamp()
       });
 
-      toast(`Đã đăng thành công ${uploadedPhotos.length} hình.`, "success");
+      const savedText = optimizationSummary.savedBytes > 0
+        ? ` Đã tối ưu giảm khoảng ${formatFileSize(optimizationSummary.savedBytes)}.`
+        : "";
+      toast(`Đã đăng thành công ${uploadedPhotos.length} hình.${savedText}`, "success");
     } catch (error) {
       console.error(error);
       toast(error.message || "Không đăng được hình. Kiểm tra Firebase Storage Rules hoặc kết nối mạng.", "error");
