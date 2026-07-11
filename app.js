@@ -4717,20 +4717,28 @@ function groupTasksByWorkOrder(tasks) {
 
 // Thêm các phiếu nháp CHƯA có công việc nào (0 dòng) vào danh sách hiển thị — nếu chỉ dựa
 // vào tasks thì những phiếu này sẽ không xuất hiện ở đâu cả (vì chưa có task nào tham chiếu tới).
-function isDraftTicketGroup(group) {
-  return !group.tasks.length || group.tasks.every((task) => task.status === "draft");
-}
-
 function sortTicketGroupsForDisplay(groups) {
   return groups.sort((a, b) => {
-    const aIsDraft = isDraftTicketGroup(a);
-    const bIsDraft = isDraftTicketGroup(b);
+    // Khi Admin xem "Tất cả trạng thái", sắp xếp Phiếu công việc theo đúng
+    // thứ tự xử lý ưu tiên. Việc sắp xếp này được thực hiện sau khi đã áp dụng
+    // bộ lọc ngày và nhân viên, nên vẫn giữ nguyên khi Admin chọn từng nhân viên:
+    // Chưa giao việc → Đang làm → Gần hết giờ → Quá hạn → Yêu cầu làm lại
+    // → Chờ xác nhận → Hoàn thành.
+    //
+    // Một Phiếu có nhiều công việc ở các trạng thái khác nhau sẽ nhận mức ưu tiên
+    // cao nhất trong số các công việc còn hiển thị của Phiếu đó. Ví dụ Phiếu có
+    // một công việc Đang làm và một công việc Hoàn thành vẫn nằm trong nhóm Đang làm.
+    const statusPriorityDifference = (
+      getAdminSearchGroupStatusPriority(a) - getAdminSearchGroupStatusPriority(b)
+    );
 
-    // Luôn ưu tiên hiển thị toàn bộ phiếu Chưa giao việc ở trên cùng,
-    // sau đó mới tới các phiếu có trạng thái khác.
-    if (aIsDraft !== bIsDraft) return aIsDraft ? -1 : 1;
+    if (statusPriorityDifference !== 0) return statusPriorityDifference;
 
-    return b.createdAtMs - a.createdAtMs;
+    // Các Phiếu cùng mức ưu tiên tiếp tục hiển thị Phiếu tạo gần đây trước.
+    return (
+      Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0)
+      || String(a.name || "").localeCompare(String(b.name || ""), "vi")
+    );
   });
 }
 
