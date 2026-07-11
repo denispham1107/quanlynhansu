@@ -1922,16 +1922,18 @@ function getAdminSearchStatusPriority(taskOrStatus) {
     : (taskOrStatus?.displayStatus || getDisplayStatus(taskOrStatus || {}));
 
   const priorities = {
+    // Phiếu chưa giao việc luôn đứng đầu. Ngay sau đó là Phiếu có công việc
+    // nhân viên vừa bấm Hoàn thành và đang chờ Admin xác nhận.
     draft: 0,
-    waiting_assignee: 1,
-    queued: 2,
-    doing: 2,
-    lunch_break: 2,
-    hotel: 2,
-    near_due: 3,
-    overdue: 4,
-    redo: 5,
-    submitted: 6,
+    submitted: 1,
+    waiting_assignee: 2,
+    queued: 3,
+    doing: 3,
+    lunch_break: 3,
+    hotel: 3,
+    near_due: 4,
+    overdue: 5,
+    redo: 6,
     completed: 7
   };
 
@@ -4921,8 +4923,8 @@ function sortTicketGroupsForDisplay(groups) {
     // Khi Admin xem "Tất cả trạng thái", sắp xếp Phiếu công việc theo đúng
     // thứ tự xử lý ưu tiên. Việc sắp xếp này được thực hiện sau khi đã áp dụng
     // bộ lọc ngày và nhân viên, nên vẫn giữ nguyên khi Admin chọn từng nhân viên:
-    // Chưa giao việc → Đang làm → Gần hết giờ → Quá hạn → Yêu cầu làm lại
-    // → Chờ xác nhận → Hoàn thành.
+    // Chưa giao việc → Chờ Admin xác nhận → Đang làm → Gần hết giờ
+    // → Quá hạn → Yêu cầu làm lại → Hoàn thành.
     //
     // Một Phiếu có nhiều công việc ở các trạng thái khác nhau sẽ nhận mức ưu tiên
     // cao nhất trong số các công việc còn hiển thị của Phiếu đó. Ví dụ Phiếu có
@@ -4961,6 +4963,7 @@ function withEmptyDraftGroups(groups, showEmptyDrafts) {
 
 function renderTicketGroup(group, mode = "admin") {
   const isDraft = !group.tasks.length || group.tasks.every((task) => task.status === "draft");
+  const hasSubmittedTask = mode === "admin" && group.tasks.some((task) => task.status === "submitted");
   // Admin có thể thấy toàn bộ task trong phiếu, nhưng Nhân viên chỉ đọc được task của chính mình.
   // Vì vậy tiêu đề phiếu phải dùng tổng số công việc lưu ở workOrders.taskCount, không dùng số task đang hiển thị.
   const taskCount = Number(group.totalTaskCount || group.tasks.length || 0);
@@ -4981,12 +4984,19 @@ function renderTicketGroup(group, mode = "admin") {
 
   const headerActions = actionButtons.length ? `<div class="ticket-actions">${actionButtons.join("")}</div>` : "";
 
+  const ticketClasses = [
+    "ticket-group",
+    isDraft ? "is-draft-ticket" : "",
+    hasSubmittedTask ? "is-awaiting-admin-confirmation" : ""
+  ].filter(Boolean).join(" ");
+
   return `
-    <section class="ticket-group ${isDraft ? "is-draft-ticket" : ""}" data-work-order-id="${escapeHtml(group.key)}">
+    <section class="${ticketClasses}" data-work-order-id="${escapeHtml(group.key)}">
       <div class="ticket-group-header">
         <div>
           <span class="ticket-badge ${isDraft ? "is-draft-badge" : ""}">${isDraft ? "Chưa giao việc" : "Phiếu công việc"}</span>
           <h4>${escapeHtml(ticketTitle)}</h4>
+          ${hasSubmittedTask ? '<span class="admin-confirm-attention-badge">Chờ xác nhận hoàn thành</span>' : ""}
         </div>
       </div>
       ${headerActions}
@@ -5147,8 +5157,12 @@ function renderTaskCard(task, mode) {
     mode === "admin" &&
     task.status === "submitted";
 
+  const attentionClass = mode === "admin" && task.status === "submitted"
+    ? "is-awaiting-admin-confirmation"
+    : "";
+
   return `
-    <article class="task-card ${taskCardClass(displayStatus)}" data-task-card data-task-id="${escapeHtml(task.id)}" data-work-order-id="${escapeHtml(task.workOrderId || "legacy")}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
+    <article class="task-card ${taskCardClass(displayStatus)} ${attentionClass}" data-task-card data-task-id="${escapeHtml(task.id)}" data-work-order-id="${escapeHtml(task.workOrderId || "legacy")}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
       <div class="task-top">
         <div>
           <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
