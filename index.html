@@ -516,6 +516,350 @@
       line-height: 1.35;
     }
 
+    button.photo-report-item {
+      width: 100%;
+      appearance: none;
+      -webkit-appearance: none;
+      font: inherit;
+      text-align: left;
+      cursor: zoom-in;
+      transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    }
+
+    button.photo-report-item:hover {
+      transform: translateY(-2px);
+      border-color: #60a5fa;
+      box-shadow: 0 14px 30px rgba(37, 99, 235, 0.14);
+    }
+
+    button.photo-report-item:focus-visible {
+      outline: 3px solid rgba(37, 99, 235, 0.35);
+      outline-offset: 3px;
+      border-color: #2563eb;
+    }
+
+    html.photo-viewer-open,
+    body.photo-viewer-open {
+      overflow: hidden !important;
+      overscroll-behavior: none;
+    }
+
+    .photo-viewer.hidden {
+      display: none !important;
+    }
+
+    .photo-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 30000;
+      display: grid;
+      place-items: center;
+      box-sizing: border-box;
+      padding:
+        max(12px, env(safe-area-inset-top, 0px))
+        max(12px, env(safe-area-inset-right, 0px))
+        max(12px, env(safe-area-inset-bottom, 0px))
+        max(12px, env(safe-area-inset-left, 0px));
+    }
+
+    .photo-viewer-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.94);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .photo-viewer-shell {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      width: min(1500px, 100%);
+      height: min(940px, calc(100dvh - 24px));
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 24px;
+      background: rgba(15, 23, 42, 0.96);
+      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48);
+      color: #ffffff;
+    }
+
+    .photo-viewer-header,
+    .photo-viewer-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      background: rgba(15, 23, 42, 0.92);
+    }
+
+    .photo-viewer-header {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    .photo-viewer-footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.10);
+      color: #cbd5e1;
+      font-size: 13px;
+    }
+
+    .photo-viewer-title {
+      min-width: 0;
+    }
+
+    .photo-viewer-counter,
+    .photo-viewer-name {
+      display: block;
+    }
+
+    .photo-viewer-counter {
+      margin-bottom: 3px;
+      color: #93c5fd;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .photo-viewer-name {
+      max-width: min(760px, 62vw);
+      overflow: hidden;
+      color: #ffffff;
+      font-size: 15px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .photo-viewer-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+
+    .photo-viewer-original,
+    .photo-viewer-close,
+    .photo-viewer-nav {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.10);
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+    }
+
+    .photo-viewer-original {
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 12px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .photo-viewer-close {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .photo-viewer-original:hover,
+    .photo-viewer-close:hover,
+    .photo-viewer-nav:not(:disabled):hover {
+      background: rgba(255, 255, 255, 0.20);
+      transform: translateY(-1px);
+    }
+
+    .photo-viewer-original:focus-visible,
+    .photo-viewer-close:focus-visible,
+    .photo-viewer-nav:focus-visible {
+      outline: 3px solid rgba(147, 197, 253, 0.70);
+      outline-offset: 3px;
+    }
+
+    .photo-viewer-stage {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr) 72px;
+      align-items: stretch;
+      overflow: hidden;
+      touch-action: pan-y pinch-zoom;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .photo-viewer-image-wrap {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      min-height: 0;
+      padding: 18px 8px;
+      overflow: hidden;
+    }
+
+    .photo-viewer-image {
+      display: block;
+      width: auto;
+      height: auto;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 10px;
+      box-shadow: 0 18px 54px rgba(0, 0, 0, 0.36);
+    }
+
+    .photo-viewer-loader {
+      position: absolute;
+      inset: 50% auto auto 50%;
+      width: 42px;
+      height: 42px;
+      margin: -21px 0 0 -21px;
+      border: 4px solid rgba(255, 255, 255, 0.24);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      opacity: 0;
+      pointer-events: none;
+      animation: photoViewerSpin 0.8s linear infinite;
+    }
+
+    .photo-viewer-stage.is-loading .photo-viewer-loader {
+      opacity: 1;
+    }
+
+    .photo-viewer-stage.is-loading .photo-viewer-image {
+      opacity: 0.22;
+    }
+
+    @keyframes photoViewerSpin {
+      to { transform: rotate(360deg); }
+    }
+
+    .photo-viewer-nav {
+      align-self: center;
+      width: 54px;
+      height: 72px;
+      margin: 0 auto;
+      border-radius: 18px;
+      font-size: 38px;
+      line-height: 1;
+    }
+
+    .photo-viewer-nav:disabled {
+      cursor: default;
+      opacity: 0.18;
+    }
+
+    .photo-viewer-meta {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .photo-viewer-hint {
+      flex: 0 0 auto;
+      color: #94a3b8;
+    }
+
+    @media (max-width: 768px) {
+      .photo-viewer {
+        padding: 0;
+      }
+
+      .photo-viewer-shell {
+        width: 100%;
+        height: 100dvh;
+        border: 0;
+        border-radius: 0;
+      }
+
+      .photo-viewer-header {
+        padding:
+          max(12px, env(safe-area-inset-top, 0px))
+          max(12px, env(safe-area-inset-right, 0px))
+          10px
+          max(12px, env(safe-area-inset-left, 0px));
+      }
+
+      .photo-viewer-footer {
+        padding:
+          10px
+          max(14px, env(safe-area-inset-right, 0px))
+          max(12px, env(safe-area-inset-bottom, 0px))
+          max(14px, env(safe-area-inset-left, 0px));
+      }
+
+      .photo-viewer-name {
+        max-width: 48vw;
+        font-size: 13px;
+      }
+
+      .photo-viewer-original {
+        min-height: 40px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+
+      .photo-viewer-close {
+        width: 42px;
+        height: 42px;
+      }
+
+      .photo-viewer-stage {
+        grid-template-columns: 48px minmax(0, 1fr) 48px;
+      }
+
+      .photo-viewer-image-wrap {
+        padding: 8px 0;
+      }
+
+      .photo-viewer-image {
+        border-radius: 4px;
+      }
+
+      .photo-viewer-nav {
+        width: 42px;
+        height: 64px;
+        border: 0;
+        border-radius: 14px;
+        background: rgba(15, 23, 42, 0.56);
+        font-size: 34px;
+      }
+
+      .photo-viewer-hint {
+        display: none;
+      }
+
+      .photo-viewer-meta {
+        width: 100%;
+        text-align: center;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .photo-viewer-original span {
+        display: none;
+      }
+
+      .photo-viewer-original {
+        width: 42px;
+        padding: 0;
+      }
+
+      .photo-viewer-name {
+        max-width: 52vw;
+      }
+    }
+
 
     /* Trang riêng xem Ảnh báo cáo: không còn hiển thị dạng popup đè lên trang chủ */
     .photo-report-page .hero-panel {
@@ -1864,6 +2208,43 @@
         <div id="photoReportGrid" class="photo-report-grid empty-box">Chưa có hình báo cáo.</div>
       </section>
     </main>
+
+  <!-- PHOTO VIEWER / LIGHTBOX -->
+  <div id="photoViewer" class="photo-viewer hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="photoViewerName">
+    <div class="photo-viewer-backdrop" data-close-photo-viewer></div>
+
+    <section class="photo-viewer-shell">
+      <header class="photo-viewer-header">
+        <div class="photo-viewer-title">
+          <span id="photoViewerCounter" class="photo-viewer-counter" aria-live="polite">Ảnh 1 / 1</span>
+          <strong id="photoViewerName" class="photo-viewer-name">Ảnh báo cáo</strong>
+        </div>
+
+        <div class="photo-viewer-actions">
+          <a id="photoViewerOpenOriginal" class="photo-viewer-original" href="#" target="_blank" rel="noopener noreferrer">
+            ↗ <span>Mở ảnh gốc</span>
+          </a>
+          <button id="photoViewerCloseBtn" class="photo-viewer-close" type="button" data-close-photo-viewer aria-label="Đóng trình xem ảnh">×</button>
+        </div>
+      </header>
+
+      <div id="photoViewerStage" class="photo-viewer-stage">
+        <button id="photoViewerPrevBtn" class="photo-viewer-nav photo-viewer-prev" type="button" aria-label="Xem ảnh trước">‹</button>
+
+        <div class="photo-viewer-image-wrap">
+          <img id="photoViewerImage" class="photo-viewer-image" alt="Ảnh báo cáo" />
+          <span class="photo-viewer-loader" aria-hidden="true"></span>
+        </div>
+
+        <button id="photoViewerNextBtn" class="photo-viewer-nav photo-viewer-next" type="button" aria-label="Xem ảnh tiếp theo">›</button>
+      </div>
+
+      <footer class="photo-viewer-footer">
+        <span id="photoViewerMeta" class="photo-viewer-meta">Thông tin ảnh</span>
+        <span class="photo-viewer-hint">Dùng phím ← → hoặc vuốt trái/phải để chuyển ảnh</span>
+      </footer>
+    </section>
+  </div>
 
   <!-- EXTEND TASK TIME MODAL -->
   <div id="extendTimeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="extendTimeModalTitle">

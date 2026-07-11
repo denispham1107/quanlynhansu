@@ -107,7 +107,9 @@ const state = {
   extendTimeTaskId: null,
   reassignTaskId: null,
   photoReportTaskId: null,
-  photoReportReturnView: null
+  photoReportReturnView: null,
+  photoViewerPhotos: [],
+  photoViewerIndex: -1
 };
 
 // =========================
@@ -214,7 +216,17 @@ const els = {
   photoReportSummary: $("#photoReportSummary"),
   photoReportGrid: $("#photoReportGrid"),
   downloadPhotoZipBtn: $("#downloadPhotoZipBtn"),
-  sharePhotoReportBtn: $("#sharePhotoReportBtn")
+  sharePhotoReportBtn: $("#sharePhotoReportBtn"),
+  photoViewer: $("#photoViewer"),
+  photoViewerImage: $("#photoViewerImage"),
+  photoViewerName: $("#photoViewerName"),
+  photoViewerMeta: $("#photoViewerMeta"),
+  photoViewerCounter: $("#photoViewerCounter"),
+  photoViewerStage: $("#photoViewerStage"),
+  photoViewerPrevBtn: $("#photoViewerPrevBtn"),
+  photoViewerNextBtn: $("#photoViewerNextBtn"),
+  photoViewerCloseBtn: $("#photoViewerCloseBtn"),
+  photoViewerOpenOriginal: $("#photoViewerOpenOriginal")
 };
 
 function escapeHtml(value = "") {
@@ -5025,7 +5037,10 @@ function closePhotoReportModal() {
 }
 
 function backFromPhotoReportPage() {
+  closePhotoViewer({ restoreFocus: false });
   state.photoReportTaskId = null;
+  state.photoViewerPhotos = [];
+  state.photoViewerIndex = -1;
   if (els.photoReportGrid) els.photoReportGrid.innerHTML = "";
   state.photoShareFile = null;
   state.photoShareTaskId = null;
@@ -5058,6 +5073,230 @@ els.downloadPhotoZipBtn?.addEventListener("click", async () => {
 
 els.sharePhotoReportBtn?.addEventListener("click", async () => {
   await shareCurrentPhotoReport();
+});
+
+// Trình xem ảnh toàn màn hình (Lightbox/Gallery)
+let photoViewerPreviousFocus = null;
+let photoViewerTouchStart = null;
+
+function isPhotoViewerOpen() {
+  return Boolean(els.photoViewer && !els.photoViewer.classList.contains("hidden"));
+}
+
+function getCurrentPhotoViewerPhoto() {
+  return state.photoViewerPhotos[state.photoViewerIndex] || null;
+}
+
+function preloadPhotoViewerNeighbors() {
+  const neighborIndexes = [state.photoViewerIndex - 1, state.photoViewerIndex + 1];
+
+  neighborIndexes.forEach((index) => {
+    const photo = state.photoViewerPhotos[index];
+    if (!photo?.url) return;
+    const image = new Image();
+    image.src = photo.url;
+  });
+}
+
+function updatePhotoViewerContent() {
+  const photo = getCurrentPhotoViewerPhoto();
+  const total = state.photoViewerPhotos.length;
+
+  if (!photo || !total) {
+    closePhotoViewer();
+    return;
+  }
+
+  const displayName = photo.name || `Ảnh ${state.photoViewerIndex + 1}`;
+  const uploader = photo.uploadedByName || "Nhân viên";
+  const uploadedAt = formatFullDateTime(photo.uploadedAt);
+  const sizeText = formatFileSize(photo.size);
+
+  if (els.photoViewerCounter) {
+    els.photoViewerCounter.textContent = `Ảnh ${state.photoViewerIndex + 1} / ${total}`;
+  }
+
+  if (els.photoViewerName) {
+    els.photoViewerName.textContent = displayName;
+  }
+
+  if (els.photoViewerMeta) {
+    els.photoViewerMeta.textContent = `${uploader} • ${uploadedAt} • ${sizeText}`;
+  }
+
+  if (els.photoViewerOpenOriginal) {
+    els.photoViewerOpenOriginal.href = photo.url;
+    els.photoViewerOpenOriginal.setAttribute("aria-label", `Mở ảnh gốc ${displayName} trong tab mới`);
+  }
+
+  if (els.photoViewerImage) {
+    els.photoViewerStage?.classList.add("is-loading");
+    els.photoViewerImage.removeAttribute("src");
+    els.photoViewerImage.alt = displayName;
+    els.photoViewerImage.src = photo.url;
+  }
+
+  if (els.photoViewerPrevBtn) {
+    const isFirst = state.photoViewerIndex <= 0;
+    els.photoViewerPrevBtn.disabled = isFirst;
+    els.photoViewerPrevBtn.setAttribute("aria-disabled", String(isFirst));
+  }
+
+  if (els.photoViewerNextBtn) {
+    const isLast = state.photoViewerIndex >= total - 1;
+    els.photoViewerNextBtn.disabled = isLast;
+    els.photoViewerNextBtn.setAttribute("aria-disabled", String(isLast));
+  }
+
+  preloadPhotoViewerNeighbors();
+}
+
+function openPhotoViewer(index) {
+  const nextIndex = Number(index);
+  if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= state.photoViewerPhotos.length) return;
+
+  if (!isPhotoViewerOpen()) {
+    photoViewerPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+
+  state.photoViewerIndex = nextIndex;
+  els.photoViewer?.classList.remove("hidden");
+  els.photoViewer?.setAttribute("aria-hidden", "false");
+  document.documentElement.classList.add("photo-viewer-open");
+  document.body.classList.add("photo-viewer-open");
+  updatePhotoViewerContent();
+
+  window.requestAnimationFrame(() => {
+    els.photoViewerCloseBtn?.focus({ preventScroll: true });
+  });
+}
+
+function closePhotoViewer(options = {}) {
+  const { restoreFocus = true } = options;
+  if (!els.photoViewer) return;
+
+  const wasOpen = isPhotoViewerOpen();
+  els.photoViewer.classList.add("hidden");
+  els.photoViewer.setAttribute("aria-hidden", "true");
+  document.documentElement.classList.remove("photo-viewer-open");
+  document.body.classList.remove("photo-viewer-open");
+  els.photoViewerStage?.classList.remove("is-loading");
+  els.photoViewerImage?.removeAttribute("src");
+  photoViewerTouchStart = null;
+
+  if (wasOpen && restoreFocus && photoViewerPreviousFocus?.isConnected) {
+    photoViewerPreviousFocus.focus({ preventScroll: true });
+  }
+
+  photoViewerPreviousFocus = null;
+}
+
+function showPreviousPhotoViewerImage() {
+  if (state.photoViewerIndex <= 0) return;
+  state.photoViewerIndex -= 1;
+  updatePhotoViewerContent();
+}
+
+function showNextPhotoViewerImage() {
+  if (state.photoViewerIndex >= state.photoViewerPhotos.length - 1) return;
+  state.photoViewerIndex += 1;
+  updatePhotoViewerContent();
+}
+
+els.photoReportGrid?.addEventListener("click", (event) => {
+  const target = event.target instanceof Element
+    ? event.target.closest("[data-photo-viewer-index]")
+    : null;
+  if (!target) return;
+
+  event.preventDefault();
+  openPhotoViewer(Number(target.dataset.photoViewerIndex));
+});
+
+els.photoViewerPrevBtn?.addEventListener("click", showPreviousPhotoViewerImage);
+els.photoViewerNextBtn?.addEventListener("click", showNextPhotoViewerImage);
+
+$$('[data-close-photo-viewer]').forEach((button) => {
+  button.addEventListener("click", () => closePhotoViewer());
+});
+
+els.photoViewerImage?.addEventListener("load", () => {
+  els.photoViewerStage?.classList.remove("is-loading");
+});
+
+els.photoViewerImage?.addEventListener("error", () => {
+  els.photoViewerStage?.classList.remove("is-loading");
+  toast("Không tải được ảnh này. Bạn có thể bấm “Mở ảnh gốc” để thử lại.", "error");
+});
+
+els.photoViewerStage?.addEventListener("touchstart", (event) => {
+  if (event.touches.length !== 1) {
+    photoViewerTouchStart = null;
+    return;
+  }
+
+  const touch = event.touches[0];
+  photoViewerTouchStart = {
+    x: touch.clientX,
+    y: touch.clientY,
+    time: Date.now()
+  };
+}, { passive: true });
+
+els.photoViewerStage?.addEventListener("touchend", (event) => {
+  if (!photoViewerTouchStart || event.changedTouches.length !== 1) return;
+
+  const touch = event.changedTouches[0];
+  const deltaX = touch.clientX - photoViewerTouchStart.x;
+  const deltaY = touch.clientY - photoViewerTouchStart.y;
+  const elapsed = Date.now() - photoViewerTouchStart.time;
+  photoViewerTouchStart = null;
+
+  const isHorizontalSwipe = Math.abs(deltaX) >= 48
+    && Math.abs(deltaX) > Math.abs(deltaY) * 1.2
+    && elapsed <= 900;
+
+  if (!isHorizontalSwipe) return;
+  if (deltaX < 0) {
+    showNextPhotoViewerImage();
+  } else {
+    showPreviousPhotoViewerImage();
+  }
+}, { passive: true });
+
+document.addEventListener("keydown", (event) => {
+  if (!isPhotoViewerOpen()) return;
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closePhotoViewer();
+    return;
+  }
+
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    showPreviousPhotoViewerImage();
+    return;
+  }
+
+  if (event.key === "ArrowRight") {
+    event.preventDefault();
+    showNextPhotoViewerImage();
+    return;
+  }
+
+  if (event.key === "Home") {
+    event.preventDefault();
+    state.photoViewerIndex = 0;
+    updatePhotoViewerContent();
+    return;
+  }
+
+  if (event.key === "End") {
+    event.preventDefault();
+    state.photoViewerIndex = Math.max(0, state.photoViewerPhotos.length - 1);
+    updatePhotoViewerContent();
+  }
 });
 
 const PHOTO_ZIP_DOWNLOAD_TIMEOUT_MS = 20000;
@@ -5613,6 +5852,16 @@ function renderPhotoReportPageContent(task) {
     .slice()
     .sort((a, b) => (timestampToDate(b.uploadedAt)?.getTime() || 0) - (timestampToDate(a.uploadedAt)?.getTime() || 0));
 
+  state.photoViewerPhotos = photos;
+  if (isPhotoViewerOpen()) {
+    if (!photos.length) {
+      closePhotoViewer();
+    } else {
+      state.photoViewerIndex = Math.min(Math.max(0, state.photoViewerIndex), photos.length - 1);
+      updatePhotoViewerContent();
+    }
+  }
+
   if (els.photoReportTaskTitle) {
     els.photoReportTaskTitle.textContent = task.title || "Công việc";
   }
@@ -5629,13 +5878,18 @@ function renderPhotoReportPageContent(task) {
     els.photoReportGrid.classList.toggle("empty-box", photos.length === 0);
     els.photoReportGrid.innerHTML = photos.length
       ? photos.map((photo, index) => `
-        <a class="photo-report-item" href="${escapeHtml(photo.url)}" target="_blank" rel="noopener">
+        <button
+          class="photo-report-item"
+          type="button"
+          data-photo-viewer-index="${index}"
+          aria-label="Xem ${escapeHtml(photo.name || `ảnh báo cáo ${index + 1}`)}"
+        >
           <img src="${escapeHtml(photo.url)}" alt="Ảnh báo cáo ${index + 1}" loading="lazy" />
           <div>
             <strong>${escapeHtml(photo.name || `Ảnh ${index + 1}`)}</strong>
             <span>${escapeHtml(photo.uploadedByName || "Nhân viên")} • ${formatFullDateTime(photo.uploadedAt)} • ${formatFileSize(photo.size)}</span>
           </div>
-        </a>
+        </button>
       `).join("")
       : `Chưa có hình báo cáo.`;
   }
