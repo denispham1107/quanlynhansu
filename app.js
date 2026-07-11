@@ -1721,6 +1721,41 @@ function getAdminDateScopedTasks(tasks = state.tasks) {
   return tasks.filter((task) => isTaskInDateFilter(task, state.adminDateFilter));
 }
 
+function getAdminWorkOrderSearchScopedTasks(tasks = state.tasks) {
+  let scopedTasks = tasks.map((task) => (
+    task.displayStatus
+      ? task
+      : { ...task, displayStatus: getDisplayStatus(task) }
+  ));
+
+  // Ô tìm kiếm luôn phải tuân theo phạm vi thời gian Admin đang chọn.
+  scopedTasks = getAdminDateScopedTasks(scopedTasks);
+
+  // Đồng thời phải tuân theo bộ lọc trạng thái chính.
+  if (state.adminStatusFilter !== "all") {
+    scopedTasks = scopedTasks.filter((task) => (
+      taskMatchesStatusFilter(task, state.adminStatusFilter)
+    ));
+  }
+
+  // Khi lọc "Đã hoàn thành", tiếp tục áp dụng nhóm công việc đã hoàn thành
+  // như Công việc bình thường, Đã nghỉ trưa hoặc Hotel đã làm.
+  if (
+    state.adminStatusFilter === "completed"
+    && state.adminCompletedTypeFilter !== "all"
+  ) {
+    scopedTasks = scopedTasks.filter((task) => (
+      getCompletedTaskGroup(task) === state.adminCompletedTypeFilter
+    ));
+  }
+
+  return scopedTasks;
+}
+
+function shouldIncludeEmptyDraftGroupsInAdminSearch() {
+  return state.adminStatusFilter === "all" || state.adminStatusFilter === "draft";
+}
+
 function getAdminEmptyDraftGroupsInDateFilter() {
   const coveredWorkOrderIds = new Set(state.tasks.map((task) => task.workOrderId).filter(Boolean));
 
@@ -1740,8 +1775,9 @@ function getAdminEmptyDraftGroupsInDateFilter() {
 function getAdminWorkOrderSearchEntries() {
   const entries = new Map();
 
-  // Gợi ý tìm kiếm chỉ được tạo từ các công việc nằm trong phạm vi thời gian Admin đang chọn.
-  getAdminDateScopedTasks().forEach((task) => {
+  // Gợi ý chỉ được tạo từ các công việc đồng thời phù hợp bộ lọc thời gian
+  // và toàn bộ bộ lọc trạng thái Admin đang chọn.
+  getAdminWorkOrderSearchScopedTasks().forEach((task) => {
     const id = task.workOrderId || "legacy";
     const workOrder = getWorkOrderMeta(id);
     const name = String(
@@ -1770,15 +1806,18 @@ function getAdminWorkOrderSearchEntries() {
     });
   });
 
-  // Vẫn cho phép tìm phiếu nháp 0 công việc, nhưng chỉ khi ngày tạo phiếu thuộc phạm vi thời gian đã chọn.
-  getAdminEmptyDraftGroupsInDateFilter().forEach((group) => {
-    entries.set(group.key, {
-      id: group.key,
-      name: String(group.name || "").trim(),
-      taskCount: Number(group.totalTaskCount || 0),
-      createdAtMs: Number(group.createdAtMs || 0)
+  // Phiếu nháp 0 công việc chỉ được tham gia tìm kiếm khi trạng thái hiện tại
+  // là "Tất cả trạng thái" hoặc "Chưa giao việc".
+  if (shouldIncludeEmptyDraftGroupsInAdminSearch()) {
+    getAdminEmptyDraftGroupsInDateFilter().forEach((group) => {
+      entries.set(group.key, {
+        id: group.key,
+        name: String(group.name || "").trim(),
+        taskCount: Number(group.totalTaskCount || 0),
+        createdAtMs: Number(group.createdAtMs || 0)
+      });
     });
-  });
+  }
 
   return Array.from(entries.values()).filter((entry) => entry.name);
 }
@@ -1856,7 +1895,7 @@ function renderAdminWorkOrderSuggestions() {
   input.setAttribute("aria-expanded", "true");
 
   if (!suggestions.length) {
-    box.innerHTML = `<div class="admin-work-order-suggestion-empty">Không tìm thấy tên Phiếu công việc gần giống ${escapeHtml(getAdminWorkOrderSearchDateScopeLabel())}.</div>`;
+    box.innerHTML = `<div class="admin-work-order-suggestion-empty">Không tìm thấy tên Phiếu công việc gần giống theo ${escapeHtml(getAdminWorkOrderSearchScopeLabel())}.</div>`;
     return;
   }
 
@@ -3676,11 +3715,13 @@ els.adminStatusFilter.addEventListener("change", (event) => {
   }
 
   renderAdminTasks();
+  renderAdminWorkOrderSuggestions();
 });
 
 els.adminCompletedTypeFilter?.addEventListener("change", (event) => {
   state.adminCompletedTypeFilter = event.target.value;
   renderAdminTasks();
+  renderAdminWorkOrderSuggestions();
 });
 
 els.adminCompletedTypeReport?.addEventListener("change", (event) => {
@@ -4412,6 +4453,37 @@ function getAdminWorkOrderSearchDateScopeLabel() {
   return "trong toàn thời gian";
 }
 
+function getAdminWorkOrderSearchStatusScopeLabel() {
+  const statusLabels = {
+    all: "tất cả trạng thái",
+    draft: "Chưa giao việc",
+    waiting_assignee: "Chờ chọn người",
+    lunch_break: "Nghỉ trưa",
+    hotel: "Hotel",
+    doing: "Đang làm",
+    near_due: "Gần hết giờ",
+    overdue: "Quá hạn",
+    submitted: "Chờ xác nhận",
+    completed: "Đã hoàn thành",
+    redo: "Yêu cầu làm lại"
+  };
+
+  const statusLabel = statusLabels[state.adminStatusFilter] || "tất cả trạng thái";
+
+  if (
+    state.adminStatusFilter === "completed"
+    && state.adminCompletedTypeFilter !== "all"
+  ) {
+    return `${statusLabel} • ${getCompletedTypeFilterLabel(state.adminCompletedTypeFilter)}`;
+  }
+
+  return statusLabel;
+}
+
+function getAdminWorkOrderSearchScopeLabel() {
+  return `${getAdminWorkOrderSearchStatusScopeLabel()}, ${getAdminWorkOrderSearchDateScopeLabel()}`;
+}
+
 function renderAdminWorkOrderSearchSummary(resultCount = 0) {
   const summaryEl = els.adminWorkOrderSearchSummary;
   if (!summaryEl) return;
@@ -4426,19 +4498,24 @@ function renderAdminWorkOrderSearchSummary(resultCount = 0) {
   }
 
   summaryEl.classList.remove("hidden");
-  summaryEl.textContent = `Đang tìm Phiếu công việc ${getAdminWorkOrderSearchDateScopeLabel()}: ${resultCount} kết quả gần giống “${queryText}”.`;
+  summaryEl.textContent = `Đang tìm Phiếu công việc theo ${getAdminWorkOrderSearchScopeLabel()}: ${resultCount} kết quả gần giống “${queryText}”.`;
 }
 
 function getAdminSearchedTicketGroups(computedTasks) {
   const queryText = String(state.adminWorkOrderSearch || "").trim();
   if (!queryText) return [];
 
-  // Bắt buộc kết hợp tìm kiếm với bộ lọc thời gian hiện tại.
-  // Các bộ lọc trạng thái và nhân viên vẫn không giới hạn kết quả tìm tên Phiếu công việc.
-  const dateScopedGroups = groupTasksByWorkOrder(getAdminDateScopedTasks(computedTasks));
+  // Bắt buộc kết hợp tìm kiếm với bộ lọc thời gian, trạng thái chính
+  // và bộ lọc loại công việc đã hoàn thành hiện tại.
+  const scopedGroups = groupTasksByWorkOrder(
+    getAdminWorkOrderSearchScopedTasks(computedTasks)
+  );
+  const emptyDraftGroups = shouldIncludeEmptyDraftGroupsInAdminSearch()
+    ? getAdminEmptyDraftGroupsInDateFilter()
+    : [];
   const groupsWithEmptyDrafts = sortTicketGroupsForDisplay([
-    ...dateScopedGroups,
-    ...getAdminEmptyDraftGroupsInDateFilter()
+    ...scopedGroups,
+    ...emptyDraftGroups
   ]);
 
   return groupsWithEmptyDrafts
@@ -4499,14 +4576,14 @@ function renderAdminTasks() {
   const searchQuery = String(state.adminWorkOrderSearch || "").trim();
 
   if (searchQuery) {
-    // Tìm kiếm tên Phiếu công việc bắt buộc theo phạm vi của bộ lọc thời gian hiện tại.
-    // Bộ lọc trạng thái và nhân viên không giới hạn việc tìm tên phiếu.
+    // Tìm kiếm tên Phiếu công việc bắt buộc theo bộ lọc thời gian,
+    // trạng thái và nhóm công việc đã hoàn thành hiện tại.
     const searchedGroups = getAdminSearchedTicketGroups(computed);
     renderAdminWorkOrderSearchSummary(searchedGroups.length);
     els.adminCompletedTypeReport?.classList.add("hidden");
 
     if (!searchedGroups.length) {
-      els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc có tên gần giống “${escapeHtml(searchQuery)}” ${escapeHtml(getAdminWorkOrderSearchDateScopeLabel())}.`;
+      els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc có tên gần giống “${escapeHtml(searchQuery)}” theo ${escapeHtml(getAdminWorkOrderSearchScopeLabel())}.`;
       els.adminTaskList.classList.add("empty");
       return;
     }
