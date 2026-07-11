@@ -1233,7 +1233,11 @@ function bindDateFilterControls(scope) {
 
     refreshDateFilterVisibility(scope);
 
-    if (scope === "admin") renderAdminTasks();
+    if (scope === "admin") {
+      renderAdminTasks();
+      // Nếu ô tìm kiếm đang mở, cập nhật ngay gợi ý theo phạm vi thời gian mới.
+      renderAdminWorkOrderSuggestions();
+    }
     if (scope === "employee") renderEmployeeTasks();
   };
 
@@ -1711,42 +1715,70 @@ function getWorkOrderSearchScore(name, queryText) {
   return score + Math.abs(nameValue.length - queryValue.length) / 100;
 }
 
+function getAdminDateScopedTasks(tasks = state.tasks) {
+  return tasks.filter((task) => isTaskInDateFilter(task, state.adminDateFilter));
+}
+
+function getAdminEmptyDraftGroupsInDateFilter() {
+  const coveredWorkOrderIds = new Set(state.tasks.map((task) => task.workOrderId).filter(Boolean));
+
+  return state.workOrders
+    .filter((workOrder) => workOrder.status === "draft" && !coveredWorkOrderIds.has(workOrder.id))
+    // Phiếu nháp 0 công việc chưa có taskDate, nên dùng ngày tạo phiếu để kết hợp với bộ lọc thời gian.
+    .filter((workOrder) => isTaskInDateFilter({ createdAt: workOrder.createdAt }, state.adminDateFilter))
+    .map((workOrder) => ({
+      key: workOrder.id,
+      name: workOrder.name,
+      tasks: [],
+      totalTaskCount: Number(workOrder.taskCount || 0),
+      createdAtMs: timestampToDate(workOrder.createdAt)?.getTime() || 0
+    }));
+}
+
 function getAdminWorkOrderSearchEntries() {
   const entries = new Map();
 
-  state.workOrders.forEach((workOrder) => {
-    const name = String(workOrder.name || "").trim();
-    if (!name) return;
-
-    entries.set(workOrder.id, {
-      id: workOrder.id,
-      name,
-      taskCount: Number(workOrder.taskCount || 0),
-      createdAtMs: timestampToDate(workOrder.createdAt)?.getTime() || 0
-    });
-  });
-
-  state.tasks.forEach((task) => {
+  // Gợi ý tìm kiếm chỉ được tạo từ các công việc nằm trong phạm vi thời gian Admin đang chọn.
+  getAdminDateScopedTasks().forEach((task) => {
     const id = task.workOrderId || "legacy";
-    const name = String(task.workOrderName || (id === "legacy" ? "Công việc lẻ (giao trước khi có Phiếu)" : "")).trim();
+    const workOrder = getWorkOrderMeta(id);
+    const name = String(
+      workOrder?.name
+      || task.workOrderName
+      || (id === "legacy" ? "Công việc lẻ (giao trước khi có Phiếu)" : "")
+    ).trim();
+
     if (!name) return;
 
     const existing = entries.get(id);
+    const taskCount = Number(workOrder?.taskCount || task.workOrderTaskCount || 0);
 
     if (existing) {
-      existing.taskCount = Math.max(existing.taskCount, Number(task.workOrderTaskCount || 0));
+      existing.taskCount = Math.max(existing.taskCount, taskCount);
       return;
     }
 
     entries.set(id, {
       id,
       name,
-      taskCount: Number(task.workOrderTaskCount || 0),
-      createdAtMs: timestampToDate(task.createdAt)?.getTime() || 0
+      taskCount,
+      createdAtMs: timestampToDate(workOrder?.createdAt)?.getTime()
+        || timestampToDate(task.createdAt)?.getTime()
+        || 0
     });
   });
 
-  return Array.from(entries.values());
+  // Vẫn cho phép tìm phiếu nháp 0 công việc, nhưng chỉ khi ngày tạo phiếu thuộc phạm vi thời gian đã chọn.
+  getAdminEmptyDraftGroupsInDateFilter().forEach((group) => {
+    entries.set(group.key, {
+      id: group.key,
+      name: String(group.name || "").trim(),
+      taskCount: Number(group.totalTaskCount || 0),
+      createdAtMs: Number(group.createdAtMs || 0)
+    });
+  });
+
+  return Array.from(entries.values()).filter((entry) => entry.name);
 }
 
 function getAdminWorkOrderSearchResults(queryText = state.adminWorkOrderSearch) {
@@ -1822,7 +1854,7 @@ function renderAdminWorkOrderSuggestions() {
   input.setAttribute("aria-expanded", "true");
 
   if (!suggestions.length) {
-    box.innerHTML = '<div class="admin-work-order-suggestion-empty">Không tìm thấy tên Phiếu công việc gần giống.</div>';
+    box.innerHTML = `<div class="admin-work-order-suggestion-empty">Không tìm thấy tên Phiếu công việc gần giống ${escapeHtml(getAdminWorkOrderSearchDateScopeLabel())}.</div>`;
     return;
   }
 
@@ -4332,6 +4364,38 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   `;
 }
 
+function getAdminWorkOrderSearchDateScopeLabel() {
+  const filter = state.adminDateFilter || { mode: "all" };
+
+  if (filter.mode === "today") return `hôm nay (${formatDateOnly(todayInputValue())})`;
+  if (filter.mode === "yesterday") return `hôm qua (${formatDateOnly(yesterdayInputValue())})`;
+
+  if (filter.mode === "current_month") {
+    const range = getMonthDateRange(0);
+    return `trong tháng này (${formatDateOnly(range.from)} đến ${formatDateOnly(range.to)})`;
+  }
+
+  if (filter.mode === "previous_month") {
+    const range = getMonthDateRange(-1);
+    return `trong tháng trước (${formatDateOnly(range.from)} đến ${formatDateOnly(range.to)})`;
+  }
+
+  if (filter.mode === "single") {
+    return filter.single ? `trong ngày ${formatDateOnly(filter.single)}` : "trong ngày đang chọn";
+  }
+
+  if (filter.mode === "range") {
+    if (filter.from && filter.to) {
+      return `từ ${formatDateOnly(filter.from)} đến ${formatDateOnly(filter.to)}`;
+    }
+    if (filter.from) return `từ ${formatDateOnly(filter.from)} trở đi`;
+    if (filter.to) return `đến ${formatDateOnly(filter.to)}`;
+    return "trong khoảng thời gian đang chọn";
+  }
+
+  return "trong toàn thời gian";
+}
+
 function renderAdminWorkOrderSearchSummary(resultCount = 0) {
   const summaryEl = els.adminWorkOrderSearchSummary;
   if (!summaryEl) return;
@@ -4346,14 +4410,22 @@ function renderAdminWorkOrderSearchSummary(resultCount = 0) {
   }
 
   summaryEl.classList.remove("hidden");
-  summaryEl.textContent = `Đang tìm trên tất cả Phiếu công việc: ${resultCount} kết quả gần giống “${queryText}”.`;
+  summaryEl.textContent = `Đang tìm Phiếu công việc ${getAdminWorkOrderSearchDateScopeLabel()}: ${resultCount} kết quả gần giống “${queryText}”.`;
 }
 
 function getAdminSearchedTicketGroups(computedTasks) {
   const queryText = String(state.adminWorkOrderSearch || "").trim();
   if (!queryText) return [];
 
-  return withEmptyDraftGroups(groupTasksByWorkOrder(computedTasks), true)
+  // Bắt buộc kết hợp tìm kiếm với bộ lọc thời gian hiện tại.
+  // Các bộ lọc trạng thái và nhân viên vẫn không giới hạn kết quả tìm tên Phiếu công việc.
+  const dateScopedGroups = groupTasksByWorkOrder(getAdminDateScopedTasks(computedTasks));
+  const groupsWithEmptyDrafts = sortTicketGroupsForDisplay([
+    ...dateScopedGroups,
+    ...getAdminEmptyDraftGroupsInDateFilter()
+  ]);
+
+  return groupsWithEmptyDrafts
     .map((group) => ({
       ...group,
       searchScore: getWorkOrderSearchScore(group.name, queryText)
@@ -4411,14 +4483,14 @@ function renderAdminTasks() {
   const searchQuery = String(state.adminWorkOrderSearch || "").trim();
 
   if (searchQuery) {
-    // Tìm kiếm tên Phiếu công việc trên toàn bộ dữ liệu, không giới hạn bởi ngày, trạng thái
-    // hoặc nhân viên đang chọn ở các bộ lọc phía trên.
+    // Tìm kiếm tên Phiếu công việc bắt buộc theo phạm vi của bộ lọc thời gian hiện tại.
+    // Bộ lọc trạng thái và nhân viên không giới hạn việc tìm tên phiếu.
     const searchedGroups = getAdminSearchedTicketGroups(computed);
     renderAdminWorkOrderSearchSummary(searchedGroups.length);
     els.adminCompletedTypeReport?.classList.add("hidden");
 
     if (!searchedGroups.length) {
-      els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc có tên gần giống “${escapeHtml(searchQuery)}”.`;
+      els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc có tên gần giống “${escapeHtml(searchQuery)}” ${escapeHtml(getAdminWorkOrderSearchDateScopeLabel())}.`;
       els.adminTaskList.classList.add("empty");
       return;
     }
