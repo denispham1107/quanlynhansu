@@ -5489,6 +5489,7 @@ let photoViewerTouchStart = null;
 let photoViewerPendingSlideDirection = 0;
 let photoViewerTransitionLocked = false;
 let photoViewerTransitionTimer = null;
+let photoViewerViewportRefreshTimer = null;
 
 const PHOTO_VIEWER_ENTER_NEXT_CLASS = "is-entering-next";
 const PHOTO_VIEWER_ENTER_PREVIOUS_CLASS = "is-entering-previous";
@@ -5534,6 +5535,26 @@ function unlockPhotoViewerTransition() {
 function resetPhotoViewerTransition() {
   photoViewerPendingSlideDirection = 0;
   unlockPhotoViewerTransition();
+}
+
+function refreshPhotoViewerAfterViewportChange() {
+  if (!isPhotoViewerOpen()) return;
+
+  if (photoViewerViewportRefreshTimer) {
+    window.clearTimeout(photoViewerViewportRefreshTimer);
+  }
+
+  photoViewerViewportRefreshTimer = window.setTimeout(() => {
+    photoViewerViewportRefreshTimer = null;
+    photoViewerTouchStart = null;
+    resetPhotoViewerTransition();
+
+    // Buộc trình duyệt tính lại kích thước vùng ảnh sau khi xoay màn hình.
+    // Hữu ích với Safari iOS và một số WebView Android có Visual Viewport cập nhật chậm.
+    if (els.photoViewerStage) {
+      void els.photoViewerStage.offsetHeight;
+    }
+  }, 80);
 }
 
 function createPhotoViewerOutgoingGhost(direction) {
@@ -5715,6 +5736,12 @@ function closePhotoViewer(options = {}) {
   els.photoViewerStage?.classList.remove("is-loading");
   els.photoViewerImage?.removeAttribute("src");
   photoViewerTouchStart = null;
+
+  if (photoViewerViewportRefreshTimer) {
+    window.clearTimeout(photoViewerViewportRefreshTimer);
+    photoViewerViewportRefreshTimer = null;
+  }
+
   resetPhotoViewerTransition();
 
   if (wasOpen && restoreFocus && photoViewerPreviousFocus?.isConnected) {
@@ -5806,6 +5833,10 @@ els.photoViewerStage?.addEventListener("touchend", (event) => {
 els.photoViewerStage?.addEventListener("touchcancel", () => {
   photoViewerTouchStart = null;
 }, { passive: true });
+
+window.addEventListener("resize", refreshPhotoViewerAfterViewportChange, { passive: true });
+window.addEventListener("orientationchange", refreshPhotoViewerAfterViewportChange, { passive: true });
+window.visualViewport?.addEventListener("resize", refreshPhotoViewerAfterViewportChange, { passive: true });
 
 document.addEventListener("keydown", (event) => {
   if (!isPhotoViewerOpen()) return;
