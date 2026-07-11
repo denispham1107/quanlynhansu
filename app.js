@@ -3713,7 +3713,12 @@ els.adminCompletedTypeReport?.addEventListener("click", async (event) => {
   const dateKey = getAdminHotelReportDateKey();
 
   if (!dateKey) {
-    toast("Vui lòng chọn Hôm nay hoặc Chọn 1 ngày trước khi lưu tổng kết Hotel.", "error");
+    toast("Vui lòng chọn Hôm nay, Hôm qua hoặc Chọn 1 ngày trước khi lưu tổng kết Hotel.", "error");
+    return;
+  }
+
+  if (dateKey > todayInputValue()) {
+    toast("Chỉ có thể lưu tổng kết Hotel cho hôm nay hoặc một ngày trong quá khứ.", "error");
     return;
   }
 
@@ -3739,7 +3744,7 @@ els.adminCompletedTypeReport?.addEventListener("click", async (event) => {
   try {
     await saveAdminHotelDailyReport();
     renderAdminTasks();
-    toast("Đã lưu tổng kết Hotel trong ngày.", "success");
+    toast(`Đã lưu tổng kết Hotel ngày ${formatDateOnly(dateKey)}.`, "success");
   } catch (error) {
     console.error(error);
     toast("Không lưu được tổng kết Hotel trong ngày. Kiểm tra Firestore Rules hotelDailyReports.", "error");
@@ -3964,9 +3969,14 @@ function getHotelHygieneStatusText(value) {
 function getAdminHotelReportDateKey() {
   const filter = state.adminDateFilter || {};
 
+  // Tổng kết Hotel là báo cáo theo từng ngày. Cho phép Admin lưu cho hôm nay,
+  // hôm qua hoặc một ngày cụ thể trong quá khứ nếu trước đó bị quên chưa lưu.
   if (filter.mode === "today") return todayInputValue();
+  if (filter.mode === "yesterday") return yesterdayInputValue();
   if (filter.mode === "single") return filter.single || "";
 
+  // Các bộ lọc nhiều ngày như Toàn thời gian/Tháng/Khoảng ngày không xác định
+  // được duy nhất một ngày để làm mã tài liệu hotelDailyReports.
   return "";
 }
 
@@ -4039,9 +4049,13 @@ function buildAdminHotelDailyReportPayload() {
 
   let timeStatusText = "Chưa nhập số lượng bé hotel cuối ngày";
   if (endPetCount) {
+    const reportDayText = dateKey === todayInputValue()
+      ? "hôm nay"
+      : `ngày ${formatDateOnly(dateKey)}`;
+
     timeStatusText = totalActualMinutes <= allowedMinutes
-      ? "Các bạn hôm nay làm đúng thời gian"
-      : "Các bạn hôm nay làm không đúng thời gian";
+      ? `Các bạn ${reportDayText} làm đúng thời gian`
+      : `Các bạn ${reportDayText} làm không đúng thời gian`;
   }
 
   return {
