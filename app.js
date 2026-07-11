@@ -113,7 +113,8 @@ const state = {
   photoReportReturnTaskId: null,
   photoReportReturnScrollY: 0,
   photoViewerPhotos: [],
-  photoViewerIndex: -1
+  photoViewerIndex: -1,
+  deletingEmployeeUid: null
 };
 
 // =========================
@@ -1585,17 +1586,215 @@ function renderEmployees() {
   els.employeeList.classList.remove("empty");
 
   els.employeeList.innerHTML = state.employees
-    .map((employee) => `
-      <div class="employee-item">
-        <div class="avatar">${escapeHtml(initials(employee.name))}</div>
-        <div>
-          <strong>${escapeHtml(employee.name)}</strong>
-          <span>${escapeHtml(employee.email)}</span>
+    .map((employee) => {
+      const isDeleting = state.deletingEmployeeUid === employee.uid;
+      const employeeLabel = employee.name || employee.email || "nhân viên này";
+
+      return `
+        <div class="employee-item" data-employee-uid="${escapeHtml(employee.uid)}">
+          <div class="avatar">${escapeHtml(initials(employee.name))}</div>
+          <div class="employee-item-info">
+            <strong>${escapeHtml(employee.name)}</strong>
+            <span>${escapeHtml(employee.email)}</span>
+          </div>
+          <button
+            type="button"
+            class="employee-delete-btn"
+            data-action="delete-employee"
+            data-employee-uid="${escapeHtml(employee.uid)}"
+            aria-label="Xóa toàn bộ dữ liệu của ${escapeHtml(employeeLabel)}"
+            title="Xóa toàn bộ dữ liệu nhân viên"
+            ${isDeleting ? "disabled" : ""}
+          >${isDeleting ? "…" : "×"}</button>
         </div>
-      </div>
-    `)
+      `;
+    })
     .join("");
 }
+
+
+function getHotelReportTimeStatusText(report, totalActualMinutes) {
+  const endPetCount = Number(report?.endPetCount || 0);
+  const allowedMinutes = Number(report?.allowedMinutes || 0);
+
+  if (!endPetCount) {
+    return report?.timeStatusText || "Chưa nhập số lượng bé hotel cuối ngày";
+  }
+
+  const dateKey = String(report?.date || report?.id || "");
+  const reportDayText = dateKey === todayInputValue()
+    ? "hôm nay"
+    : `ngày ${formatDateOnly(dateKey)}`;
+
+  return Number(totalActualMinutes || 0) <= allowedMinutes
+    ? `Các bạn ${reportDayText} làm đúng thời gian`
+    : `Các bạn ${reportDayText} làm không đúng thời gian`;
+}
+
+function hotelReportEntryBelongsToEmployee(entry, employee) {
+  if (!entry || !employee) return false;
+  if (entry.uid && entry.uid === employee.uid) return true;
+
+  // Một số báo cáo Hotel cũ có thể chưa lưu uid, chỉ lưu tên nhân viên.
+  // Chỉ dùng tên làm phương án dự phòng khi dòng báo cáo không có uid.
+  if (!entry.uid && employee.name) {
+    return normalizeSearchText(entry.name || "") === normalizeSearchText(employee.name);
+  }
+
+  return false;
+}
+
+async function deleteEmployeeData(employeeUid) {
+  if (state.profile?.role !== "admin" || !employeeUid) return;
+  if (employeeUid === state.user?.uid) {
+    toast("Admin không thể tự xóa tài khoản của chính mình.", "error");
+    return;
+  }
+
+  const employee = state.employees.find((item) => item.uid === employeeUid);
+  if (!employee) {
+    toast("Không tìm thấy nhân viên cần xóa.", "error");
+    return;
+  }
+
+  const employeeName = employee.name || employee.email || "nhân viên này";
+  const currentEmployeeTasks = state.tasks.filter((task) => task.assignedToUid === employeeUid);
+  const currentPhotoCount = getTaskPhotoStoragePaths(currentEmployeeTasks).length;
+  const affectedTicketCount = new Set(
+    currentEmployeeTasks
+      .map((task) => task.workOrderId)
+      .filter(Boolean)
+  ).size;
+
+  const confirmed = window.confirm(
+    `Bạn có chắc chắn muốn xóa toàn bộ dữ liệu của nhân viên “${employeeName}” không?\n\n`
+    + `Hệ thống sẽ xóa hồ sơ nhân viên, ${currentEmployeeTasks.length} công việc, dữ liệu trong ${affectedTicketCount} phiếu liên quan, ${currentPhotoCount} hình ảnh báo cáo, thông báo và phần thống kê Hotel của nhân viên này.\n\n`
+    + "Các công việc của nhân viên khác trong cùng Phiếu công việc vẫn được giữ lại. Hành động này không thể hoàn tác."
+  );
+
+  if (!confirmed) return;
+
+  state.deletingEmployeeUid = employeeUid;
+  renderEmployees();
+
+  try {
+    // Đọc dữ liệu mới nhất trước khi xóa để không phụ thuộc vào snapshot đang hiển thị.
+    const [tasksSnapshot, workOrdersSnapshot, notificationsSnapshot, hotelReportsSnapshot] = await Promise.all([
+      getDocs(collection(db, "tasks")),
+      getDocs(collection(db, "workOrders")),
+      getDocs(collection(db, "notifications")),
+      getDocs(collection(db, "hotelDailyReports"))
+    ]);
+
+    const allTasks = tasksSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const allWorkOrders = workOrdersSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const employeeTasks = allTasks.filter((task) => task.assignedToUid === employeeUid);
+    const employeeTaskIds = new Set(employeeTasks.map((task) => task.id));
+    const affectedWorkOrderIds = new Set(
+      employeeTasks
+        .map((task) => task.workOrderId)
+        .filter(Boolean)
+    );
+
+    // Xóa file ảnh trước. Nếu Storage gặp lỗi thì dừng để tránh Firestore bị xóa dở.
+    const deletedPhotos = await deleteTaskPhotosFromStorage(employeeTasks);
+    const operations = [];
+
+    employeeTasks.forEach((task) => {
+      operations.push((batch) => batch.delete(doc(db, "tasks", task.id)));
+    });
+
+    // Phiếu chỉ có công việc của nhân viên bị xóa sẽ bị xóa theo.
+    // Phiếu có công việc của người khác sẽ được giữ lại và cập nhật lại số lượng/thứ tự.
+    affectedWorkOrderIds.forEach((workOrderId) => {
+      const workOrder = allWorkOrders.find((item) => item.id === workOrderId);
+      const remainingTasks = allTasks
+        .filter((task) => task.workOrderId === workOrderId && task.assignedToUid !== employeeUid)
+        .sort((a, b) => Number(a.rowIndex || 0) - Number(b.rowIndex || 0));
+
+      if (!remainingTasks.length) {
+        if (workOrder) {
+          operations.push((batch) => batch.delete(doc(db, "workOrders", workOrderId)));
+        }
+        return;
+      }
+
+      if (workOrder) {
+        operations.push((batch) => batch.update(doc(db, "workOrders", workOrderId), {
+          taskCount: remainingTasks.length
+        }));
+      }
+
+      remainingTasks.forEach((task, index) => {
+        operations.push((batch) => batch.update(doc(db, "tasks", task.id), {
+          rowIndex: index,
+          workOrderTaskCount: remainingTasks.length
+        }));
+      });
+    });
+
+    // Xóa thông báo trực tiếp của nhân viên và mọi thông báo tham chiếu tới task đã xóa.
+    notificationsSnapshot.docs.forEach((item) => {
+      const notification = item.data();
+      if (
+        notification.recipientUid === employeeUid
+        || notification.actorUid === employeeUid
+        || employeeTaskIds.has(notification.taskId)
+      ) {
+        operations.push((batch) => batch.delete(doc(db, "notifications", item.id)));
+      }
+    });
+
+    // Gỡ phần thống kê của nhân viên khỏi các báo cáo Hotel lịch sử,
+    // đồng thời tính lại tổng thời gian và kết luận của ngày đó.
+    hotelReportsSnapshot.docs.forEach((item) => {
+      const report = { id: item.id, ...item.data() };
+      const originalTotals = Array.isArray(report.employeeTotals) ? report.employeeTotals : [];
+      const employeeTotals = originalTotals.filter((entry) => !hotelReportEntryBelongsToEmployee(entry, employee));
+
+      if (employeeTotals.length === originalTotals.length) return;
+
+      const totalActualMinutes = employeeTotals.reduce(
+        (sum, entry) => sum + Number(entry?.minutes || 0),
+        0
+      );
+
+      operations.push((batch) => batch.update(doc(db, "hotelDailyReports", item.id), {
+        employeeTotals,
+        totalActualMinutes,
+        timeStatusText: getHotelReportTimeStatusText(report, totalActualMinutes),
+        updatedAt: serverTimestamp()
+      }));
+    });
+
+    // Xóa hồ sơ cuối cùng để tài khoản này mất quyền truy cập ứng dụng ngay sau khi dọn xong dữ liệu.
+    operations.push((batch) => batch.delete(doc(db, "users", employeeUid)));
+
+    await commitInChunks(operations);
+
+    if (state.adminEmployeeFilter === employeeUid) {
+      state.adminEmployeeFilter = "all";
+      syncSelectValue(els.adminEmployeeFilter, "all");
+    }
+
+    toast(
+      `Đã xóa dữ liệu của ${employeeName}: ${employeeTasks.length} công việc và ${deletedPhotos.deleted} hình ảnh báo cáo.`,
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    toast(error.message || `Không xóa được dữ liệu của ${employeeName}.`, "error");
+  } finally {
+    state.deletingEmployeeUid = null;
+    renderEmployees();
+  }
+}
+
+els.employeeList?.addEventListener("click", (event) => {
+  const button = event.target.closest('[data-action="delete-employee"]');
+  if (!button || button.disabled) return;
+  deleteEmployeeData(button.dataset.employeeUid);
+});
 
 function employeeOptionsHtml() {
   return state.employees
