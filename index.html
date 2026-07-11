@@ -1734,6 +1734,168 @@
     }
 
 
+    .admin-work-order-search {
+      position: relative;
+      width: min(720px, 100%);
+      margin: 8px 0 14px;
+    }
+
+    .admin-work-order-search-control {
+      position: relative;
+      width: 100%;
+    }
+
+    .admin-work-order-search-icon {
+      position: absolute;
+      left: 16px;
+      top: 50%;
+      z-index: 1;
+      transform: translateY(-50%);
+      color: #64748b;
+      font-size: 18px;
+      pointer-events: none;
+    }
+
+    .admin-work-order-search-input {
+      width: 100%;
+      min-height: 50px;
+      box-sizing: border-box;
+      border: 1px solid #bfdbfe;
+      border-radius: 16px;
+      padding: 12px 48px 12px 46px;
+      background: #ffffff;
+      color: #0f172a;
+      font: inherit;
+      font-weight: 700;
+      outline: none;
+      box-shadow: 0 8px 20px rgba(37, 99, 235, 0.06);
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .admin-work-order-search-input::placeholder {
+      color: #64748b;
+      font-weight: 600;
+      opacity: 1;
+    }
+
+    .admin-work-order-search-input:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 10px 24px rgba(37, 99, 235, 0.1);
+    }
+
+    .admin-work-order-search-input::-webkit-search-cancel-button {
+      display: none;
+    }
+
+    .admin-work-order-search-clear {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      z-index: 2;
+      width: 34px;
+      height: 34px;
+      transform: translateY(-50%);
+      border: 0;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      font-size: 20px;
+      font-weight: 900;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .admin-work-order-search-clear:hover {
+      background: #cbd5e1;
+    }
+
+    .admin-work-order-suggestions {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      z-index: 80;
+      max-height: min(360px, 55vh);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      border: 1px solid #bfdbfe;
+      border-radius: 16px;
+      padding: 6px;
+      background: #ffffff;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .admin-work-order-suggestion {
+      display: flex;
+      width: 100%;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      border: 0;
+      border-radius: 12px;
+      padding: 11px 12px;
+      background: transparent;
+      color: #0f172a;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .admin-work-order-suggestion:hover,
+    .admin-work-order-suggestion.is-active {
+      background: #eff6ff;
+    }
+
+    .admin-work-order-suggestion strong {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .admin-work-order-suggestion span {
+      flex: 0 0 auto;
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .admin-work-order-suggestion-empty {
+      padding: 14px 12px;
+      color: #64748b;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .admin-work-order-search-summary {
+      margin: 8px 2px 0;
+      color: #1d4ed8;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    @media (max-width: 768px) {
+      .admin-work-order-search {
+        width: 100%;
+      }
+
+      .admin-work-order-search-input {
+        min-height: 52px;
+        font-size: 16px;
+      }
+
+      .admin-work-order-suggestion {
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .admin-work-order-suggestion span {
+        white-space: normal;
+      }
+    }
+
     .completed-subfilter.hidden,
     .completed-type-report.hidden {
       display: none !important;
@@ -1995,6 +2157,25 @@
           </div>
         </div>
         <p id="adminDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
+        <div class="admin-work-order-search">
+          <div class="admin-work-order-search-control">
+            <span class="admin-work-order-search-icon" aria-hidden="true">⌕</span>
+            <input
+              id="adminWorkOrderSearch"
+              class="admin-work-order-search-input"
+              type="search"
+              placeholder="Tìm kiếm"
+              autocomplete="off"
+              aria-label="Tìm kiếm tên Phiếu công việc"
+              aria-autocomplete="list"
+              aria-controls="adminWorkOrderSuggestions"
+              aria-expanded="false"
+            />
+            <button id="adminClearWorkOrderSearch" class="admin-work-order-search-clear hidden" type="button" aria-label="Xóa nội dung tìm kiếm">×</button>
+            <div id="adminWorkOrderSuggestions" class="admin-work-order-suggestions hidden" role="listbox" aria-label="Gợi ý tên Phiếu công việc"></div>
+          </div>
+          <p id="adminWorkOrderSearchSummary" class="admin-work-order-search-summary hidden"></p>
+        </div>
         <div id="adminCompletedTypeReport" class="completed-type-report hidden"></div>
         <div id="adminTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>

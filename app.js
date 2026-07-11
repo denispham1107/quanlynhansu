@@ -87,6 +87,8 @@ const state = {
   adminStatusFilter: "all",
   adminCompletedTypeFilter: "all",
   adminEmployeeFilter: "all",
+  adminWorkOrderSearch: "",
+  adminWorkOrderSuggestionIndex: -1,
   adminHotelReportHygiene: "pending",
   adminHotelEndPetCount: "",
   adminHotelReportDrafts: {},
@@ -169,6 +171,10 @@ const els = {
   adminDateTo: $("#adminDateTo"),
   adminClearDateFilter: $("#adminClearDateFilter"),
   adminDateSummary: $("#adminDateSummary"),
+  adminWorkOrderSearch: $("#adminWorkOrderSearch"),
+  adminClearWorkOrderSearch: $("#adminClearWorkOrderSearch"),
+  adminWorkOrderSuggestions: $("#adminWorkOrderSuggestions"),
+  adminWorkOrderSearchSummary: $("#adminWorkOrderSearchSummary"),
   adminEmployeeStatusSummary: $("#adminEmployeeStatusSummary"),
   adminTaskList: $("#adminTaskList"),
   employeeStatusFilter: $("#employeeStatusFilter"),
@@ -1046,6 +1052,10 @@ function showTaskInCurrentDashboard(task) {
     state.adminStatusFilter = "all";
     state.adminCompletedTypeFilter = "all";
     state.adminEmployeeFilter = "all";
+    state.adminWorkOrderSearch = "";
+    state.adminWorkOrderSuggestionIndex = -1;
+    if (els.adminWorkOrderSearch) els.adminWorkOrderSearch.value = "";
+    hideAdminWorkOrderSuggestions();
     state.adminDateFilter = {
       mode: taskDate ? "single" : "all",
       single: taskDate || "",
@@ -1329,6 +1339,7 @@ function isTaskInDateFilter(task, filter) {
 
 bindDateFilterControls("admin");
 bindDateFilterControls("employee");
+bindAdminWorkOrderSearch();
 
 // =========================
 // Auth flow
@@ -1387,6 +1398,10 @@ onAuthStateChanged(auth, async (user) => {
   state.employees = [];
   state.tasks = [];
   state.workOrders = [];
+  state.adminWorkOrderSearch = "";
+  state.adminWorkOrderSuggestionIndex = -1;
+  if (els.adminWorkOrderSearch) els.adminWorkOrderSearch.value = "";
+  hideAdminWorkOrderSuggestions();
   state.timeExtensionReasons = [];
   state.workTemplates = [];
   state.notifications = [];
@@ -1644,6 +1659,266 @@ function isWorkTemplateMatch(template, queryText) {
       return levenshteinDistance(queryWord, nameWord) <= limit;
     })
   ));
+}
+
+function getWorkOrderSearchScore(name, queryText) {
+  const queryValue = normalizeSearchText(queryText);
+  const nameValue = normalizeSearchText(name);
+
+  if (!queryValue || !nameValue) return queryValue ? Number.POSITIVE_INFINITY : 0;
+  if (nameValue === queryValue) return 0;
+
+  if (nameValue.startsWith(queryValue)) {
+    return 5 + Math.max(0, nameValue.length - queryValue.length) / 100;
+  }
+
+  const directIndex = nameValue.indexOf(queryValue);
+  if (directIndex >= 0) {
+    return 10 + directIndex + Math.max(0, nameValue.length - queryValue.length) / 100;
+  }
+
+  const queryWords = queryValue.split(" ").filter(Boolean);
+  const nameWords = nameValue.split(" ").filter(Boolean);
+
+  // Với nội dung rất ngắn, chỉ nhận kết quả chứa trực tiếp để tránh gợi ý sai quá nhiều.
+  if (queryValue.length < 3) return Number.POSITIVE_INFINITY;
+
+  let score = 30;
+
+  for (const queryWord of queryWords) {
+    if (nameWords.some((nameWord) => nameWord.startsWith(queryWord))) {
+      score += 1;
+      continue;
+    }
+
+    if (nameValue.includes(queryWord)) {
+      score += 3;
+      continue;
+    }
+
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    nameWords.forEach((nameWord) => {
+      closestDistance = Math.min(closestDistance, levenshteinDistance(queryWord, nameWord));
+    });
+
+    const allowedDistance = queryWord.length <= 4 ? 1 : 2;
+    if (closestDistance > allowedDistance) return Number.POSITIVE_INFINITY;
+
+    score += 8 + (closestDistance * 4);
+  }
+
+  return score + Math.abs(nameValue.length - queryValue.length) / 100;
+}
+
+function getAdminWorkOrderSearchEntries() {
+  const entries = new Map();
+
+  state.workOrders.forEach((workOrder) => {
+    const name = String(workOrder.name || "").trim();
+    if (!name) return;
+
+    entries.set(workOrder.id, {
+      id: workOrder.id,
+      name,
+      taskCount: Number(workOrder.taskCount || 0),
+      createdAtMs: timestampToDate(workOrder.createdAt)?.getTime() || 0
+    });
+  });
+
+  state.tasks.forEach((task) => {
+    const id = task.workOrderId || "legacy";
+    const name = String(task.workOrderName || (id === "legacy" ? "Công việc lẻ (giao trước khi có Phiếu)" : "")).trim();
+    if (!name) return;
+
+    const existing = entries.get(id);
+
+    if (existing) {
+      existing.taskCount = Math.max(existing.taskCount, Number(task.workOrderTaskCount || 0));
+      return;
+    }
+
+    entries.set(id, {
+      id,
+      name,
+      taskCount: Number(task.workOrderTaskCount || 0),
+      createdAtMs: timestampToDate(task.createdAt)?.getTime() || 0
+    });
+  });
+
+  return Array.from(entries.values());
+}
+
+function getAdminWorkOrderSearchResults(queryText = state.adminWorkOrderSearch) {
+  const queryValue = normalizeSearchText(queryText);
+  if (!queryValue) return [];
+
+  return getAdminWorkOrderSearchEntries()
+    .map((entry) => ({
+      ...entry,
+      searchScore: getWorkOrderSearchScore(entry.name, queryValue)
+    }))
+    .filter((entry) => Number.isFinite(entry.searchScore))
+    .sort((a, b) => (
+      a.searchScore - b.searchScore
+      || b.createdAtMs - a.createdAtMs
+      || a.name.localeCompare(b.name, "vi")
+    ));
+}
+
+function hideAdminWorkOrderSuggestions() {
+  if (!els.adminWorkOrderSuggestions) return;
+  els.adminWorkOrderSuggestions.classList.add("hidden");
+  els.adminWorkOrderSuggestions.innerHTML = "";
+  els.adminWorkOrderSearch?.setAttribute("aria-expanded", "false");
+  state.adminWorkOrderSuggestionIndex = -1;
+}
+
+function updateAdminWorkOrderSuggestionActiveState() {
+  const options = Array.from(els.adminWorkOrderSuggestions?.querySelectorAll?.("[data-work-order-search-value]") || []);
+
+  options.forEach((option, index) => {
+    const isActive = index === state.adminWorkOrderSuggestionIndex;
+    option.classList.toggle("is-active", isActive);
+    option.setAttribute("aria-selected", isActive ? "true" : "false");
+
+    if (isActive) option.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function renderAdminWorkOrderSuggestions() {
+  const box = els.adminWorkOrderSuggestions;
+  const input = els.adminWorkOrderSearch;
+  if (!box || !input) return;
+
+  const queryText = input.value.trim();
+  state.adminWorkOrderSearch = queryText;
+  els.adminClearWorkOrderSearch?.classList.toggle("hidden", !queryText);
+
+  if (!queryText || document.activeElement !== input) {
+    hideAdminWorkOrderSuggestions();
+    return;
+  }
+
+  const results = getAdminWorkOrderSearchResults(queryText);
+  const uniqueNames = new Map();
+
+  results.forEach((item) => {
+    const key = normalizeSearchText(item.name);
+    const current = uniqueNames.get(key);
+
+    if (current) {
+      current.ticketCount += 1;
+      current.taskCount += Number(item.taskCount || 0);
+      return;
+    }
+
+    uniqueNames.set(key, { ...item, ticketCount: 1 });
+  });
+
+  const suggestions = Array.from(uniqueNames.values()).slice(0, 8);
+  state.adminWorkOrderSuggestionIndex = suggestions.length ? 0 : -1;
+  box.classList.remove("hidden");
+  input.setAttribute("aria-expanded", "true");
+
+  if (!suggestions.length) {
+    box.innerHTML = '<div class="admin-work-order-suggestion-empty">Không tìm thấy tên Phiếu công việc gần giống.</div>';
+    return;
+  }
+
+  box.innerHTML = suggestions
+    .map((item, index) => `
+      <button
+        class="admin-work-order-suggestion${index === 0 ? " is-active" : ""}"
+        type="button"
+        role="option"
+        aria-selected="${index === 0 ? "true" : "false"}"
+        data-work-order-search-value="${escapeHtml(item.name)}"
+      >
+        <strong>${escapeHtml(item.name)}</strong>
+        <span>${item.ticketCount > 1 ? `${item.ticketCount} phiếu • ` : ""}${Number(item.taskCount || 0)} công việc</span>
+      </button>
+    `)
+    .join("");
+}
+
+function setAdminWorkOrderSearch(value) {
+  const nextValue = String(value || "").trim();
+  state.adminWorkOrderSearch = nextValue;
+  state.adminWorkOrderSuggestionIndex = -1;
+
+  if (els.adminWorkOrderSearch) els.adminWorkOrderSearch.value = nextValue;
+  els.adminClearWorkOrderSearch?.classList.toggle("hidden", !nextValue);
+  hideAdminWorkOrderSuggestions();
+  renderAdminTasks();
+}
+
+function bindAdminWorkOrderSearch() {
+  const input = els.adminWorkOrderSearch;
+  const suggestionBox = els.adminWorkOrderSuggestions;
+  if (!input || !suggestionBox) return;
+
+  const handleInput = () => {
+    state.adminWorkOrderSearch = input.value.trim();
+    state.adminWorkOrderSuggestionIndex = -1;
+    renderAdminTasks();
+    renderAdminWorkOrderSuggestions();
+  };
+
+  input.addEventListener("input", handleInput);
+  input.addEventListener("search", handleInput);
+  input.addEventListener("focus", renderAdminWorkOrderSuggestions);
+
+  input.addEventListener("keydown", (event) => {
+    const options = Array.from(suggestionBox.querySelectorAll("[data-work-order-search-value]"));
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!options.length) {
+        renderAdminWorkOrderSuggestions();
+        return;
+      }
+
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const currentIndex = state.adminWorkOrderSuggestionIndex < 0 ? 0 : state.adminWorkOrderSuggestionIndex;
+      state.adminWorkOrderSuggestionIndex = (currentIndex + direction + options.length) % options.length;
+      updateAdminWorkOrderSuggestionActiveState();
+      return;
+    }
+
+    if (event.key === "Enter" && options.length) {
+      event.preventDefault();
+      const selectedIndex = state.adminWorkOrderSuggestionIndex >= 0 ? state.adminWorkOrderSuggestionIndex : 0;
+      const selected = options[selectedIndex];
+      if (selected) setAdminWorkOrderSearch(selected.dataset.workOrderSearchValue || "");
+      return;
+    }
+
+    if (event.key === "Escape") {
+      hideAdminWorkOrderSuggestions();
+    }
+  });
+
+  suggestionBox.addEventListener("pointerdown", (event) => {
+    // Giữ focus ở ô nhập cho tới khi xử lý xong lựa chọn, đặc biệt trên iPhone/Safari.
+    event.preventDefault();
+  });
+
+  suggestionBox.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-work-order-search-value]");
+    if (!option) return;
+    setAdminWorkOrderSearch(option.dataset.workOrderSearchValue || "");
+    input.focus();
+  });
+
+  els.adminClearWorkOrderSearch?.addEventListener("click", () => {
+    setAdminWorkOrderSearch("");
+    input.focus();
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest(".admin-work-order-search")) hideAdminWorkOrderSuggestions();
+  });
 }
 
 function getFilteredWorkTemplates() {
@@ -4057,6 +4332,40 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   `;
 }
 
+function renderAdminWorkOrderSearchSummary(resultCount = 0) {
+  const summaryEl = els.adminWorkOrderSearchSummary;
+  if (!summaryEl) return;
+
+  const queryText = String(state.adminWorkOrderSearch || "").trim();
+  els.adminClearWorkOrderSearch?.classList.toggle("hidden", !queryText);
+
+  if (!queryText) {
+    summaryEl.classList.add("hidden");
+    summaryEl.textContent = "";
+    return;
+  }
+
+  summaryEl.classList.remove("hidden");
+  summaryEl.textContent = `Đang tìm trên tất cả Phiếu công việc: ${resultCount} kết quả gần giống “${queryText}”.`;
+}
+
+function getAdminSearchedTicketGroups(computedTasks) {
+  const queryText = String(state.adminWorkOrderSearch || "").trim();
+  if (!queryText) return [];
+
+  return withEmptyDraftGroups(groupTasksByWorkOrder(computedTasks), true)
+    .map((group) => ({
+      ...group,
+      searchScore: getWorkOrderSearchScore(group.name, queryText)
+    }))
+    .filter((group) => Number.isFinite(group.searchScore))
+    .sort((a, b) => (
+      a.searchScore - b.searchScore
+      || b.createdAtMs - a.createdAtMs
+      || a.name.localeCompare(b.name, "vi")
+    ));
+}
+
 function renderAdminTasks() {
   const computed = state.tasks.map((task) => ({
     ...task,
@@ -4098,6 +4407,33 @@ function renderAdminTasks() {
 
   renderCompletedTypeReport(filtered);
   refreshDateFilterVisibility("admin");
+
+  const searchQuery = String(state.adminWorkOrderSearch || "").trim();
+
+  if (searchQuery) {
+    // Tìm kiếm tên Phiếu công việc trên toàn bộ dữ liệu, không giới hạn bởi ngày, trạng thái
+    // hoặc nhân viên đang chọn ở các bộ lọc phía trên.
+    const searchedGroups = getAdminSearchedTicketGroups(computed);
+    renderAdminWorkOrderSearchSummary(searchedGroups.length);
+    els.adminCompletedTypeReport?.classList.add("hidden");
+
+    if (!searchedGroups.length) {
+      els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc có tên gần giống “${escapeHtml(searchQuery)}”.`;
+      els.adminTaskList.classList.add("empty");
+      return;
+    }
+
+    els.adminTaskList.classList.remove("empty");
+    els.adminTaskList.innerHTML = searchedGroups
+      .map((group) => renderTicketGroup(group))
+      .join("");
+
+    updateCountdowns();
+    refreshPhotoReportPageIfOpen();
+    return;
+  }
+
+  renderAdminWorkOrderSearchSummary(0);
 
   // Chỉ chèn thêm phiếu nháp trống (0 công việc) khi không có bộ lọc nào khác đang áp dụng,
   // vì các phiếu này chưa có nhân viên/ngày để so khớp với bộ lọc.
