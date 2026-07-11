@@ -110,6 +110,8 @@ const state = {
   reassignTaskId: null,
   photoReportTaskId: null,
   photoReportReturnView: null,
+  photoReportReturnTaskId: null,
+  photoReportReturnScrollY: 0,
   photoViewerPhotos: [],
   photoViewerIndex: -1
 };
@@ -5444,7 +5446,57 @@ function closePhotoReportModal() {
   backFromPhotoReportPage();
 }
 
+function getPhotoReportReturnButton(taskId) {
+  if (!taskId) return null;
+
+  const safeTaskId = getSafeSelectorValue(taskId);
+  return document.querySelector(
+    `[data-action="view-task-photos"][data-task-id="${safeTaskId}"]`
+  );
+}
+
+function restorePhotoReportOrigin(taskId, savedScrollY) {
+  const fallbackScrollY = Math.max(0, Number(savedScrollY) || 0);
+
+  // Khôi phục ngay đúng vị trí cuộn trước khi mở trang ảnh.
+  window.scrollTo({ top: fallbackScrollY, left: 0, behavior: "auto" });
+
+  // Chờ dashboard hiện lại và trình duyệt hoàn tất bố cục. Nếu dữ liệu vừa
+  // cập nhật làm vị trí thay đổi, ưu tiên đưa đúng nút “Xem hình” trở lại màn hình.
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      const returnButton = getPhotoReportReturnButton(taskId);
+      const returnCard = returnButton?.closest?.("[data-task-card]");
+      const returnTarget = returnCard || returnButton;
+
+      if (!returnTarget) {
+        window.scrollTo({ top: fallbackScrollY, left: 0, behavior: "auto" });
+        return;
+      }
+
+      const rect = returnTarget.getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const isVisible = rect.bottom > 0 && rect.top < viewportHeight;
+
+      if (!isVisible) {
+        returnTarget.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      }
+
+      returnCard?.classList.add("notification-jump-highlight");
+      window.setTimeout(() => {
+        returnCard?.classList.remove("notification-jump-highlight");
+      }, 2200);
+
+      returnButton?.focus?.({ preventScroll: true });
+    });
+  });
+}
+
 function backFromPhotoReportPage() {
+  const returnView = state.photoReportReturnView;
+  const returnTaskId = state.photoReportReturnTaskId || state.photoReportTaskId;
+  const returnScrollY = state.photoReportReturnScrollY;
+
   closePhotoViewer({ restoreFocus: false });
   state.photoReportTaskId = null;
   state.photoViewerPhotos = [];
@@ -5460,14 +5512,17 @@ function backFromPhotoReportPage() {
   els.photoReportView?.classList.add("hidden");
   els.photoReportModal?.classList.add("hidden");
 
-  if (state.photoReportReturnView === "employee") {
+  if (returnView === "employee") {
     els.employeeView?.classList.remove("hidden");
   } else {
     els.adminView?.classList.remove("hidden");
   }
 
   state.photoReportReturnView = null;
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  state.photoReportReturnTaskId = null;
+  state.photoReportReturnScrollY = 0;
+
+  restorePhotoReportOrigin(returnTaskId, returnScrollY);
 }
 
 $$('[data-close-photo-modal]').forEach((button) => {
@@ -6504,6 +6559,11 @@ function openPhotoReportPage(taskId) {
   state.photoShareTaskId = null;
   state.photoShareFileName = "";
   state.photoReportReturnView = state.profile?.role === "employee" ? "employee" : "admin";
+  state.photoReportReturnTaskId = taskId;
+  state.photoReportReturnScrollY = window.scrollY
+    || document.documentElement.scrollTop
+    || document.body.scrollTop
+    || 0;
 
   hideMainContentForPhotoReport();
   renderPhotoReportPageContent(task);
