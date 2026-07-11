@@ -1717,6 +1717,36 @@ function getWorkOrderSearchScore(name, queryText) {
   return score + Math.abs(nameValue.length - queryValue.length) / 100;
 }
 
+function getAdminSearchStatusPriority(taskOrStatus) {
+  const displayStatus = typeof taskOrStatus === "string"
+    ? taskOrStatus
+    : (taskOrStatus?.displayStatus || getDisplayStatus(taskOrStatus || {}));
+
+  const priorities = {
+    draft: 0,
+    waiting_assignee: 1,
+    queued: 2,
+    doing: 2,
+    lunch_break: 2,
+    hotel: 2,
+    near_due: 3,
+    overdue: 4,
+    redo: 5,
+    submitted: 6,
+    completed: 7
+  };
+
+  return priorities[displayStatus] ?? 8;
+}
+
+function getAdminSearchGroupStatusPriority(group) {
+  if (!group?.tasks?.length) return getAdminSearchStatusPriority("draft");
+
+  return Math.min(
+    ...group.tasks.map((task) => getAdminSearchStatusPriority(task))
+  );
+}
+
 function getAdminDateScopedTasks(tasks = state.tasks) {
   return tasks.filter((task) => isTaskInDateFilter(task, state.adminDateFilter));
 }
@@ -1791,8 +1821,11 @@ function getAdminWorkOrderSearchEntries() {
     const existing = entries.get(id);
     const taskCount = Number(workOrder?.taskCount || task.workOrderTaskCount || 0);
 
+    const statusPriority = getAdminSearchStatusPriority(task);
+
     if (existing) {
       existing.taskCount = Math.max(existing.taskCount, taskCount);
+      existing.statusPriority = Math.min(existing.statusPriority, statusPriority);
       return;
     }
 
@@ -1800,6 +1833,7 @@ function getAdminWorkOrderSearchEntries() {
       id,
       name,
       taskCount,
+      statusPriority,
       createdAtMs: timestampToDate(workOrder?.createdAt)?.getTime()
         || timestampToDate(task.createdAt)?.getTime()
         || 0
@@ -1814,6 +1848,7 @@ function getAdminWorkOrderSearchEntries() {
         id: group.key,
         name: String(group.name || "").trim(),
         taskCount: Number(group.totalTaskCount || 0),
+        statusPriority: getAdminSearchStatusPriority("draft"),
         createdAtMs: Number(group.createdAtMs || 0)
       });
     });
@@ -1833,7 +1868,8 @@ function getAdminWorkOrderSearchResults(queryText = state.adminWorkOrderSearch) 
     }))
     .filter((entry) => Number.isFinite(entry.searchScore))
     .sort((a, b) => (
-      a.searchScore - b.searchScore
+      a.statusPriority - b.statusPriority
+      || a.searchScore - b.searchScore
       || b.createdAtMs - a.createdAtMs
       || a.name.localeCompare(b.name, "vi")
     ));
@@ -4521,11 +4557,13 @@ function getAdminSearchedTicketGroups(computedTasks) {
   return groupsWithEmptyDrafts
     .map((group) => ({
       ...group,
+      statusPriority: getAdminSearchGroupStatusPriority(group),
       searchScore: getWorkOrderSearchScore(group.name, queryText)
     }))
     .filter((group) => Number.isFinite(group.searchScore))
     .sort((a, b) => (
-      a.searchScore - b.searchScore
+      a.statusPriority - b.statusPriority
+      || a.searchScore - b.searchScore
       || b.createdAtMs - a.createdAtMs
       || a.name.localeCompare(b.name, "vi")
     ));
