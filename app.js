@@ -5078,6 +5078,14 @@ els.sharePhotoReportBtn?.addEventListener("click", async () => {
 // Trình xem ảnh toàn màn hình (Lightbox/Gallery)
 let photoViewerPreviousFocus = null;
 let photoViewerTouchStart = null;
+let photoViewerPendingSlideDirection = 0;
+let photoViewerTransitionLocked = false;
+let photoViewerTransitionTimer = null;
+
+const PHOTO_VIEWER_ENTER_NEXT_CLASS = "is-entering-next";
+const PHOTO_VIEWER_ENTER_PREVIOUS_CLASS = "is-entering-previous";
+const PHOTO_VIEWER_GHOST_CLASS = "photo-viewer-image-ghost";
+const PHOTO_VIEWER_TRANSITION_MS = 320;
 
 function isPhotoViewerOpen() {
   return Boolean(els.photoViewer && !els.photoViewer.classList.contains("hidden"));
@@ -5085,6 +5093,97 @@ function isPhotoViewerOpen() {
 
 function getCurrentPhotoViewerPhoto() {
   return state.photoViewerPhotos[state.photoViewerIndex] || null;
+}
+
+function shouldReducePhotoViewerMotion() {
+  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+}
+
+function removePhotoViewerGhosts() {
+  els.photoViewerStage
+    ?.querySelectorAll(`.${PHOTO_VIEWER_GHOST_CLASS}`)
+    .forEach((ghost) => ghost.remove());
+}
+
+function clearPhotoViewerIncomingClasses() {
+  els.photoViewerImage?.classList.remove(
+    PHOTO_VIEWER_ENTER_NEXT_CLASS,
+    PHOTO_VIEWER_ENTER_PREVIOUS_CLASS
+  );
+}
+
+function unlockPhotoViewerTransition() {
+  if (photoViewerTransitionTimer) {
+    window.clearTimeout(photoViewerTransitionTimer);
+    photoViewerTransitionTimer = null;
+  }
+
+  photoViewerTransitionLocked = false;
+  clearPhotoViewerIncomingClasses();
+  removePhotoViewerGhosts();
+}
+
+function resetPhotoViewerTransition() {
+  photoViewerPendingSlideDirection = 0;
+  unlockPhotoViewerTransition();
+}
+
+function createPhotoViewerOutgoingGhost(direction) {
+  const image = els.photoViewerImage;
+  const wrap = image?.parentElement;
+
+  if (!image || !wrap || !image.currentSrc || !image.complete || !image.naturalWidth) return;
+
+  removePhotoViewerGhosts();
+
+  const imageRect = image.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  if (!imageRect.width || !imageRect.height) return;
+
+  const ghost = image.cloneNode(false);
+  ghost.removeAttribute("id");
+  ghost.removeAttribute("aria-describedby");
+  ghost.classList.remove(PHOTO_VIEWER_ENTER_NEXT_CLASS, PHOTO_VIEWER_ENTER_PREVIOUS_CLASS);
+  ghost.classList.add(
+    PHOTO_VIEWER_GHOST_CLASS,
+    direction > 0 ? "is-leaving-next" : "is-leaving-previous"
+  );
+  ghost.setAttribute("aria-hidden", "true");
+
+  Object.assign(ghost.style, {
+    left: `${imageRect.left - wrapRect.left}px`,
+    top: `${imageRect.top - wrapRect.top}px`,
+    width: `${imageRect.width}px`,
+    height: `${imageRect.height}px`
+  });
+
+  wrap.appendChild(ghost);
+  ghost.addEventListener("animationend", () => ghost.remove(), { once: true });
+  window.setTimeout(() => ghost.remove(), PHOTO_VIEWER_TRANSITION_MS + 180);
+}
+
+function runPhotoViewerIncomingAnimation(direction) {
+  const image = els.photoViewerImage;
+  if (!image || !direction || shouldReducePhotoViewerMotion()) {
+    unlockPhotoViewerTransition();
+    return;
+  }
+
+  clearPhotoViewerIncomingClasses();
+  // Buộc trình duyệt ghi nhận trạng thái ban đầu trước khi thêm animation mới.
+  void image.offsetWidth;
+
+  const animationClass = direction > 0
+    ? PHOTO_VIEWER_ENTER_NEXT_CLASS
+    : PHOTO_VIEWER_ENTER_PREVIOUS_CLASS;
+
+  image.classList.add(animationClass);
+  image.addEventListener("animationend", unlockPhotoViewerTransition, { once: true });
+
+  photoViewerTransitionTimer = window.setTimeout(
+    unlockPhotoViewerTransition,
+    PHOTO_VIEWER_TRANSITION_MS + 180
+  );
 }
 
 function preloadPhotoViewerNeighbors() {
@@ -5098,7 +5197,8 @@ function preloadPhotoViewerNeighbors() {
   });
 }
 
-function updatePhotoViewerContent() {
+function updatePhotoViewerContent(options = {}) {
+  const { slideDirection = 0 } = options;
   const photo = getCurrentPhotoViewerPhoto();
   const total = state.photoViewerPhotos.length;
 
@@ -5130,6 +5230,8 @@ function updatePhotoViewerContent() {
   }
 
   if (els.photoViewerImage) {
+    clearPhotoViewerIncomingClasses();
+    photoViewerPendingSlideDirection = slideDirection;
     els.photoViewerStage?.classList.add("is-loading");
     els.photoViewerImage.removeAttribute("src");
     els.photoViewerImage.alt = displayName;
@@ -5151,6 +5253,27 @@ function updatePhotoViewerContent() {
   preloadPhotoViewerNeighbors();
 }
 
+function navigatePhotoViewerTo(targetIndex, direction = 0) {
+  const nextIndex = Number(targetIndex);
+  const total = state.photoViewerPhotos.length;
+
+  if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= total) return;
+  if (nextIndex === state.photoViewerIndex || photoViewerTransitionLocked) return;
+
+  const resolvedDirection = direction || (nextIndex > state.photoViewerIndex ? 1 : -1);
+  const useAnimation = !shouldReducePhotoViewerMotion();
+
+  if (useAnimation) {
+    photoViewerTransitionLocked = true;
+    createPhotoViewerOutgoingGhost(resolvedDirection);
+  } else {
+    resetPhotoViewerTransition();
+  }
+
+  state.photoViewerIndex = nextIndex;
+  updatePhotoViewerContent({ slideDirection: useAnimation ? resolvedDirection : 0 });
+}
+
 function openPhotoViewer(index) {
   const nextIndex = Number(index);
   if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= state.photoViewerPhotos.length) return;
@@ -5159,6 +5282,7 @@ function openPhotoViewer(index) {
     photoViewerPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   }
 
+  resetPhotoViewerTransition();
   state.photoViewerIndex = nextIndex;
   els.photoViewer?.classList.remove("hidden");
   els.photoViewer?.setAttribute("aria-hidden", "false");
@@ -5183,6 +5307,7 @@ function closePhotoViewer(options = {}) {
   els.photoViewerStage?.classList.remove("is-loading");
   els.photoViewerImage?.removeAttribute("src");
   photoViewerTouchStart = null;
+  resetPhotoViewerTransition();
 
   if (wasOpen && restoreFocus && photoViewerPreviousFocus?.isConnected) {
     photoViewerPreviousFocus.focus({ preventScroll: true });
@@ -5192,15 +5317,11 @@ function closePhotoViewer(options = {}) {
 }
 
 function showPreviousPhotoViewerImage() {
-  if (state.photoViewerIndex <= 0) return;
-  state.photoViewerIndex -= 1;
-  updatePhotoViewerContent();
+  navigatePhotoViewerTo(state.photoViewerIndex - 1, -1);
 }
 
 function showNextPhotoViewerImage() {
-  if (state.photoViewerIndex >= state.photoViewerPhotos.length - 1) return;
-  state.photoViewerIndex += 1;
-  updatePhotoViewerContent();
+  navigatePhotoViewerTo(state.photoViewerIndex + 1, 1);
 }
 
 els.photoReportGrid?.addEventListener("click", (event) => {
@@ -5222,15 +5343,25 @@ $$('[data-close-photo-viewer]').forEach((button) => {
 
 els.photoViewerImage?.addEventListener("load", () => {
   els.photoViewerStage?.classList.remove("is-loading");
+
+  const direction = photoViewerPendingSlideDirection;
+  photoViewerPendingSlideDirection = 0;
+
+  if (direction) {
+    window.requestAnimationFrame(() => runPhotoViewerIncomingAnimation(direction));
+  } else {
+    unlockPhotoViewerTransition();
+  }
 });
 
 els.photoViewerImage?.addEventListener("error", () => {
   els.photoViewerStage?.classList.remove("is-loading");
+  resetPhotoViewerTransition();
   toast("Không tải được ảnh này. Bạn có thể bấm “Mở ảnh gốc” để thử lại.", "error");
 });
 
 els.photoViewerStage?.addEventListener("touchstart", (event) => {
-  if (event.touches.length !== 1) {
+  if (event.touches.length !== 1 || photoViewerTransitionLocked) {
     photoViewerTouchStart = null;
     return;
   }
@@ -5264,6 +5395,10 @@ els.photoViewerStage?.addEventListener("touchend", (event) => {
   }
 }, { passive: true });
 
+els.photoViewerStage?.addEventListener("touchcancel", () => {
+  photoViewerTouchStart = null;
+}, { passive: true });
+
 document.addEventListener("keydown", (event) => {
   if (!isPhotoViewerOpen()) return;
 
@@ -5287,15 +5422,13 @@ document.addEventListener("keydown", (event) => {
 
   if (event.key === "Home") {
     event.preventDefault();
-    state.photoViewerIndex = 0;
-    updatePhotoViewerContent();
+    navigatePhotoViewerTo(0, -1);
     return;
   }
 
   if (event.key === "End") {
     event.preventDefault();
-    state.photoViewerIndex = Math.max(0, state.photoViewerPhotos.length - 1);
-    updatePhotoViewerContent();
+    navigatePhotoViewerTo(Math.max(0, state.photoViewerPhotos.length - 1), 1);
   }
 });
 
