@@ -5851,6 +5851,68 @@
       }
     }
 
+
+
+    /* Fix bố cục Ngày giao việc / Người được giao trên iOS, iPad và Android.
+       Các control native (đặc biệt input[type=date] trên Safari) có min-content width lớn,
+       nên phải cho grid item và control được co thật sự trong cột. */
+    #taskModal .task-row-schedule-grid > .task-row-field {
+      min-width: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      overflow: hidden;
+    }
+
+    #taskModal .task-row-schedule-grid .task-field-label {
+      display: flex !important;
+      flex-wrap: wrap !important;
+      align-items: baseline !important;
+      gap: 2px 4px !important;
+      min-width: 0 !important;
+      overflow-wrap: anywhere;
+    }
+
+    #taskModal .task-row-schedule-grid input,
+    #taskModal .task-row-schedule-grid select {
+      display: block !important;
+      min-width: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis;
+    }
+
+    /* Tablet dọc: vẫn giữ hai cột nhưng cấp thêm chỗ cho ô nhân viên. */
+    @media (min-width: 641px) and (max-width: 1024px) {
+      #taskModal .task-row-schedule-grid {
+        grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr) !important;
+        gap: 10px !important;
+      }
+
+      #taskModal .task-row-schedule-grid .task-field-label {
+        min-height: 34px;
+      }
+    }
+
+    /* Điện thoại dọc: xếp thành một cột để input ngày native của iOS/Android
+       không thể tràn và chồng lên select nhân viên. */
+    @media (max-width: 640px) {
+      #taskModal .task-row-schedule-grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 8px !important;
+      }
+
+      #taskModal .task-row-schedule-grid .task-field-label {
+        min-height: 0 !important;
+      }
+
+      #taskModal .task-row-schedule-grid .optional-label {
+        display: inline !important;
+        flex-basis: auto !important;
+      }
+    }
+
 </style>
 </head>
 <body>
