@@ -6311,6 +6311,20 @@ function renderTaskCard(task, mode) {
   const mobileDetailsId = `task-mobile-details-${String(task.id || "task").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
   const initialCountdownText = getInitialCountdownText(task);
+  const mobilePhotoCount = getTaskPhotoCount(task);
+  const canViewMobilePhotos = mobilePhotoCount > 0 && (mode === "admin" || mode === "employee");
+  const mobilePhotoQuickAction = canViewMobilePhotos
+    ? `
+      <button
+        class="task-mobile-photo-action"
+        data-action="view-task-photos"
+        data-task-id="${escapeHtml(task.id)}"
+        type="button"
+      >
+        Xem hình (${mobilePhotoCount})
+      </button>
+    `
+    : "";
 
   const taskActions = renderTaskActions(task, {
     canEmployeeSubmit,
@@ -6344,6 +6358,7 @@ function renderTaskCard(task, mode) {
           <span>Hạn lúc</span>
           <strong>${formatDateTime(task.deadlineAt)}</strong>
         </div>
+        ${mobilePhotoQuickAction}
       </div>
 
       ${renderDesktopTaskSummary(task, mode, employeeName, initialCountdownText)}

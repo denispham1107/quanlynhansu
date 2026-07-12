@@ -2762,6 +2762,36 @@
         color: #1d4ed8;
       }
 
+      .task-mobile-photo-action {
+        grid-column: 1 / -1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 38px;
+        margin: 1px 0 0;
+        padding: 8px 12px;
+        border: 1px solid #bfdbfe;
+        border-radius: 12px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 900;
+        line-height: 1.2;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .task-mobile-photo-action:active {
+        transform: translateY(1px);
+      }
+
+      .task-mobile-photo-action:focus-visible {
+        outline: 3px solid rgba(37, 99, 235, 0.22);
+        outline-offset: 2px;
+      }
+
       .task-card.is-overdue .task-mobile-summary-item.is-countdown strong,
       .task-card.is-near-due .task-mobile-summary-item.is-countdown strong {
         color: #b45309;
