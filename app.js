@@ -92,6 +92,9 @@ const state = {
   adminEmployeeFilter: "all",
   adminWorkOrderSearch: "",
   adminWorkOrderSuggestionIndex: -1,
+  adminEmployeeStatusGroups: { free: [], assigned: [], hotel: [], lunch: [] },
+  mobileEmployeeStatusExpanded: true,
+  adminMobileFilterSheetOpen: false,
   adminHotelReportHygiene: "pending",
   adminHotelEndPetCount: "",
   adminHotelReportDrafts: {},
@@ -257,6 +260,16 @@ const els = {
   taskRowsContainer: $("#taskRowsContainer"),
   saveDraftBtn: $("#saveDraftBtn"),
   deleteAllWorkOrdersBtn: $("#deleteAllWorkOrdersBtn"),
+  mobileTaskPanelMenuBtn: $("#mobileTaskPanelMenuBtn"),
+  mobileTaskPanelMenu: $("#mobileTaskPanelMenu"),
+  adminMobileEmployeeStatusToggle: $("#adminMobileEmployeeStatusToggle"),
+  adminMobileEmployeeStatusOverview: $("#adminMobileEmployeeStatusOverview"),
+  adminMobileEmployeeStatusChevron: $("#adminMobileEmployeeStatusChevron"),
+  adminEmployeeStatusDetailBackdrop: $("#adminEmployeeStatusDetailBackdrop"),
+  adminEmployeeStatusDetailSheet: $("#adminEmployeeStatusDetailSheet"),
+  adminEmployeeStatusDetailTitle: $("#adminEmployeeStatusDetailTitle"),
+  adminEmployeeStatusDetailList: $("#adminEmployeeStatusDetailList"),
+  adminEmployeeStatusDetailCloseBtn: $("#adminEmployeeStatusDetailCloseBtn"),
   adminEmployeeFilter: $("#adminEmployeeFilter"),
   adminStatusFilter: $("#adminStatusFilter"),
   adminCompletedTypeFilter: $("#adminCompletedTypeFilter"),
@@ -271,6 +284,15 @@ const els = {
   adminClearWorkOrderSearch: $("#adminClearWorkOrderSearch"),
   adminWorkOrderSuggestions: $("#adminWorkOrderSuggestions"),
   adminWorkOrderSearchSummary: $("#adminWorkOrderSearchSummary"),
+  adminMobileFilterBackdrop: $("#adminMobileFilterBackdrop"),
+  adminMobileFilterSheet: $("#adminMobileFilterSheet"),
+  adminMobileFilterOpenBtn: $("#adminMobileFilterOpenBtn"),
+  adminMobileFilterCount: $("#adminMobileFilterCount"),
+  adminMobileFilterCloseBtn: $("#adminMobileFilterCloseBtn"),
+  adminMobileFilterResetBtn: $("#adminMobileFilterResetBtn"),
+  adminMobileFilterApplyBtn: $("#adminMobileFilterApplyBtn"),
+  adminActiveFilterChips: $("#adminActiveFilterChips"),
+  adminMobileResultSummary: $("#adminMobileResultSummary"),
   adminEmployeeStatusSummary: $("#adminEmployeeStatusSummary"),
   adminTaskList: $("#adminTaskList"),
   desktopCompactViewBtn: $("#desktopCompactViewBtn"),
@@ -1467,6 +1489,15 @@ function refreshDateFilterVisibility(scope) {
   toEl?.classList.toggle("hidden", filter.mode !== "range");
   clearEl?.classList.toggle("hidden", filter.mode === "all");
 
+  if (scope === "admin") {
+    // Trên mobile chỉ hiện ô ngày khi Admin thực sự chọn “Chọn 1 ngày”.
+    // Ngày tự động của Hôm nay/Hôm qua vẫn được giữ trong state để lọc chính xác.
+    singleEl?.classList.toggle("mobile-auto-date-control", filter.mode !== "single");
+    document.querySelector(".mobile-single-date-label")?.classList.toggle("hidden", filter.mode !== "single");
+    document.querySelector(".mobile-date-from-label")?.classList.toggle("hidden", filter.mode !== "range");
+    document.querySelector(".mobile-date-to-label")?.classList.toggle("hidden", filter.mode !== "range");
+  }
+
   if (summaryEl) summaryEl.textContent = getDateFilterSummary(filter);
 }
 
@@ -1754,6 +1785,7 @@ function applyManagementPermissionUI() {
   els.exportDataBtn?.classList.toggle("hidden", !canExport);
   els.importDataBtn?.classList.toggle("hidden", !canImport);
   els.deleteAllWorkOrdersBtn?.classList.toggle("hidden", !hasPermission("deleteAllWorkOrders"));
+  updateMobileTaskPanelMenuAvailability();
   els.openWorkTemplateModalBtn?.classList.toggle("hidden", !hasPermission("manageWorkTemplates"));
 
   const backupActions = els.exportDataBtn?.closest(".backup-actions");
@@ -4454,7 +4486,336 @@ async function deleteAllWorkOrders(button) {
   }
 }
 
-els.deleteAllWorkOrdersBtn?.addEventListener("click", () => deleteAllWorkOrders(els.deleteAllWorkOrdersBtn));
+
+function isMobileManagementViewport() {
+  return window.matchMedia?.("(max-width: 768px)")?.matches === true;
+}
+
+function syncMobileSheetBodyLock() {
+  const hasOpenSheet = Boolean(
+    state.adminMobileFilterSheetOpen
+    || els.adminEmployeeStatusDetailSheet?.classList.contains("is-open")
+  );
+  document.body.classList.toggle("mobile-sheet-open", hasOpenSheet && isMobileManagementViewport());
+}
+
+function setMobileTaskPanelMenuOpen(open) {
+  const canShow = !els.deleteAllWorkOrdersBtn?.classList.contains("hidden");
+  const shouldOpen = Boolean(open && canShow && isMobileManagementViewport());
+
+  els.mobileTaskPanelMenu?.classList.toggle("is-open", shouldOpen);
+  els.mobileTaskPanelMenu?.setAttribute("aria-hidden", String(!shouldOpen));
+  els.mobileTaskPanelMenuBtn?.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function updateMobileTaskPanelMenuAvailability() {
+  if (!els.mobileTaskPanelMenuBtn) return;
+  const canShow = !els.deleteAllWorkOrdersBtn?.classList.contains("hidden");
+  els.mobileTaskPanelMenuBtn.classList.toggle("hidden", !canShow);
+  if (!canShow) setMobileTaskPanelMenuOpen(false);
+}
+
+function setAdminMobileFilterSheetOpen(open) {
+  const shouldOpen = Boolean(open && isMobileManagementViewport());
+  state.adminMobileFilterSheetOpen = shouldOpen;
+
+  els.adminMobileFilterSheet?.classList.toggle("is-open", shouldOpen);
+  if (els.adminMobileFilterSheet) {
+    if (isMobileManagementViewport()) {
+      els.adminMobileFilterSheet.setAttribute("role", "dialog");
+      els.adminMobileFilterSheet.setAttribute("aria-modal", "true");
+      els.adminMobileFilterSheet.setAttribute("aria-hidden", String(!shouldOpen));
+    } else {
+      els.adminMobileFilterSheet.setAttribute("role", "group");
+      els.adminMobileFilterSheet.removeAttribute("aria-modal");
+      els.adminMobileFilterSheet.removeAttribute("aria-hidden");
+    }
+  }
+  els.adminMobileFilterOpenBtn?.setAttribute("aria-expanded", String(shouldOpen));
+
+  if (els.adminMobileFilterBackdrop) {
+    els.adminMobileFilterBackdrop.classList.toggle("hidden", !shouldOpen);
+    requestAnimationFrame(() => {
+      els.adminMobileFilterBackdrop?.classList.toggle("is-open", shouldOpen);
+    });
+  }
+
+  syncMobileSheetBodyLock();
+
+  if (shouldOpen) {
+    requestAnimationFrame(() => els.adminStatusFilter?.focus?.({ preventScroll: true }));
+  }
+}
+
+function getSelectOptionText(selectEl, fallback = "") {
+  return selectEl?.selectedOptions?.[0]?.textContent?.trim() || fallback;
+}
+
+function getAdminActiveMobileFilterDescriptors() {
+  const filters = [];
+
+  if (state.adminStatusFilter !== "all") {
+    filters.push({
+      key: "status",
+      label: getSelectOptionText(els.adminStatusFilter, "Trạng thái")
+    });
+  }
+
+  if (state.adminStatusFilter === "completed" && state.adminCompletedTypeFilter !== "all") {
+    filters.push({
+      key: "completedType",
+      label: getSelectOptionText(els.adminCompletedTypeFilter, "Nhóm hoàn thành")
+    });
+  }
+
+  if (state.adminEmployeeFilter !== "all") {
+    filters.push({
+      key: "employee",
+      label: getSelectOptionText(els.adminEmployeeFilter, "Nhân viên")
+    });
+  }
+
+  const dateFilter = state.adminDateFilter || { mode: "all" };
+  if (dateFilter.mode !== "all") {
+    let label = getSelectOptionText(els.adminDateMode, "Thời gian");
+
+    if (dateFilter.mode === "single" && dateFilter.single) {
+      label = formatDateOnly(dateFilter.single);
+    } else if (dateFilter.mode === "range") {
+      if (dateFilter.from && dateFilter.to) {
+        label = `${formatDateOnly(dateFilter.from)} – ${formatDateOnly(dateFilter.to)}`;
+      } else if (dateFilter.from) {
+        label = `Từ ${formatDateOnly(dateFilter.from)}`;
+      } else if (dateFilter.to) {
+        label = `Đến ${formatDateOnly(dateFilter.to)}`;
+      }
+    }
+
+    filters.push({ key: "date", label });
+  }
+
+  return filters;
+}
+
+function updateAdminMobileFilterUI() {
+  const filters = getAdminActiveMobileFilterDescriptors();
+
+  if (els.adminMobileFilterCount) {
+    els.adminMobileFilterCount.textContent = String(filters.length);
+    els.adminMobileFilterCount.classList.toggle("hidden", filters.length === 0);
+  }
+
+  if (els.adminActiveFilterChips) {
+    els.adminActiveFilterChips.innerHTML = filters
+      .map((filter) => `
+        <span class="mobile-active-filter-chip">
+          <span title="${escapeHtml(filter.label)}">${escapeHtml(filter.label)}</span>
+          <button type="button" data-clear-mobile-filter="${escapeHtml(filter.key)}" aria-label="Bỏ lọc ${escapeHtml(filter.label)}">×</button>
+        </span>
+      `)
+      .join("");
+  }
+}
+
+function getAdminMobileResultScopeLabel() {
+  const filter = state.adminDateFilter || { mode: "all" };
+
+  if (filter.mode === "today") return formatDateOnly(todayInputValue());
+  if (filter.mode === "yesterday") return formatDateOnly(yesterdayInputValue());
+  if (filter.mode === "current_month") return "Tháng này";
+  if (filter.mode === "previous_month") return "Tháng trước";
+  if (filter.mode === "single") return filter.single ? formatDateOnly(filter.single) : "Ngày cụ thể";
+  if (filter.mode === "range") {
+    if (filter.from && filter.to) return `${formatDateOnly(filter.from)} – ${formatDateOnly(filter.to)}`;
+    if (filter.from) return `Từ ${formatDateOnly(filter.from)}`;
+    if (filter.to) return `Đến ${formatDateOnly(filter.to)}`;
+    return "Khoảng ngày";
+  }
+
+  return "Toàn thời gian";
+}
+
+function updateAdminMobileResultSummary(groupCount = 0) {
+  if (!els.adminMobileResultSummary) return;
+  const count = Math.max(0, Number(groupCount || 0));
+  const ticketLabel = count === 1 ? "Phiếu công việc" : "Phiếu công việc";
+  els.adminMobileResultSummary.textContent = `▣ ${getAdminMobileResultScopeLabel()} • ${count} ${ticketLabel}`;
+}
+
+function resetAdminMobileFilters() {
+  state.adminStatusFilter = "all";
+  state.adminCompletedTypeFilter = "all";
+  state.adminEmployeeFilter = "all";
+  state.adminDateFilter = {
+    mode: "today",
+    single: todayInputValue(),
+    from: "",
+    to: ""
+  };
+
+  if (els.adminStatusFilter) els.adminStatusFilter.value = "all";
+  if (els.adminCompletedTypeFilter) els.adminCompletedTypeFilter.value = "all";
+  if (els.adminEmployeeFilter) els.adminEmployeeFilter.value = "all";
+  if (els.adminDateMode) els.adminDateMode.value = "today";
+  if (els.adminSingleDate) els.adminSingleDate.value = todayInputValue();
+  if (els.adminDateFrom) els.adminDateFrom.value = "";
+  if (els.adminDateTo) els.adminDateTo.value = "";
+
+  updateCompletedTypeFilterVisibility("admin");
+  refreshDateFilterVisibility("admin");
+  renderAdminTasks();
+  renderAdminWorkOrderSuggestions();
+}
+
+function clearAdminMobileFilter(key) {
+  if (key === "status") {
+    state.adminStatusFilter = "all";
+    state.adminCompletedTypeFilter = "all";
+    if (els.adminStatusFilter) els.adminStatusFilter.value = "all";
+    if (els.adminCompletedTypeFilter) els.adminCompletedTypeFilter.value = "all";
+  } else if (key === "completedType") {
+    state.adminCompletedTypeFilter = "all";
+    if (els.adminCompletedTypeFilter) els.adminCompletedTypeFilter.value = "all";
+  } else if (key === "employee") {
+    state.adminEmployeeFilter = "all";
+    if (els.adminEmployeeFilter) els.adminEmployeeFilter.value = "all";
+  } else if (key === "date") {
+    state.adminDateFilter = { mode: "all", single: "", from: "", to: "" };
+    if (els.adminDateMode) els.adminDateMode.value = "all";
+    if (els.adminSingleDate) els.adminSingleDate.value = "";
+    if (els.adminDateFrom) els.adminDateFrom.value = "";
+    if (els.adminDateTo) els.adminDateTo.value = "";
+  }
+
+  updateCompletedTypeFilterVisibility("admin");
+  refreshDateFilterVisibility("admin");
+  renderAdminTasks();
+  renderAdminWorkOrderSuggestions();
+}
+
+function getEmployeeInitials(employee) {
+  const name = getEmployeeSummaryName(employee).trim();
+  if (!name) return "NV";
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(-2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "NV";
+}
+
+function setEmployeeStatusDetailSheetOpen(open, type = "free") {
+  const shouldOpen = Boolean(open && isMobileManagementViewport());
+
+  if (shouldOpen) {
+    const config = getEmployeeStatusGroupConfig(type);
+    const employees = state.adminEmployeeStatusGroups?.[type] || [];
+
+    if (els.adminEmployeeStatusDetailTitle) {
+      els.adminEmployeeStatusDetailTitle.textContent = `${config.detailTitle} (${employees.length})`;
+    }
+
+    if (els.adminEmployeeStatusDetailList) {
+      els.adminEmployeeStatusDetailList.innerHTML = employees.length
+        ? employees.map((employee) => `
+            <div class="mobile-status-detail-person">
+              <span class="mobile-status-detail-avatar">${escapeHtml(getEmployeeInitials(employee))}</span>
+              <span title="${escapeHtml(getEmployeeSummaryName(employee))}">${escapeHtml(getEmployeeSummaryName(employee))}</span>
+            </div>
+          `).join("")
+        : '<div class="mobile-status-detail-empty">Không có nhân viên trong nhóm này.</div>';
+    }
+  }
+
+  els.adminEmployeeStatusDetailSheet?.classList.toggle("is-open", shouldOpen);
+  els.adminEmployeeStatusDetailSheet?.setAttribute("aria-hidden", String(!shouldOpen));
+
+  if (els.adminEmployeeStatusDetailBackdrop) {
+    els.adminEmployeeStatusDetailBackdrop.classList.toggle("hidden", !shouldOpen);
+    requestAnimationFrame(() => {
+      els.adminEmployeeStatusDetailBackdrop?.classList.toggle("is-open", shouldOpen);
+    });
+  }
+
+  syncMobileSheetBodyLock();
+}
+
+function setupMobileAdminCompactControls() {
+  try {
+    state.mobileEmployeeStatusExpanded = localStorage.getItem("quanlynhansu-mobile-employee-status") !== "collapsed";
+  } catch (_) {
+    state.mobileEmployeeStatusExpanded = true;
+  }
+  applyMobileEmployeeStatusExpanded();
+
+  els.adminMobileEmployeeStatusToggle?.addEventListener("click", () => {
+    state.mobileEmployeeStatusExpanded = !state.mobileEmployeeStatusExpanded;
+    try {
+      localStorage.setItem(
+        "quanlynhansu-mobile-employee-status",
+        state.mobileEmployeeStatusExpanded ? "expanded" : "collapsed"
+      );
+    } catch (_) {
+      // LocalStorage có thể bị chặn ở chế độ riêng tư; giao diện vẫn hoạt động trong phiên hiện tại.
+    }
+    applyMobileEmployeeStatusExpanded();
+  });
+
+  els.adminEmployeeStatusSummary?.addEventListener("click", (event) => {
+    if (!isMobileManagementViewport()) return;
+    const card = event.target.closest("[data-employee-status-type]");
+    if (!card) return;
+    setEmployeeStatusDetailSheetOpen(true, card.dataset.employeeStatusType || "free");
+  });
+
+  els.mobileTaskPanelMenuBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMobileTaskPanelMenuOpen(!els.mobileTaskPanelMenu?.classList.contains("is-open"));
+  });
+
+  els.mobileTaskPanelMenu?.addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", () => setMobileTaskPanelMenuOpen(false));
+
+  els.adminMobileFilterOpenBtn?.addEventListener("click", () => setAdminMobileFilterSheetOpen(true));
+  els.adminMobileFilterCloseBtn?.addEventListener("click", () => setAdminMobileFilterSheetOpen(false));
+  els.adminMobileFilterBackdrop?.addEventListener("click", () => setAdminMobileFilterSheetOpen(false));
+  els.adminMobileFilterApplyBtn?.addEventListener("click", () => setAdminMobileFilterSheetOpen(false));
+  els.adminMobileFilterResetBtn?.addEventListener("click", resetAdminMobileFilters);
+
+  els.adminActiveFilterChips?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-clear-mobile-filter]");
+    if (!button) return;
+    clearAdminMobileFilter(button.dataset.clearMobileFilter || "");
+  });
+
+  els.adminEmployeeStatusDetailCloseBtn?.addEventListener("click", () => setEmployeeStatusDetailSheetOpen(false));
+  els.adminEmployeeStatusDetailBackdrop?.addEventListener("click", () => setEmployeeStatusDetailSheetOpen(false));
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    setMobileTaskPanelMenuOpen(false);
+    setAdminMobileFilterSheetOpen(false);
+    setEmployeeStatusDetailSheetOpen(false);
+  });
+
+  window.addEventListener("resize", () => {
+    if (!isMobileManagementViewport()) {
+      setMobileTaskPanelMenuOpen(false);
+      setAdminMobileFilterSheetOpen(false);
+      setEmployeeStatusDetailSheetOpen(false);
+    }
+  });
+
+  updateMobileTaskPanelMenuAvailability();
+  updateAdminMobileFilterUI();
+}
+
+setupMobileAdminCompactControls();
+
+els.deleteAllWorkOrdersBtn?.addEventListener("click", () => {
+  setMobileTaskPanelMenuOpen(false);
+  deleteAllWorkOrders(els.deleteAllWorkOrdersBtn);
+});
 
 els.adminStatusFilter.addEventListener("change", (event) => {
   state.adminStatusFilter = event.target.value;
@@ -5062,6 +5423,10 @@ function updateCompletedTypeFilterVisibility(scope = "admin") {
   const show = statusFilter === "completed";
   completedTypeFilterEl.classList.toggle("hidden", !show);
 
+  if (scope === "admin") {
+    document.querySelector(".mobile-completed-filter-label")?.classList.toggle("hidden", !show);
+  }
+
   if (show) {
     completedTypeFilterEl.value = state[`${scope}CompletedTypeFilter`];
   } else {
@@ -5128,9 +5493,85 @@ function renderEmployeeStatusNameChips(employees) {
     return '<span class="employee-status-empty">Không có</span>';
   }
 
-  return employees
+  const chips = employees
     .map((employee) => `<span class="employee-status-chip">${escapeHtml(getEmployeeSummaryName(employee))}</span>`)
     .join("");
+  const overflowCount = Math.max(0, employees.length - 3);
+  const moreChip = overflowCount
+    ? `<span class="employee-status-more" aria-hidden="true">+${overflowCount}</span>`
+    : "";
+
+  return `${chips}${moreChip}`;
+}
+
+function getEmployeeStatusGroupConfig(type) {
+  const configs = {
+    free: {
+      cardClass: "is-free",
+      icon: "♙",
+      longLabel: "Tổng số bạn nhân viên đang chưa được giao việc:",
+      shortLabel: "Chưa có việc",
+      detailTitle: "Nhân viên chưa được giao việc"
+    },
+    assigned: {
+      cardClass: "is-assigned",
+      icon: "♟",
+      longLabel: "Tổng số bạn nhân viên đã được giao việc:",
+      shortLabel: "Đã có việc",
+      detailTitle: "Nhân viên đã được giao việc"
+    },
+    hotel: {
+      cardClass: "is-hotel",
+      icon: "▤",
+      longLabel: "Tổng số bạn nhân viên đang làm hotel:",
+      shortLabel: "Hotel",
+      detailTitle: "Nhân viên đang làm Hotel"
+    },
+    lunch: {
+      cardClass: "is-lunch",
+      icon: "☕",
+      longLabel: "Tổng số bạn nhân viên đang nghỉ trưa:",
+      shortLabel: "Nghỉ trưa",
+      detailTitle: "Nhân viên đang nghỉ trưa"
+    }
+  };
+
+  return configs[type] || configs.free;
+}
+
+function renderEmployeeStatusCard(type, employees) {
+  const config = getEmployeeStatusGroupConfig(type);
+  const count = employees.length;
+
+  return `
+    <button class="employee-status-card ${config.cardClass}" type="button" data-employee-status-type="${escapeHtml(type)}" aria-label="${escapeHtml(config.detailTitle)}: ${count}">
+      <span class="employee-status-card-icon" aria-hidden="true">${config.icon}</span>
+      <strong>
+        <span class="employee-status-long-label">${escapeHtml(config.longLabel)}</span>
+        <span class="employee-status-short-label">${escapeHtml(config.shortLabel)}</span>
+        <span class="employee-status-count">${count}</span>
+      </strong>
+      <div class="employee-status-names">${renderEmployeeStatusNameChips(employees)}</div>
+    </button>
+  `;
+}
+
+function updateMobileEmployeeStatusOverview() {
+  if (!els.adminMobileEmployeeStatusOverview) return;
+
+  const groups = state.adminEmployeeStatusGroups || {};
+  const freeCount = groups.free?.length || 0;
+  const assignedCount = groups.assigned?.length || 0;
+  const hotelCount = groups.hotel?.length || 0;
+  const lunchCount = groups.lunch?.length || 0;
+
+  els.adminMobileEmployeeStatusOverview.textContent = `Chưa ${freeCount} • Đã ${assignedCount} • Hotel ${hotelCount} • Nghỉ ${lunchCount}`;
+}
+
+function applyMobileEmployeeStatusExpanded() {
+  const expanded = state.mobileEmployeeStatusExpanded !== false;
+  els.adminMobileEmployeeStatusToggle?.setAttribute("aria-expanded", String(expanded));
+  els.adminEmployeeStatusSummary?.classList.toggle("is-mobile-collapsed", !expanded);
 }
 
 function renderAdminEmployeeStatusSummary(computedTasks = []) {
@@ -5138,30 +5579,6 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   if (!summaryEl) return;
 
   const employees = [...state.employees].sort((a, b) => getEmployeeSummaryName(a).localeCompare(getEmployeeSummaryName(b), "vi"));
-
-  if (!employees.length) {
-    summaryEl.classList.remove("hidden");
-    summaryEl.innerHTML = `
-      <div class="employee-status-card is-free">
-        <strong>Tổng số bạn nhân viên đang chưa được giao việc: 0</strong>
-        <div class="employee-status-names"><span class="employee-status-empty">Chưa có nhân viên</span></div>
-      </div>
-      <div class="employee-status-card is-assigned">
-        <strong>Tổng số bạn nhân viên đã được giao việc: 0</strong>
-        <div class="employee-status-names"><span class="employee-status-empty">Không có</span></div>
-      </div>
-      <div class="employee-status-card is-hotel">
-        <strong>Tổng số bạn nhân viên đang làm hotel: 0</strong>
-        <div class="employee-status-names"><span class="employee-status-empty">Không có</span></div>
-      </div>
-      <div class="employee-status-card is-lunch">
-        <strong>Tổng số bạn nhân viên đang nghỉ trưa: 0</strong>
-        <div class="employee-status-names"><span class="employee-status-empty">Không có</span></div>
-      </div>
-    `;
-    return;
-  }
-
   const busyEmployeeUids = new Set();
   const hotelEmployeeUids = new Set();
   const lunchEmployeeUids = new Set();
@@ -5189,25 +5606,23 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   const hotelEmployees = employees.filter((employee) => hotelEmployeeUids.has(employee.uid));
   const lunchEmployees = employees.filter((employee) => lunchEmployeeUids.has(employee.uid));
 
+  state.adminEmployeeStatusGroups = {
+    free: freeEmployees,
+    assigned: assignedEmployees,
+    hotel: hotelEmployees,
+    lunch: lunchEmployees
+  };
+
   summaryEl.classList.remove("hidden");
-  summaryEl.innerHTML = `
-    <div class="employee-status-card is-free">
-      <strong>Tổng số bạn nhân viên đang chưa được giao việc: ${freeEmployees.length}</strong>
-      <div class="employee-status-names">${renderEmployeeStatusNameChips(freeEmployees)}</div>
-    </div>
-    <div class="employee-status-card is-assigned">
-      <strong>Tổng số bạn nhân viên đã được giao việc: ${assignedEmployees.length}</strong>
-      <div class="employee-status-names">${renderEmployeeStatusNameChips(assignedEmployees)}</div>
-    </div>
-    <div class="employee-status-card is-hotel">
-      <strong>Tổng số bạn nhân viên đang làm hotel: ${hotelEmployees.length}</strong>
-      <div class="employee-status-names">${renderEmployeeStatusNameChips(hotelEmployees)}</div>
-    </div>
-    <div class="employee-status-card is-lunch">
-      <strong>Tổng số bạn nhân viên đang nghỉ trưa: ${lunchEmployees.length}</strong>
-      <div class="employee-status-names">${renderEmployeeStatusNameChips(lunchEmployees)}</div>
-    </div>
-  `;
+  summaryEl.innerHTML = [
+    renderEmployeeStatusCard("free", freeEmployees),
+    renderEmployeeStatusCard("assigned", assignedEmployees),
+    renderEmployeeStatusCard("hotel", hotelEmployees),
+    renderEmployeeStatusCard("lunch", lunchEmployees)
+  ].join("");
+
+  updateMobileEmployeeStatusOverview();
+  applyMobileEmployeeStatusExpanded();
 }
 
 function getAdminWorkOrderSearchDateScopeLabel() {
@@ -5329,6 +5744,7 @@ function renderAdminTasks() {
   }));
 
   renderAdminEmployeeStatusSummary(computed);
+  updateAdminMobileFilterUI();
 
   const baseFiltered = getAdminBaseFilteredTasks(computed);
 
@@ -5374,11 +5790,13 @@ function renderAdminTasks() {
     els.adminCompletedTypeReport?.classList.add("hidden");
 
     if (!searchedGroups.length) {
+      updateAdminMobileResultSummary(0);
       els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc có tên gần giống “${escapeHtml(searchQuery)}” theo ${escapeHtml(getAdminWorkOrderSearchScopeLabel())}.`;
       els.adminTaskList.classList.add("empty");
       return;
     }
 
+    updateAdminMobileResultSummary(searchedGroups.length);
     els.adminTaskList.classList.remove("empty");
     els.adminTaskList.innerHTML = searchedGroups
       .map((group) => renderTicketGroup(group))
@@ -5401,11 +5819,13 @@ function renderAdminTasks() {
   const groups = withEmptyDraftGroups(groupTasksByWorkOrder(filtered), showEmptyDrafts);
 
   if (!groups.length) {
+    updateAdminMobileResultSummary(0);
     els.adminTaskList.innerHTML = "Không có công việc phù hợp bộ lọc.";
     els.adminTaskList.classList.add("empty");
     return;
   }
 
+  updateAdminMobileResultSummary(groups.length);
   els.adminTaskList.classList.remove("empty");
 
   els.adminTaskList.innerHTML = groups

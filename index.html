@@ -4025,6 +4025,722 @@
         justify-content: flex-end;
       }
     }
+
+
+    /* =========================================================
+       Mobile compact cấp 2 cho khu vực Tất cả công việc
+       - Trạng thái nhân viên dạng lưới 2x2, có thể thu gọn
+       - Tìm kiếm + nút Bộ lọc trên cùng một hàng
+       - Bộ lọc mở dạng bottom sheet
+       - Các bộ lọc đang dùng hiển thị bằng chip nhỏ
+       ========================================================= */
+    .mobile-employee-status-toggle,
+    .mobile-task-panel-menu-btn,
+    .mobile-filter-backdrop,
+    .mobile-filter-sheet-handle,
+    .mobile-filter-sheet-header,
+    .mobile-filter-field-label,
+    .mobile-filter-sheet-note,
+    .mobile-filter-sheet-actions,
+    .mobile-filter-open-btn,
+    .mobile-active-filter-chips,
+    .mobile-result-summary,
+    .mobile-task-list-heading,
+    .mobile-status-detail-backdrop,
+    .mobile-status-detail-sheet,
+    .employee-status-short-label,
+    .employee-status-card-icon,
+    .employee-status-more {
+      display: none;
+    }
+
+    .mobile-task-panel-menu {
+      display: block;
+    }
+
+    .employee-status-card {
+      appearance: none;
+      width: 100%;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: default;
+    }
+
+    .employee-status-long-label {
+      display: inline;
+    }
+
+    .employee-status-count {
+      display: inline;
+      margin-left: 4px;
+    }
+
+    @media (max-width: 768px) {
+      body.mobile-sheet-open {
+        overflow: hidden !important;
+        overscroll-behavior: none;
+      }
+
+      #adminView .task-panel {
+        padding: 14px 12px 18px !important;
+        border-radius: 22px !important;
+      }
+
+      #adminView .task-filter-row {
+        position: relative;
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        align-items: start !important;
+        gap: 10px !important;
+      }
+
+      #adminView .task-panel-title-block {
+        min-width: 0;
+      }
+
+      #adminView .task-filter-row h3 {
+        margin: 0 !important;
+        font-size: clamp(25px, 7vw, 31px) !important;
+        line-height: 1.08 !important;
+      }
+
+      #adminView .task-filter-row p.muted {
+        margin: 5px 0 0 !important;
+        font-size: 13px !important;
+        line-height: 1.35 !important;
+      }
+
+      #adminView .task-panel-header-actions {
+        position: relative;
+        display: block !important;
+        min-width: 44px;
+      }
+
+      #adminView .desktop-task-view-switch {
+        display: none !important;
+      }
+
+      .mobile-task-panel-menu-btn.hidden {
+        display: none !important;
+      }
+
+      .mobile-task-panel-menu-btn {
+        display: inline-grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 1px solid #dbe7f7;
+        border-radius: 14px;
+        background: #ffffff;
+        color: #0f172a;
+        font: inherit;
+        font-size: 26px;
+        font-weight: 900;
+        line-height: 1;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+        cursor: pointer;
+      }
+
+      .mobile-task-panel-menu {
+        position: absolute;
+        top: calc(100% + 7px);
+        right: 0;
+        z-index: 80;
+        display: none;
+        min-width: 230px;
+        padding: 8px;
+        border: 1px solid #fecaca;
+        border-radius: 15px;
+        background: #ffffff;
+        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+      }
+
+      .mobile-task-panel-menu.is-open {
+        display: block;
+      }
+
+      .mobile-task-panel-menu .btn {
+        width: 100% !important;
+        min-height: 44px !important;
+        justify-content: flex-start !important;
+        border-radius: 11px !important;
+        font-size: 13px !important;
+      }
+
+      .mobile-employee-status-toggle {
+        display: grid;
+        grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        min-height: 42px;
+        margin: 13px 0 8px;
+        padding: 9px 11px;
+        border: 1px solid #dbe7f7;
+        border-radius: 14px;
+        background: #f8fbff;
+        color: #0f172a;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 900;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .mobile-employee-status-overview {
+        min-width: 0;
+        overflow: hidden;
+        color: #64748b;
+        font-size: 10.5px;
+        font-weight: 800;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mobile-employee-status-chevron {
+        color: #334155;
+        font-size: 16px;
+        transition: transform 0.18s ease;
+      }
+
+      .mobile-employee-status-toggle[aria-expanded="false"] .mobile-employee-status-chevron {
+        transform: rotate(180deg);
+      }
+
+      #adminView .employee-status-summary.hidden {
+        display: none !important;
+      }
+
+      #adminView .employee-status-summary {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+        margin: 0 0 12px !important;
+        overflow: hidden;
+        transition: max-height 0.22s ease, opacity 0.18s ease, margin 0.22s ease;
+      }
+
+      #adminView .employee-status-summary.is-mobile-collapsed {
+        max-height: 0 !important;
+        margin-bottom: 0 !important;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #adminView .employee-status-card {
+        position: relative;
+        display: grid !important;
+        grid-template-columns: 32px minmax(0, 1fr);
+        grid-template-rows: auto auto;
+        align-items: start;
+        gap: 2px 8px !important;
+        min-width: 0;
+        min-height: 88px;
+        padding: 10px !important;
+        border-radius: 15px !important;
+        box-shadow: none !important;
+        cursor: pointer;
+      }
+
+      #adminView .employee-status-card:active {
+        transform: scale(0.985);
+      }
+
+      .employee-status-card-icon {
+        display: grid;
+        grid-row: 1 / span 2;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.72);
+        font-size: 18px;
+      }
+
+      #adminView .employee-status-card strong {
+        display: flex !important;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 5px;
+        min-width: 0;
+        margin: 0 !important;
+        font-size: 12px !important;
+        line-height: 1.15 !important;
+      }
+
+      .employee-status-long-label {
+        display: none;
+      }
+
+      .employee-status-short-label {
+        display: inline;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .employee-status-count {
+        display: inline;
+        flex: 0 0 auto;
+        margin-left: 0;
+        color: #0f172a;
+        font-size: 23px;
+        font-weight: 950;
+        line-height: 1;
+      }
+
+      #adminView .employee-status-card .employee-status-names {
+        display: flex !important;
+        align-items: center;
+        flex-wrap: nowrap !important;
+        min-width: 0;
+        margin: 4px 0 0 !important;
+        gap: 4px !important;
+        overflow: hidden;
+      }
+
+      #adminView .employee-status-chip {
+        flex: 0 0 auto;
+        max-width: 68px;
+        padding: 3px 6px !important;
+        overflow: hidden;
+        font-size: 10px !important;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #adminView .employee-status-chip:nth-of-type(n + 4) {
+        display: none !important;
+      }
+
+      .employee-status-more {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        min-width: 27px;
+        height: 23px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.86);
+        color: #334155;
+        font-size: 10px;
+        font-weight: 950;
+      }
+
+      #adminView .employee-status-empty {
+        overflow: hidden;
+        font-size: 10px !important;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mobile-filter-toolbar {
+        position: sticky;
+        top: calc(64px + env(safe-area-inset-top, 0px));
+        z-index: 1000;
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        align-items: start !important;
+        gap: 8px !important;
+        margin: 0 -3px !important;
+        padding: 8px 3px !important;
+        background: rgba(255, 255, 255, 0.96);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+      }
+
+      .mobile-filter-toolbar .admin-work-order-search {
+        grid-column: 1;
+        width: 100% !important;
+        margin: 0 !important;
+      }
+
+      .mobile-filter-toolbar .admin-work-order-search-input {
+        min-height: 46px !important;
+        padding: 9px 42px 9px 40px !important;
+        border-radius: 14px !important;
+        font-size: 14px !important;
+      }
+
+      .mobile-filter-toolbar .admin-work-order-search-icon {
+        left: 14px !important;
+        font-size: 16px !important;
+      }
+
+      .mobile-filter-toolbar .admin-work-order-search-clear {
+        right: 7px !important;
+        width: 32px !important;
+        height: 32px !important;
+      }
+
+      .mobile-filter-open-btn {
+        display: inline-flex;
+        grid-column: 2;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-width: 104px;
+        min-height: 46px;
+        padding: 9px 11px;
+        border: 1px solid #93c5fd;
+        border-radius: 14px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 950;
+        cursor: pointer;
+      }
+
+      .mobile-filter-count {
+        display: inline-grid;
+        place-items: center;
+        min-width: 22px;
+        height: 22px;
+        padding: 0 5px;
+        border-radius: 999px;
+        background: #2563eb;
+        color: #ffffff;
+        font-size: 10px;
+        font-weight: 950;
+      }
+
+      .mobile-filter-count.hidden {
+        display: none !important;
+      }
+
+      .mobile-filter-backdrop,
+      .mobile-status-detail-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1190;
+        display: block;
+        background: rgba(15, 23, 42, 0.48);
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      .mobile-filter-backdrop.hidden,
+      .mobile-status-detail-backdrop.hidden {
+        display: none !important;
+      }
+
+      .mobile-filter-backdrop.is-open,
+      .mobile-status-detail-backdrop.is-open {
+        opacity: 1;
+      }
+
+      #adminView .mobile-filter-sheet,
+      .mobile-status-detail-sheet {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        z-index: 1200 !important;
+        display: flex !important;
+        flex-direction: column;
+        gap: 0 !important;
+        width: 100% !important;
+        max-height: 88vh;
+        max-height: min(88dvh, 760px);
+        margin: 0 !important;
+        padding: 10px 16px max(18px, env(safe-area-inset-bottom, 0px)) !important;
+        overflow: auto;
+        border: 0 !important;
+        border-radius: 24px 24px 0 0 !important;
+        background: #ffffff !important;
+        box-shadow: 0 -24px 60px rgba(15, 23, 42, 0.22) !important;
+        visibility: hidden;
+        transform: translateY(105%);
+        transition: transform 0.24s ease, visibility 0.24s step-end;
+      }
+
+      #adminView .mobile-filter-sheet.is-open,
+      .mobile-status-detail-sheet.is-open {
+        visibility: visible;
+        transform: translateY(0);
+        transition: transform 0.24s ease, visibility 0s;
+      }
+
+      .mobile-filter-sheet-handle {
+        display: block;
+        flex: 0 0 auto;
+        width: 44px;
+        height: 5px;
+        margin: 0 auto 12px;
+        border-radius: 999px;
+        background: #94a3b8;
+      }
+
+      .mobile-filter-sheet-header {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 13px;
+      }
+
+      .mobile-filter-sheet-header h4 {
+        margin: 0;
+        color: #0f172a;
+        font-size: 22px;
+        line-height: 1.15;
+      }
+
+      .mobile-filter-sheet-close {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 12px;
+        background: #f1f5f9;
+        color: #0f172a;
+        font: inherit;
+        font-size: 26px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .mobile-filter-field-label {
+        display: block;
+        margin: 9px 0 6px;
+        color: #0f172a;
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      #adminView .mobile-filter-sheet > select,
+      #adminView .mobile-filter-sheet > input,
+      #adminView .mobile-filter-sheet > .mobile-clear-date-control {
+        flex: 0 0 auto;
+        width: 100% !important;
+        min-height: 48px !important;
+        margin: 0 !important;
+        padding: 10px 12px !important;
+        border-radius: 13px !important;
+        font-size: 14px !important;
+      }
+
+      #adminView .mobile-filter-sheet > .hidden,
+      #adminView .mobile-filter-sheet > .mobile-filter-field-label.hidden,
+      #adminView .mobile-filter-sheet > .mobile-auto-date-control {
+        display: none !important;
+      }
+
+      #adminView .mobile-filter-sheet .mobile-clear-date-control {
+        display: none !important;
+      }
+
+      .mobile-filter-sheet-note {
+        display: block;
+        margin-top: 12px;
+        padding: 10px 11px;
+        border-radius: 12px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 11.5px;
+        font-weight: 700;
+        line-height: 1.4;
+      }
+
+      .mobile-filter-sheet-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 9px;
+        margin-top: 14px;
+      }
+
+      .mobile-filter-sheet-actions .btn {
+        min-height: 48px !important;
+        border-radius: 13px !important;
+        font-size: 14px !important;
+      }
+
+      .mobile-active-filter-chips {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-height: 0;
+        margin: 2px 0 7px;
+      }
+
+      .mobile-active-filter-chips:empty {
+        display: none;
+      }
+
+      .mobile-active-filter-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        max-width: 100%;
+        min-height: 30px;
+        padding: 5px 8px 5px 10px;
+        border: 1px solid #dbe7f7;
+        border-radius: 999px;
+        background: #f8fafc;
+        color: #334155;
+        font-size: 11px;
+        font-weight: 850;
+      }
+
+      .mobile-active-filter-chip span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mobile-active-filter-chip button {
+        display: grid;
+        flex: 0 0 auto;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: #e2e8f0;
+        color: #475569;
+        font: inherit;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .mobile-result-summary {
+        display: flex;
+        align-items: center;
+        min-height: 34px;
+        margin: 0 0 8px;
+        padding: 7px 9px;
+        border: 1px solid #dbe7f7;
+        border-radius: 11px;
+        background: #f8fbff;
+        color: #475569;
+        font-size: 11.5px;
+        font-weight: 800;
+      }
+
+      #adminView #adminDateSummary,
+      #adminView .admin-work-order-search-summary {
+        display: none !important;
+      }
+
+      .mobile-task-list-heading {
+        display: block;
+        margin: 10px 0 8px;
+        color: #0f172a;
+        font-size: 16px;
+        line-height: 1.2;
+      }
+
+      .mobile-status-detail-sheet {
+        padding-left: 14px !important;
+        padding-right: 14px !important;
+      }
+
+      .mobile-status-detail-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding-bottom: 4px;
+      }
+
+      .mobile-status-detail-person {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        min-height: 48px;
+        padding: 8px 10px;
+        border: 1px solid #dbe7f7;
+        border-radius: 13px;
+        background: #f8fbff;
+        color: #0f172a;
+        font-size: 12px;
+        font-weight: 850;
+      }
+
+      .mobile-status-detail-avatar {
+        display: grid;
+        flex: 0 0 auto;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #2563eb, #7c3aed);
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: 950;
+      }
+
+      .mobile-status-detail-person span:last-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mobile-status-detail-empty {
+        grid-column: 1 / -1;
+        padding: 20px;
+        border-radius: 14px;
+        background: #f8fafc;
+        color: #64748b;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .floating-create-task-btn {
+        width: 54px !important;
+        height: 54px !important;
+        right: max(12px, env(safe-area-inset-right, 0px)) !important;
+        bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
+        font-size: 30px !important;
+      }
+    }
+
+    @media (max-width: 390px) {
+      #adminView .task-panel {
+        padding-left: 10px !important;
+        padding-right: 10px !important;
+      }
+
+      #adminView .employee-status-card {
+        min-height: 82px;
+        padding: 8px !important;
+      }
+
+      .employee-status-card-icon {
+        width: 29px;
+        height: 29px;
+        font-size: 16px;
+      }
+
+      .employee-status-count {
+        font-size: 20px;
+      }
+
+      .mobile-filter-open-btn {
+        min-width: 96px;
+        padding-left: 9px;
+        padding-right: 9px;
+      }
+
+      .mobile-status-detail-list {
+        grid-template-columns: 1fr;
+      }
+    }
+
 </style>
 </head>
 <body>
@@ -4150,9 +4866,22 @@
 
       <section class="panel task-panel">
         <div class="panel-header task-filter-row">
-          <div>
+          <div class="task-panel-title-block">
             <h3>Tất cả công việc</h3>
             <p class="muted">Admin thấy toàn bộ công việc của shop.</p>
+
+            <button
+              id="adminMobileEmployeeStatusToggle"
+              class="mobile-employee-status-toggle"
+              type="button"
+              aria-expanded="true"
+              aria-controls="adminEmployeeStatusSummary"
+            >
+              <span>Trạng thái nhân viên</span>
+              <span id="adminMobileEmployeeStatusOverview" class="mobile-employee-status-overview"></span>
+              <span id="adminMobileEmployeeStatusChevron" class="mobile-employee-status-chevron" aria-hidden="true">⌃</span>
+            </button>
+
             <div id="adminEmployeeStatusSummary" class="employee-status-summary hidden"></div>
           </div>
           <div class="task-panel-header-actions">
@@ -4160,11 +4889,31 @@
               <button id="desktopCompactViewBtn" class="desktop-task-view-btn is-active" type="button" aria-pressed="true">Thu gọn</button>
               <button id="desktopDetailedViewBtn" class="desktop-task-view-btn" type="button" aria-pressed="false">Chi tiết</button>
             </div>
-            <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
+            <button
+              id="mobileTaskPanelMenuBtn"
+              class="mobile-task-panel-menu-btn"
+              type="button"
+              aria-label="Mở chức năng khác"
+              aria-expanded="false"
+              aria-controls="mobileTaskPanelMenu"
+            >⋮</button>
+            <div id="mobileTaskPanelMenu" class="mobile-task-panel-menu" aria-hidden="true">
+              <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
+            </div>
           </div>
         </div>
-        <div class="task-filter-row-secondary">
-          <div class="filters enhanced-filters">
+
+        <div class="task-filter-row-secondary mobile-filter-toolbar">
+          <div id="adminMobileFilterBackdrop" class="mobile-filter-backdrop hidden" aria-hidden="true"></div>
+
+          <div id="adminMobileFilterSheet" class="filters enhanced-filters mobile-filter-sheet" role="group" aria-labelledby="adminMobileFilterSheetTitle">
+            <div class="mobile-filter-sheet-handle" aria-hidden="true"></div>
+            <div class="mobile-filter-sheet-header">
+              <h4 id="adminMobileFilterSheetTitle">Bộ lọc công việc</h4>
+              <button id="adminMobileFilterCloseBtn" class="mobile-filter-sheet-close" type="button" aria-label="Đóng bộ lọc">×</button>
+            </div>
+
+            <span class="mobile-filter-field-label">Trạng thái</span>
             <select id="adminStatusFilter" aria-label="Lọc trạng thái">
               <option value="all">Tất cả trạng thái</option>
               <option value="draft">Chưa giao việc</option>
@@ -4178,15 +4927,21 @@
               <option value="completed">Đã hoàn thành</option>
               <option value="redo">Yêu cầu làm lại</option>
             </select>
+
+            <span class="mobile-filter-field-label mobile-completed-filter-label hidden">Nhóm đã hoàn thành</span>
             <select id="adminCompletedTypeFilter" class="completed-subfilter hidden" aria-label="Lọc nhóm công việc đã hoàn thành">
               <option value="all">Tất cả đã hoàn thành</option>
               <option value="normal">Công việc bình thường</option>
               <option value="lunch_break">Đã nghỉ trưa</option>
               <option value="hotel">Hotel đã làm</option>
             </select>
+
+            <span class="mobile-filter-field-label">Nhân viên</span>
             <select id="adminEmployeeFilter" aria-label="Lọc nhân viên">
               <option value="all">Tất cả nhân viên</option>
             </select>
+
+            <span class="mobile-filter-field-label">Thời gian</span>
             <select id="adminDateMode" aria-label="Lọc thời gian">
               <option value="all">Tất cả ngày</option>
               <option value="today">Hôm nay</option>
@@ -4196,11 +4951,27 @@
               <option value="single">Chọn 1 ngày</option>
               <option value="range">Khoảng ngày</option>
             </select>
+
+            <span class="mobile-filter-field-label mobile-single-date-label hidden">Ngày cụ thể</span>
             <input id="adminSingleDate" class="date-filter-control hidden" type="date" aria-label="Chọn ngày giao việc" />
+
+            <span class="mobile-filter-field-label mobile-date-from-label hidden">Từ ngày</span>
             <input id="adminDateFrom" class="date-filter-control hidden" type="date" aria-label="Từ ngày" />
+
+            <span class="mobile-filter-field-label mobile-date-to-label hidden">Đến ngày</span>
             <input id="adminDateTo" class="date-filter-control hidden" type="date" aria-label="Đến ngày" />
-            <button id="adminClearDateFilter" class="btn ghost small" type="button">Xóa lọc ngày</button>
+
+            <button id="adminClearDateFilter" class="btn ghost small mobile-clear-date-control" type="button">Xóa lọc ngày</button>
+
+            <div class="mobile-filter-sheet-note">
+              Ngày chỉ hiển thị khi chọn “Chọn 1 ngày” hoặc “Khoảng ngày”.
+            </div>
+            <div class="mobile-filter-sheet-actions">
+              <button id="adminMobileFilterResetBtn" class="btn ghost" type="button">Đặt lại</button>
+              <button id="adminMobileFilterApplyBtn" class="btn primary" type="button">Áp dụng</button>
+            </div>
           </div>
+
           <div class="admin-work-order-search">
             <div class="admin-work-order-search-control">
               <span class="admin-work-order-search-icon" aria-hidden="true">⌕</span>
@@ -4208,7 +4979,7 @@
                 id="adminWorkOrderSearch"
                 class="admin-work-order-search-input"
                 type="search"
-                placeholder="Tìm kiếm Phiếu công việc"
+                placeholder="Tìm Phiếu công việc..."
                 autocomplete="off"
                 aria-label="Tìm kiếm tên Phiếu công việc"
                 aria-autocomplete="list"
@@ -4220,11 +4991,30 @@
             </div>
             <p id="adminWorkOrderSearchSummary" class="admin-work-order-search-summary hidden"></p>
           </div>
+
+          <button id="adminMobileFilterOpenBtn" class="mobile-filter-open-btn" type="button" aria-expanded="false" aria-controls="adminMobileFilterSheet">
+            <span aria-hidden="true">⌯</span> Bộ lọc
+            <span id="adminMobileFilterCount" class="mobile-filter-count hidden">0</span>
+          </button>
         </div>
+
+        <div id="adminActiveFilterChips" class="mobile-active-filter-chips" aria-label="Bộ lọc đang áp dụng"></div>
+        <div id="adminMobileResultSummary" class="mobile-result-summary" aria-live="polite"></div>
         <p id="adminDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
 
         <div id="adminCompletedTypeReport" class="completed-type-report hidden"></div>
+        <h4 class="mobile-task-list-heading">Danh sách Phiếu công việc</h4>
         <div id="adminTaskList" class="task-list empty-box">Chưa có công việc.</div>
+      </section>
+
+      <div id="adminEmployeeStatusDetailBackdrop" class="mobile-status-detail-backdrop hidden" aria-hidden="true"></div>
+      <section id="adminEmployeeStatusDetailSheet" class="mobile-status-detail-sheet" role="dialog" aria-modal="true" aria-labelledby="adminEmployeeStatusDetailTitle" aria-hidden="true">
+        <div class="mobile-filter-sheet-handle" aria-hidden="true"></div>
+        <div class="mobile-filter-sheet-header">
+          <h4 id="adminEmployeeStatusDetailTitle">Danh sách nhân viên</h4>
+          <button id="adminEmployeeStatusDetailCloseBtn" class="mobile-filter-sheet-close" type="button" aria-label="Đóng danh sách nhân viên">×</button>
+        </div>
+        <div id="adminEmployeeStatusDetailList" class="mobile-status-detail-list"></div>
       </section>
       <button id="floatingCreateTaskBtn" class="floating-create-task-btn" type="button" aria-label="Tạo phiếu công việc nhanh" title="Tạo phiếu công việc">+</button>
     </main>
