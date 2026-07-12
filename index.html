@@ -4106,6 +4106,10 @@
       margin-left: 4px;
     }
 
+    .mobile-filter-modal-root {
+      display: contents;
+    }
+
     @media (max-width: 768px) {
       body.mobile-sheet-open {
         overflow: hidden !important;
@@ -4462,7 +4466,47 @@
         display: none !important;
       }
 
-      .mobile-filter-backdrop,
+      /* Popup Bộ lọc mobile dùng một lớp modal toàn màn hình, được JS đưa trực tiếp
+         vào <body>. Flexbox căn giữa theo chính viewport hiện tại nên không phụ thuộc
+         vị trí cuộn, thanh sticky, transform hay backdrop-filter của phần nội dung. */
+      .mobile-filter-modal-root {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 1180 !important;
+        display: none !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 100% !important;
+        height: 100dvh !important;
+        min-height: 100svh !important;
+        padding:
+          max(12px, env(safe-area-inset-top, 0px))
+          12px
+          max(12px, env(safe-area-inset-bottom, 0px)) !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+        isolation: isolate;
+        pointer-events: none;
+      }
+
+      .mobile-filter-modal-root.is-open {
+        display: flex !important;
+        pointer-events: auto;
+      }
+
+      .mobile-filter-backdrop {
+        position: absolute !important;
+        inset: 0 !important;
+        z-index: 0 !important;
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+        background: rgba(15, 23, 42, 0.52);
+        opacity: 0;
+        transition: opacity 0.18s ease;
+      }
+
       .mobile-status-detail-backdrop {
         position: fixed;
         inset: 0;
@@ -4483,23 +4527,24 @@
         opacity: 1;
       }
 
-      /* Bộ lọc trên mobile được JS đưa trực tiếp vào <body> khi mở.
-         Việc này tránh lỗi Safari coi phần tử fixed là con của thanh sticky có backdrop-filter.
-         Tọa độ được tính theo visualViewport nên luôn nằm giữa vùng màn hình đang nhìn thấy. */
       .mobile-filter-sheet {
-        position: fixed !important;
-        top: var(--mobile-filter-center-y, 50%) !important;
-        left: var(--mobile-filter-center-x, 50%) !important;
+        position: relative !important;
+        inset: auto !important;
+        top: auto !important;
         right: auto !important;
         bottom: auto !important;
-        z-index: 1200 !important;
+        left: auto !important;
+        z-index: 1 !important;
         display: flex !important;
+        flex: 0 1 auto !important;
         flex-direction: column;
         gap: 0 !important;
-        width: min(560px, calc(var(--mobile-filter-viewport-width, 100vw) - 24px)) !important;
-        max-height: calc(var(--mobile-filter-viewport-height, 100dvh) - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        width: min(560px, 100%) !important;
+        max-width: 100% !important;
+        max-height: calc(100dvh - max(24px, env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px))) !important;
         margin: 0 !important;
         padding: 12px 16px max(16px, env(safe-area-inset-bottom, 0px)) !important;
+        box-sizing: border-box !important;
         overflow-x: hidden;
         overflow-y: auto;
         overscroll-behavior: contain;
@@ -4510,16 +4555,16 @@
         box-shadow: 0 24px 70px rgba(15, 23, 42, 0.30) !important;
         visibility: hidden;
         opacity: 0;
-        transform: translate(-50%, calc(-50% + 20px)) scale(0.97);
-        transform-origin: center;
-        transition: transform 0.22s ease, opacity 0.18s ease, visibility 0.22s step-end;
+        transform: translateY(14px) scale(0.98) !important;
+        transform-origin: center center;
+        transition: transform 0.2s ease, opacity 0.18s ease, visibility 0.2s step-end;
       }
 
       .mobile-filter-sheet.is-open {
         visibility: visible;
         opacity: 1;
-        transform: translate(-50%, -50%) scale(1);
-        transition: transform 0.22s ease, opacity 0.18s ease, visibility 0s;
+        transform: translateY(0) scale(1) !important;
+        transition: transform 0.2s ease, opacity 0.18s ease, visibility 0s;
       }
 
       /* Danh sách trạng thái nhân viên vẫn giữ kiểu kéo từ dưới lên. */
@@ -4991,9 +5036,10 @@
         </div>
 
         <div class="task-filter-row-secondary mobile-filter-toolbar">
-          <div id="adminMobileFilterBackdrop" class="mobile-filter-backdrop hidden" aria-hidden="true"></div>
+          <div id="adminMobileFilterModalRoot" class="mobile-filter-modal-root" aria-hidden="true">
+            <div id="adminMobileFilterBackdrop" class="mobile-filter-backdrop hidden" aria-hidden="true"></div>
 
-          <div id="adminMobileFilterSheet" class="filters enhanced-filters mobile-filter-sheet" role="group" aria-labelledby="adminMobileFilterSheetTitle">
+            <div id="adminMobileFilterSheet" class="filters enhanced-filters mobile-filter-sheet" role="group" aria-labelledby="adminMobileFilterSheetTitle">
             <div class="mobile-filter-sheet-handle" aria-hidden="true"></div>
             <div class="mobile-filter-sheet-header">
               <h4 id="adminMobileFilterSheetTitle">Bộ lọc công việc</h4>
@@ -5056,6 +5102,7 @@
             <div class="mobile-filter-sheet-actions">
               <button id="adminMobileFilterResetBtn" class="btn ghost" type="button">Đặt lại</button>
               <button id="adminMobileFilterApplyBtn" class="btn primary" type="button">Áp dụng</button>
+            </div>
             </div>
           </div>
 

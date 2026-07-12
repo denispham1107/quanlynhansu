@@ -284,6 +284,7 @@ const els = {
   adminClearWorkOrderSearch: $("#adminClearWorkOrderSearch"),
   adminWorkOrderSuggestions: $("#adminWorkOrderSuggestions"),
   adminWorkOrderSearchSummary: $("#adminWorkOrderSearchSummary"),
+  adminMobileFilterModalRoot: $("#adminMobileFilterModalRoot"),
   adminMobileFilterBackdrop: $("#adminMobileFilterBackdrop"),
   adminMobileFilterSheet: $("#adminMobileFilterSheet"),
   adminMobileFilterOpenBtn: $("#adminMobileFilterOpenBtn"),
@@ -4491,77 +4492,39 @@ function isMobileManagementViewport() {
   return window.matchMedia?.("(max-width: 768px)")?.matches === true;
 }
 
-// Safari/iOS tạo containing block mới cho phần tử fixed nếu tổ tiên có
-// backdrop-filter/transform. Thanh tìm kiếm mobile đang là sticky + backdrop-filter,
-// vì vậy popup Bộ lọc phải được đưa tạm ra làm con trực tiếp của <body>.
+// Popup Bộ lọc được bọc trong một modal root toàn màn hình. Khi mở trên mobile,
+// root được đưa trực tiếp vào <body> để không chịu ảnh hưởng của sticky, transform
+// hoặc backdrop-filter ở bất kỳ phần tử tổ tiên nào. Việc căn giữa do flexbox xử lý.
 const adminMobileFilterPortal = {
   initialized: false,
-  backdropAnchor: null,
-  sheetAnchor: null
+  rootAnchor: null
 };
 
 function initializeAdminMobileFilterPortal() {
   if (adminMobileFilterPortal.initialized) return;
 
-  const backdrop = els.adminMobileFilterBackdrop;
-  const sheet = els.adminMobileFilterSheet;
-  if (!backdrop || !sheet || !backdrop.parentNode || !sheet.parentNode) return;
+  const root = els.adminMobileFilterModalRoot;
+  if (!root || !root.parentNode) return;
 
-  adminMobileFilterPortal.backdropAnchor = document.createComment("admin-mobile-filter-backdrop-anchor");
-  adminMobileFilterPortal.sheetAnchor = document.createComment("admin-mobile-filter-sheet-anchor");
-
-  backdrop.parentNode.insertBefore(adminMobileFilterPortal.backdropAnchor, backdrop);
-  sheet.parentNode.insertBefore(adminMobileFilterPortal.sheetAnchor, sheet);
+  adminMobileFilterPortal.rootAnchor = document.createComment("admin-mobile-filter-modal-root-anchor");
+  root.parentNode.insertBefore(adminMobileFilterPortal.rootAnchor, root);
   adminMobileFilterPortal.initialized = true;
 }
 
 function portalAdminMobileFilterToBody() {
   initializeAdminMobileFilterPortal();
-  if (els.adminMobileFilterBackdrop && els.adminMobileFilterBackdrop.parentNode !== document.body) {
-    document.body.appendChild(els.adminMobileFilterBackdrop);
-  }
-  if (els.adminMobileFilterSheet && els.adminMobileFilterSheet.parentNode !== document.body) {
-    document.body.appendChild(els.adminMobileFilterSheet);
+  const root = els.adminMobileFilterModalRoot;
+  if (root && root.parentNode !== document.body) {
+    document.body.appendChild(root);
   }
 }
 
 function restoreAdminMobileFilterFromBody() {
-  const backdropAnchor = adminMobileFilterPortal.backdropAnchor;
-  const sheetAnchor = adminMobileFilterPortal.sheetAnchor;
-
-  if (els.adminMobileFilterBackdrop && backdropAnchor?.parentNode) {
-    backdropAnchor.parentNode.insertBefore(els.adminMobileFilterBackdrop, backdropAnchor.nextSibling);
+  const root = els.adminMobileFilterModalRoot;
+  const anchor = adminMobileFilterPortal.rootAnchor;
+  if (root && anchor?.parentNode) {
+    anchor.parentNode.insertBefore(root, anchor.nextSibling);
   }
-  if (els.adminMobileFilterSheet && sheetAnchor?.parentNode) {
-    sheetAnchor.parentNode.insertBefore(els.adminMobileFilterSheet, sheetAnchor.nextSibling);
-  }
-}
-
-function updateAdminMobileFilterViewportPosition() {
-  const sheet = els.adminMobileFilterSheet;
-  if (!sheet || !state.adminMobileFilterSheetOpen) return;
-
-  const viewport = window.visualViewport;
-  const viewportWidth = viewport?.width || window.innerWidth || document.documentElement.clientWidth;
-  const viewportHeight = viewport?.height || window.innerHeight || document.documentElement.clientHeight;
-  const viewportLeft = viewport?.offsetLeft || 0;
-  const viewportTop = viewport?.offsetTop || 0;
-
-  sheet.style.setProperty("--mobile-filter-center-x", `${viewportLeft + viewportWidth / 2}px`);
-  sheet.style.setProperty("--mobile-filter-center-y", `${viewportTop + viewportHeight / 2}px`);
-  sheet.style.setProperty("--mobile-filter-viewport-width", `${viewportWidth}px`);
-  sheet.style.setProperty("--mobile-filter-viewport-height", `${viewportHeight}px`);
-}
-
-function clearAdminMobileFilterViewportPosition() {
-  const sheet = els.adminMobileFilterSheet;
-  if (!sheet) return;
-  [
-    "--mobile-filter-center-x",
-    "--mobile-filter-center-y",
-    "--mobile-filter-viewport-width",
-    "--mobile-filter-viewport-height"
-  ].forEach((propertyName) => sheet.style.removeProperty(propertyName));
 }
 
 function syncMobileSheetBodyLock() {
@@ -4590,13 +4553,15 @@ function updateMobileTaskPanelMenuAvailability() {
 
 function setAdminMobileFilterSheetOpen(open) {
   const shouldOpen = Boolean(open && isMobileManagementViewport());
+  const root = els.adminMobileFilterModalRoot;
 
   if (shouldOpen) {
-    // Đưa popup ra khỏi thanh sticky/backdrop-filter trước khi áp dụng position: fixed.
     portalAdminMobileFilterToBody();
   }
 
   state.adminMobileFilterSheetOpen = shouldOpen;
+  root?.classList.toggle("is-open", shouldOpen);
+  root?.setAttribute("aria-hidden", String(!shouldOpen));
   els.adminMobileFilterSheet?.classList.toggle("is-open", shouldOpen);
 
   if (els.adminMobileFilterSheet) {
@@ -4615,23 +4580,25 @@ function setAdminMobileFilterSheetOpen(open) {
 
   if (els.adminMobileFilterBackdrop) {
     els.adminMobileFilterBackdrop.classList.toggle("hidden", !shouldOpen);
-    requestAnimationFrame(() => {
-      els.adminMobileFilterBackdrop?.classList.toggle("is-open", shouldOpen);
-    });
+    if (shouldOpen) {
+      requestAnimationFrame(() => {
+        els.adminMobileFilterBackdrop?.classList.add("is-open");
+      });
+    } else {
+      els.adminMobileFilterBackdrop.classList.remove("is-open");
+    }
   }
 
   syncMobileSheetBodyLock();
 
   if (shouldOpen) {
-    // Không tự focus select trên iOS vì focus có thể làm Safari tự cuộn trang.
-    updateAdminMobileFilterViewportPosition();
-    requestAnimationFrame(updateAdminMobileFilterViewportPosition);
+    // Luôn bắt đầu từ đầu nội dung để tiêu đề Popup không bao giờ bị khuất.
+    if (els.adminMobileFilterSheet) els.adminMobileFilterSheet.scrollTop = 0;
   } else {
-    clearAdminMobileFilterViewportPosition();
-    // Chờ hiệu ứng đóng kết thúc rồi trả bộ lọc về vị trí desktop ban đầu.
+    // Chờ hiệu ứng đóng xong rồi đưa modal root về đúng vị trí desktop ban đầu.
     window.setTimeout(() => {
       if (!state.adminMobileFilterSheetOpen) restoreAdminMobileFilterFromBody();
-    }, 240);
+    }, 220);
   }
 }
 
@@ -4867,6 +4834,9 @@ function setupMobileAdminCompactControls() {
   els.adminMobileFilterOpenBtn?.addEventListener("click", () => setAdminMobileFilterSheetOpen(true));
   els.adminMobileFilterCloseBtn?.addEventListener("click", () => setAdminMobileFilterSheetOpen(false));
   els.adminMobileFilterBackdrop?.addEventListener("click", () => setAdminMobileFilterSheetOpen(false));
+  els.adminMobileFilterModalRoot?.addEventListener("click", (event) => {
+    if (event.target === els.adminMobileFilterModalRoot) setAdminMobileFilterSheetOpen(false);
+  });
   els.adminMobileFilterApplyBtn?.addEventListener("click", () => setAdminMobileFilterSheetOpen(false));
   els.adminMobileFilterResetBtn?.addEventListener("click", resetAdminMobileFilters);
 
@@ -4886,14 +4856,7 @@ function setupMobileAdminCompactControls() {
     setEmployeeStatusDetailSheetOpen(false);
   });
 
-  const syncOpenFilterToVisualViewport = () => {
-    if (state.adminMobileFilterSheetOpen) updateAdminMobileFilterViewportPosition();
-  };
-  window.visualViewport?.addEventListener("resize", syncOpenFilterToVisualViewport);
-  window.visualViewport?.addEventListener("scroll", syncOpenFilterToVisualViewport);
-
   window.addEventListener("resize", () => {
-    syncOpenFilterToVisualViewport();
     if (!isMobileManagementViewport()) {
       setMobileTaskPanelMenuOpen(false);
       setAdminMobileFilterSheetOpen(false);
