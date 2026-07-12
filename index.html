@@ -570,26 +570,100 @@
       line-height: 1.35;
     }
 
-    button.photo-report-item {
-      width: 100%;
-      appearance: none;
-      -webkit-appearance: none;
-      font: inherit;
-      text-align: left;
-      cursor: zoom-in;
-      transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    .photo-report-item {
+      position: relative;
+      overflow: visible;
+      transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
     }
 
-    button.photo-report-item:hover {
+    .photo-report-item:hover {
       transform: translateY(-2px);
       border-color: #60a5fa;
       box-shadow: 0 14px 30px rgba(37, 99, 235, 0.14);
     }
 
-    button.photo-report-item:focus-visible {
+    .photo-report-item.is-selected {
+      border-color: #2563eb;
+      background: #eff6ff;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18), 0 16px 34px rgba(37, 99, 235, 0.16);
+    }
+
+    .photo-report-open {
+      display: grid;
+      width: 100%;
+      gap: 8px;
+      padding: 0;
+      border: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: zoom-in;
+    }
+
+    .photo-report-open:focus-visible {
       outline: 3px solid rgba(37, 99, 235, 0.35);
       outline-offset: 3px;
-      border-color: #2563eb;
+      border-radius: 12px;
+    }
+
+    .photo-report-select {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      z-index: 4;
+      display: inline-grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.72);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .photo-report-select:hover {
+      transform: scale(1.06);
+      background: rgba(30, 64, 175, 0.92);
+    }
+
+    .photo-report-select input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .photo-report-select-mark {
+      color: #ffffff;
+      font-size: 21px;
+      font-weight: 1000;
+      line-height: 1;
+      opacity: 0;
+      transform: scale(0.6);
+      transition: opacity 0.14s ease, transform 0.14s ease;
+    }
+
+    .photo-report-select.is-checked {
+      background: #2563eb;
+      box-shadow: 0 0 0 4px rgba(191, 219, 254, 0.95), 0 10px 24px rgba(37, 99, 235, 0.34);
+    }
+
+    .photo-report-select input:checked + .photo-report-select-mark {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .photo-report-select:focus-within {
+      outline: 3px solid rgba(37, 99, 235, 0.45);
+      outline-offset: 3px;
     }
 
     html.photo-viewer-open,
@@ -1136,6 +1210,91 @@
       padding: 22px;
     }
 
+    .photo-selection-toolbar {
+      position: sticky;
+      top: 82px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border: 1px solid #bfdbfe;
+      border-radius: 18px;
+      background: rgba(239, 246, 255, 0.96);
+      box-shadow: 0 14px 32px rgba(37, 99, 235, 0.12);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .photo-selection-toolbar.hidden {
+      display: none !important;
+    }
+
+    .photo-selection-summary {
+      min-width: 0;
+    }
+
+    .photo-selection-summary strong,
+    .photo-selection-summary span {
+      display: block;
+    }
+
+    .photo-selection-summary strong {
+      color: #1e3a8a;
+      font-size: 15px;
+      font-weight: 1000;
+    }
+
+    .photo-selection-summary span {
+      margin-top: 3px;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .photo-selection-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .photo-selection-actions .btn {
+      min-height: 38px;
+      white-space: nowrap;
+    }
+
+    .photo-selected-download-btn {
+      background: linear-gradient(135deg, #059669, #2563eb) !important;
+      color: #ffffff !important;
+    }
+
+    .photo-selected-share-btn {
+      background: linear-gradient(135deg, #7c3aed, #0ea5e9) !important;
+      color: #ffffff !important;
+    }
+
+    .photo-selected-delete-btn {
+      background: #dc2626 !important;
+      color: #ffffff !important;
+      border-color: #dc2626 !important;
+    }
+
+    .photo-selected-delete-btn:hover,
+    .photo-selected-delete-btn:focus-visible {
+      background: #b91c1c !important;
+      border-color: #b91c1c !important;
+    }
+
+    .photo-selection-actions .btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.48;
+      transform: none;
+      filter: none;
+    }
+
     .download-photo-zip-btn {
       background: linear-gradient(135deg, rgba(16, 185, 129, 0.96), rgba(37, 99, 235, 0.96)) !important;
       color: #ffffff !important;
@@ -1194,6 +1353,34 @@
       .photo-report-page-card .photo-report-grid {
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         gap: 12px;
+      }
+
+      .photo-selection-toolbar {
+        position: static;
+        align-items: stretch;
+        flex-direction: column;
+        padding: 12px;
+      }
+
+      .photo-selection-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .photo-selection-actions .btn {
+        width: 100%;
+        padding-inline: 10px;
+      }
+
+      .photo-selected-delete-btn {
+        grid-column: 1 / -1;
+      }
+
+      .photo-report-select {
+        top: 12px;
+        right: 12px;
+        width: 34px;
+        height: 34px;
       }
     }
 
@@ -2743,6 +2930,21 @@
       </section>
 
       <section class="panel photo-report-page-card">
+        <div id="photoSelectionToolbar" class="photo-selection-toolbar hidden" aria-live="polite">
+          <div class="photo-selection-summary">
+            <strong id="photoSelectionCount">Chưa chọn ảnh</strong>
+            <span>Đánh dấu một hoặc nhiều ảnh để tải, chia sẻ hoặc xóa.</span>
+          </div>
+
+          <div class="photo-selection-actions">
+            <button id="photoSelectAllBtn" class="btn ghost small" type="button">Chọn tất cả</button>
+            <button id="photoClearSelectionBtn" class="btn ghost small" type="button" disabled>Bỏ chọn</button>
+            <button id="downloadSelectedPhotosBtn" class="btn primary small photo-selected-download-btn" type="button" disabled>⬇ Tải đã chọn</button>
+            <button id="shareSelectedPhotosBtn" class="btn primary small photo-selected-share-btn" type="button" disabled>↗ Chia sẻ</button>
+            <button id="deleteSelectedPhotosBtn" class="btn danger small photo-selected-delete-btn" type="button" disabled>🗑 Xóa ảnh</button>
+          </div>
+        </div>
+
         <div id="photoReportGrid" class="photo-report-grid empty-box">Chưa có hình báo cáo.</div>
       </section>
     </main>

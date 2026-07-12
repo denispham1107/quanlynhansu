@@ -81,6 +81,7 @@ const state = {
   photoShareFile: null,
   photoShareTaskId: null,
   photoShareFileName: "",
+  photoShareCacheKey: "",
   unsubs: [],
   editingWorkOrderId: null,
   editingWorkTemplateId: null,
@@ -114,6 +115,7 @@ const state = {
   photoReportReturnScrollY: 0,
   photoViewerPhotos: [],
   photoViewerIndex: -1,
+  photoReportSelectedKeys: new Set(),
   deletingEmployeeUid: null
 };
 
@@ -224,6 +226,13 @@ const els = {
   photoReportTaskTitle: $("#photoReportTaskTitle"),
   photoReportSummary: $("#photoReportSummary"),
   photoReportGrid: $("#photoReportGrid"),
+  photoSelectionToolbar: $("#photoSelectionToolbar"),
+  photoSelectionCount: $("#photoSelectionCount"),
+  photoSelectAllBtn: $("#photoSelectAllBtn"),
+  photoClearSelectionBtn: $("#photoClearSelectionBtn"),
+  downloadSelectedPhotosBtn: $("#downloadSelectedPhotosBtn"),
+  shareSelectedPhotosBtn: $("#shareSelectedPhotosBtn"),
+  deleteSelectedPhotosBtn: $("#deleteSelectedPhotosBtn"),
   downloadPhotoZipBtn: $("#downloadPhotoZipBtn"),
   sharePhotoReportBtn: $("#sharePhotoReportBtn"),
   photoViewer: $("#photoViewer"),
@@ -5785,6 +5794,112 @@ document.addEventListener("keydown", async (event) => {
 // =========================
 // Ảnh báo cáo công việc
 // =========================
+function resetPreparedPhotoShare() {
+  state.photoShareFile = null;
+  state.photoShareTaskId = null;
+  state.photoShareFileName = "";
+  state.photoShareCacheKey = "";
+}
+
+function getPhotoStableKey(photo, index = 0) {
+  const uploadedAt = timestampToDate(photo?.uploadedAt)?.getTime() || "";
+  return String(
+    photo?.id
+    || getStoragePathFromPhoto(photo)
+    || photo?.url
+    || `${photo?.name || "photo"}|${photo?.size || 0}|${uploadedAt}|${index}`
+  );
+}
+
+function getSortedTaskPhotos(task) {
+  return getTaskPhotos(task)
+    .slice()
+    .sort((a, b) => (timestampToDate(b.uploadedAt)?.getTime() || 0) - (timestampToDate(a.uploadedAt)?.getTime() || 0));
+}
+
+function syncPhotoReportSelection(photos = []) {
+  const validKeys = new Set(photos.map((photo, index) => getPhotoStableKey(photo, index)));
+
+  Array.from(state.photoReportSelectedKeys).forEach((key) => {
+    if (!validKeys.has(key)) state.photoReportSelectedKeys.delete(key);
+  });
+}
+
+function getSelectedPhotoReportPhotos(task) {
+  const photos = getSortedTaskPhotos(task);
+  return photos.filter((photo, index) => state.photoReportSelectedKeys.has(getPhotoStableKey(photo, index)));
+}
+
+function getPhotoShareCacheKey(task, photos, scope = "all") {
+  const keys = photos
+    .map((photo, index) => getPhotoStableKey(photo, index))
+    .sort();
+
+  return `${task?.id || "task"}::${scope}::${keys.join("|")}`;
+}
+
+function updatePhotoSelectionToolbar(task, photos = getSortedTaskPhotos(task)) {
+  if (!els.photoSelectionToolbar) return;
+
+  const isAdmin = state.profile?.role === "admin";
+  const selectedPhotos = isAdmin ? getSelectedPhotoReportPhotos(task) : [];
+  const selectedCount = selectedPhotos.length;
+  const totalCount = photos.length;
+  const canManage = isAdmin && totalCount > 0;
+
+  els.photoSelectionToolbar.classList.toggle("hidden", !canManage);
+
+  if (els.photoSelectionCount) {
+    els.photoSelectionCount.textContent = selectedCount
+      ? `Đã chọn ${selectedCount}/${totalCount} ảnh`
+      : `Chưa chọn ảnh • Có ${totalCount} ảnh`;
+  }
+
+  if (els.photoSelectAllBtn) {
+    els.photoSelectAllBtn.disabled = !canManage || selectedCount === totalCount;
+  }
+
+  if (els.photoClearSelectionBtn) {
+    els.photoClearSelectionBtn.disabled = selectedCount === 0;
+  }
+
+  if (els.downloadSelectedPhotosBtn) {
+    els.downloadSelectedPhotosBtn.disabled = selectedCount === 0;
+  }
+
+  if (els.shareSelectedPhotosBtn) {
+    els.shareSelectedPhotosBtn.disabled = selectedCount === 0;
+  }
+
+  if (els.deleteSelectedPhotosBtn) {
+    els.deleteSelectedPhotosBtn.disabled = selectedCount === 0;
+  }
+}
+
+function setPhotoReportSelection(keys) {
+  state.photoReportSelectedKeys = new Set(keys);
+  resetPreparedPhotoShare();
+
+  els.photoReportGrid?.querySelectorAll("[data-photo-key]").forEach((card) => {
+    const key = String(card.dataset.photoKey || "");
+    const checked = state.photoReportSelectedKeys.has(key);
+    card.classList.toggle("is-selected", checked);
+
+    const checkbox = card.querySelector("[data-photo-select-key]");
+    if (checkbox) checkbox.checked = checked;
+
+    const label = card.querySelector(".photo-report-select");
+    label?.classList.toggle("is-checked", checked);
+  });
+
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  updatePhotoSelectionToolbar(task);
+}
+
+function clearPhotoReportSelection() {
+  setPhotoReportSelection([]);
+}
+
 function hideMainContentForPhotoReport() {
   els.adminView?.classList.add("hidden");
   els.employeeView?.classList.add("hidden");
@@ -5848,13 +5963,13 @@ function backFromPhotoReportPage() {
   const returnScrollY = state.photoReportReturnScrollY;
 
   closePhotoViewer({ restoreFocus: false });
+  clearPhotoReportSelection();
   state.photoReportTaskId = null;
   state.photoViewerPhotos = [];
   state.photoViewerIndex = -1;
   if (els.photoReportGrid) els.photoReportGrid.innerHTML = "";
-  state.photoShareFile = null;
-  state.photoShareTaskId = null;
-  state.photoShareFileName = "";
+  resetPreparedPhotoShare();
+  els.photoSelectionToolbar?.classList.add("hidden");
   els.downloadPhotoZipBtn?.classList.add("hidden");
   if (els.downloadPhotoZipBtn) els.downloadPhotoZipBtn.disabled = false;
   els.sharePhotoReportBtn?.classList.add("hidden");
@@ -5886,6 +6001,26 @@ els.downloadPhotoZipBtn?.addEventListener("click", async () => {
 
 els.sharePhotoReportBtn?.addEventListener("click", async () => {
   await shareCurrentPhotoReport();
+});
+
+els.photoSelectAllBtn?.addEventListener("click", () => {
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  const photos = getSortedTaskPhotos(task);
+  setPhotoReportSelection(photos.map((photo, index) => getPhotoStableKey(photo, index)));
+});
+
+els.photoClearSelectionBtn?.addEventListener("click", clearPhotoReportSelection);
+
+els.downloadSelectedPhotosBtn?.addEventListener("click", async () => {
+  await downloadSelectedPhotoReportPhotos();
+});
+
+els.shareSelectedPhotosBtn?.addEventListener("click", async () => {
+  await shareSelectedPhotoReportPhotos();
+});
+
+els.deleteSelectedPhotosBtn?.addEventListener("click", async () => {
+  await deleteSelectedPhotoReportPhotos();
 });
 
 // Trình xem ảnh toàn màn hình (Lightbox/Gallery)
@@ -6172,6 +6307,26 @@ els.photoReportGrid?.addEventListener("click", (event) => {
 
   event.preventDefault();
   openPhotoViewer(Number(target.dataset.photoViewerIndex));
+});
+
+els.photoReportGrid?.addEventListener("change", (event) => {
+  const checkbox = event.target instanceof HTMLInputElement
+    ? event.target.closest("[data-photo-select-key]")
+    : null;
+
+  if (!checkbox || state.profile?.role !== "admin") return;
+
+  const key = String(checkbox.dataset.photoSelectKey || "");
+  if (!key) return;
+
+  const nextKeys = new Set(state.photoReportSelectedKeys);
+  if (checkbox.checked) {
+    nextKeys.add(key);
+  } else {
+    nextKeys.delete(key);
+  }
+
+  setPhotoReportSelection(nextKeys);
 });
 
 els.photoViewerPrevBtn?.addEventListener("click", showPreviousPhotoViewerImage);
@@ -6681,6 +6836,194 @@ async function downloadCurrentPhotoReportZip() {
   }
 }
 
+function getSinglePhotoDownloadName(photo, index = 0) {
+  const rawName = sanitizeStorageFileName(photo?.name || `anh-bao-cao-${index + 1}.jpg`);
+  if (/\.[a-zA-Z0-9]{2,5}$/.test(rawName)) return rawName;
+
+  const type = String(photo?.contentType || "").toLowerCase();
+  if (type.includes("png")) return `${rawName}.png`;
+  if (type.includes("webp")) return `${rawName}.webp`;
+  if (type.includes("heic") || type.includes("heif")) return `${rawName}.heic`;
+  return `${rawName}.jpg`;
+}
+
+async function downloadSelectedPhotoReportPhotos() {
+  if (state.profile?.role !== "admin") {
+    toast("Chỉ Admin mới được tải các ảnh đã chọn.", "error");
+    return;
+  }
+
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  const photos = getSelectedPhotoReportPhotos(task);
+
+  if (!task || !photos.length) {
+    toast("Vui lòng chọn ít nhất một ảnh để tải.", "error");
+    return;
+  }
+
+  const button = els.downloadSelectedPhotosBtn;
+  setButtonLoading(button, true, "Đang chuẩn bị...");
+
+  try {
+    if (photos.length === 1) {
+      const blob = await getPhotoBlobForZip(photos[0]);
+      downloadBlobFile(blob, getSinglePhotoDownloadName(photos[0]));
+      toast("Đã tải ảnh được chọn.", "success");
+      return;
+    }
+
+    const result = await createPhotoReportZipBlob(task, photos, (message) => {
+      if (button) button.textContent = message;
+    });
+
+    downloadBlobFile(result.zipBlob, result.fileName);
+    toast(
+      `Đã tải ${result.successCount}/${result.totalCount} ảnh được chọn trong file ZIP.`,
+      result.failedPhotos.length ? "warning" : "success"
+    );
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không tải được các ảnh đã chọn.", "error");
+  } finally {
+    setButtonLoading(button, false);
+    updatePhotoSelectionToolbar(task);
+  }
+}
+
+function getLatestUploadedAtFromPhotos(photos = []) {
+  return photos.reduce((latest, photo) => {
+    const currentMs = timestampToDate(photo?.uploadedAt)?.getTime() || 0;
+    const latestMs = timestampToDate(latest)?.getTime() || 0;
+    return currentMs > latestMs ? photo.uploadedAt : latest;
+  }, null);
+}
+
+async function deleteSelectedPhotoReportPhotos() {
+  if (state.profile?.role !== "admin") {
+    toast("Chỉ Admin mới được xóa ảnh báo cáo.", "error");
+    return;
+  }
+
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  const selectedPhotos = getSelectedPhotoReportPhotos(task);
+
+  if (!task || !selectedPhotos.length) {
+    toast("Vui lòng chọn ít nhất một ảnh để xóa.", "error");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Bạn có chắc chắn muốn xóa vĩnh viễn ${selectedPhotos.length} ảnh đã chọn?\n\n`
+    + "Ảnh sẽ bị xóa khỏi Phiếu công việc và xóa luôn trên Firebase Storage. Hành động này không thể hoàn tác."
+  );
+
+  if (!confirmed) return;
+
+  const button = els.deleteSelectedPhotosBtn;
+  setButtonLoading(button, true, "Đang xóa...");
+
+  try {
+    const taskRef = doc(db, "tasks", task.id);
+    const latestSnapshot = await getDoc(taskRef);
+
+    if (!latestSnapshot.exists()) {
+      throw new Error("Công việc không còn tồn tại.");
+    }
+
+    const latestTask = latestSnapshot.data() || {};
+    const latestPhotos = Array.isArray(latestTask.photos)
+      ? latestTask.photos.filter((photo) => photo?.url)
+      : [];
+    const selectedKeys = new Set(state.photoReportSelectedKeys);
+    const targets = latestPhotos
+      .map((photo, index) => ({
+        photo,
+        key: getPhotoStableKey(photo, index)
+      }))
+      .filter((item) => selectedKeys.has(item.key));
+
+    if (!targets.length) {
+      clearPhotoReportSelection();
+      toast("Các ảnh đã chọn không còn tồn tại. Danh sách đã được cập nhật.", "warning");
+      return;
+    }
+
+    const deletedKeys = new Set();
+    const failedPhotos = [];
+
+    for (let index = 0; index < targets.length; index += 1) {
+      const { photo, key } = targets[index];
+      const path = getStoragePathFromPhoto(photo);
+
+      if (!path) {
+        failedPhotos.push({
+          photo,
+          error: new Error("Không xác định được đường dẫn ảnh trên Firebase Storage.")
+        });
+        continue;
+      }
+
+      if (button) button.textContent = `Đang xóa ${index + 1}/${targets.length}...`;
+
+      try {
+        await deleteObject(storageRef(storage, path));
+        deletedKeys.add(key);
+      } catch (error) {
+        if (isStorageObjectNotFound(error)) {
+          // File đã không còn trên Storage: vẫn xóa dữ liệu tham chiếu trong Firestore.
+          deletedKeys.add(key);
+        } else {
+          console.error("Không xóa được ảnh báo cáo trên Storage", photo, error);
+          failedPhotos.push({ photo, error });
+        }
+      }
+    }
+
+    if (!deletedKeys.size) {
+      throw new Error(
+        failedPhotos[0]?.error?.message
+        || "Không xóa được ảnh nào trên Firebase Storage."
+      );
+    }
+
+    const remainingPhotos = latestPhotos.filter(
+      (photo, index) => !deletedKeys.has(getPhotoStableKey(photo, index))
+    );
+
+    await updateDoc(taskRef, {
+      photos: remainingPhotos,
+      photoCount: remainingPhotos.length,
+      lastPhotoUploadedAt: getLatestUploadedAtFromPhotos(remainingPhotos)
+    });
+
+    task.photos = remainingPhotos;
+    task.photoCount = remainingPhotos.length;
+    task.lastPhotoUploadedAt = getLatestUploadedAtFromPhotos(remainingPhotos);
+
+    const nextSelection = new Set(state.photoReportSelectedKeys);
+    deletedKeys.forEach((key) => nextSelection.delete(key));
+    state.photoReportSelectedKeys = nextSelection;
+    resetPreparedPhotoShare();
+    renderPhotoReportPageContent(task);
+
+    if (failedPhotos.length) {
+      toast(
+        `Đã xóa ${deletedKeys.size} ảnh. Còn ${failedPhotos.length} ảnh chưa xóa được trên Storage, vui lòng thử lại.`,
+        "warning"
+      );
+    } else {
+      toast(`Đã xóa vĩnh viễn ${deletedKeys.size} ảnh khỏi Phiếu và Firebase Storage.`, "success");
+    }
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không xóa được các ảnh đã chọn.", "error");
+  } finally {
+    setButtonLoading(button, false);
+    const currentTask = state.tasks.find((item) => item.id === state.photoReportTaskId);
+    updatePhotoSelectionToolbar(currentTask);
+  }
+}
+
 function isSharePermissionDeniedError(error) {
   const name = String(error?.name || "").toLowerCase();
   const message = String(error?.message || error || "").toLowerCase();
@@ -6690,6 +7033,10 @@ function isSharePermissionDeniedError(error) {
     || message.includes("not allowed")
     || message.includes("permissions policy")
     || message.includes("disallowed");
+}
+
+function getPreparedShareFileLabel(file) {
+  return String(file?.type || "").toLowerCase().includes("zip") ? "file ZIP" : "ảnh";
 }
 
 async function sharePreparedPhotoZipFile(file, task, photos) {
@@ -6720,7 +7067,7 @@ async function sharePreparedPhotoZipFile(file, task, photos) {
       return "file";
     } catch (error) {
       if (error?.name === "AbortError") throw error;
-      console.warn("Không chia sẻ được file ZIP, sẽ thử chia sẻ link hoặc tải xuống.", error);
+      console.warn("Không chia sẻ được file đã chuẩn bị, sẽ thử chia sẻ link hoặc tải xuống.", error);
       if (isSharePermissionDeniedError(error)) {
         return downloadInsteadOfShare();
       }
@@ -6737,39 +7084,48 @@ ${firstPhotoUrl}`,
     return "link";
   } catch (error) {
     if (error?.name === "AbortError") throw error;
-    console.warn("Không chia sẻ được link ảnh, sẽ tải file ZIP xuống để gửi thủ công.", error);
+    console.warn("Không chia sẻ được link ảnh, sẽ tải file đã chuẩn bị xuống để gửi thủ công.", error);
     return downloadInsteadOfShare();
   }
 }
 
-async function shareCurrentPhotoReport() {
-  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
-  const photos = getTaskPhotos(task);
-
+async function sharePhotoReportCollection({
+  task,
+  photos,
+  button,
+  cacheScope = "all",
+  emptyMessage = "Không có ảnh báo cáo để chia sẻ."
+}) {
   if (!task || !photos.length) {
-    toast("Không có ảnh báo cáo để chia sẻ.", "error");
+    toast(emptyMessage, "error");
     return;
   }
 
-  if (!navigator.share) {
-    toast("Trình duyệt này chưa hỗ trợ chia sẻ. Bạn có thể dùng nút Tải ZIP rồi gửi file qua Zalo.", "error");
-    return;
-  }
+  const cacheKey = getPhotoShareCacheKey(task, photos, cacheScope);
 
-  const button = els.sharePhotoReportBtn;
+  const notifyShareMode = (mode, file) => {
+    const fileLabel = getPreparedShareFileLabel(file);
+    if (mode === "file") {
+      toast(`Đã mở bảng chia sẻ ${fileLabel}.`, "success");
+    } else if (mode === "link") {
+      toast(`Thiết bị không chia sẻ được ${fileLabel}, đã mở chia sẻ link ảnh.`, "warning");
+    } else if (mode === "download") {
+      toast(`Trình duyệt không cho chia sẻ trực tiếp. Đã tải ${fileLabel} để bạn gửi thủ công.`, "warning");
+    }
+  };
 
-  // Nếu ZIP đã được chuẩn bị sẵn, lần bấm này sẽ mở bảng chia sẻ ngay để tránh lỗi mất quyền thao tác người dùng trên iOS/Android.
-  if (state.photoShareFile && state.photoShareTaskId === task.id) {
+  // Nếu file đúng với bộ ảnh hiện tại đã được chuẩn bị sẵn, lần bấm này sẽ mở
+  // bảng chia sẻ ngay. Cách này tránh lỗi mất quyền thao tác người dùng trên iOS/Android.
+  if (
+    state.photoShareFile
+    && state.photoShareTaskId === task.id
+    && state.photoShareCacheKey === cacheKey
+  ) {
     setButtonLoading(button, true, "Đang mở chia sẻ...");
+
     try {
       const mode = await sharePreparedPhotoZipFile(state.photoShareFile, task, photos);
-      if (mode === "file") {
-        toast("Đã mở bảng chia sẻ file ZIP.", "success");
-      } else if (mode === "link") {
-        toast("Thiết bị không chia sẻ được file ZIP, đã mở chia sẻ link ảnh.", "warning");
-      } else if (mode === "download") {
-        toast("Trình duyệt không cho chia sẻ trực tiếp. Đã tải file ZIP, bạn có thể gửi qua Zalo thủ công.", "warning");
-      }
+      notifyShareMode(mode, state.photoShareFile);
     } catch (error) {
       console.error(error);
       if (error?.name !== "AbortError") {
@@ -6777,57 +7133,98 @@ async function shareCurrentPhotoReport() {
       }
     } finally {
       setButtonLoading(button, false);
+      updatePhotoSelectionToolbar(task);
     }
+
     return;
   }
 
+  resetPreparedPhotoShare();
   setButtonLoading(button, true, "Đang chuẩn bị...");
 
   try {
-    const result = await createPhotoReportZipBlob(task, photos, (message) => {
-      if (button) button.textContent = message;
-    });
+    let file;
 
-    const file = new File([result.zipBlob], result.fileName, { type: "application/zip" });
+    // Khi chỉ chọn 1 ảnh, chia sẻ trực tiếp file ảnh để Zalo/ứng dụng khác
+    // nhận đúng hình. Từ 2 ảnh trở lên sẽ gom thành ZIP để giữ đủ toàn bộ ảnh.
+    if (cacheScope === "selected" && photos.length === 1) {
+      if (button) button.textContent = "Đang tải ảnh...";
+      const photoBlob = await getPhotoBlobForZip(photos[0]);
+      file = new File(
+        [photoBlob],
+        getSinglePhotoDownloadName(photos[0]),
+        { type: photoBlob.type || photos[0]?.contentType || "image/jpeg" }
+      );
+    } else {
+      const result = await createPhotoReportZipBlob(task, photos, (message) => {
+        if (button) button.textContent = message;
+      });
+      file = new File([result.zipBlob], result.fileName, { type: "application/zip" });
+    }
+
     state.photoShareFile = file;
     state.photoShareTaskId = task.id;
-    state.photoShareFileName = result.fileName;
+    state.photoShareFileName = file.name;
+    state.photoShareCacheKey = cacheKey;
 
     try {
       const mode = await sharePreparedPhotoZipFile(file, task, photos);
-      if (mode === "file") {
-        toast("Đã mở bảng chia sẻ file ZIP.", "success");
-      } else if (mode === "link") {
-        toast("Thiết bị không chia sẻ được file ZIP, đã mở chia sẻ link ảnh.", "warning");
-      } else if (mode === "download") {
-        toast("Trình duyệt không cho chia sẻ trực tiếp. Đã tải file ZIP, bạn có thể gửi qua Zalo thủ công.", "warning");
-      }
+      notifyShareMode(mode, file);
     } catch (shareError) {
       console.error(shareError);
       if (shareError?.name === "AbortError") return;
 
-      // Một số trình duyệt mobile yêu cầu bấm chia sẻ sau khi file đã chuẩn bị xong.
-      if (button) button.textContent = "Chia sẻ ZIP";
-      toast("Đã chuẩn bị xong file ZIP. Bấm nút Chia sẻ thêm một lần nữa để mở Zalo/app chia sẻ.", "warning");
+      const fileLabel = getPreparedShareFileLabel(file);
+      // Một số trình duyệt mobile chỉ cho mở bảng chia sẻ ở lần bấm tiếp theo,
+      // sau khi file đã được chuẩn bị hoàn tất.
+      toast(`Đã chuẩn bị xong ${fileLabel}. Bấm nút Chia sẻ thêm một lần nữa để mở Zalo hoặc ứng dụng khác.`, "warning");
     }
   } catch (error) {
     console.error(error);
+    resetPreparedPhotoShare();
     toast(error.message || "Không chuẩn bị được file chia sẻ.", "error");
   } finally {
-    if (!state.photoShareFile || state.photoShareTaskId !== task.id) {
-      setButtonLoading(button, false);
-    } else if (button && button.disabled) {
-      button.disabled = false;
-      if (!button.textContent.includes("Chia sẻ")) button.textContent = "↗ Chia sẻ";
-    }
+    setButtonLoading(button, false);
+    updatePhotoSelectionToolbar(task);
   }
 }
+
+async function shareCurrentPhotoReport() {
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  const photos = getSortedTaskPhotos(task);
+
+  await sharePhotoReportCollection({
+    task,
+    photos,
+    button: els.sharePhotoReportBtn,
+    cacheScope: "all",
+    emptyMessage: "Không có ảnh báo cáo để chia sẻ."
+  });
+}
+
+async function shareSelectedPhotoReportPhotos() {
+  if (state.profile?.role !== "admin") {
+    toast("Chỉ Admin mới được chia sẻ các ảnh đã chọn.", "error");
+    return;
+  }
+
+  const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
+  const photos = getSelectedPhotoReportPhotos(task);
+
+  await sharePhotoReportCollection({
+    task,
+    photos,
+    button: els.shareSelectedPhotosBtn,
+    cacheScope: "selected",
+    emptyMessage: "Vui lòng chọn ít nhất một ảnh để chia sẻ."
+  });
+}
+
 function renderPhotoReportPageContent(task) {
   if (!task) return;
 
-  const photos = getTaskPhotos(task)
-    .slice()
-    .sort((a, b) => (timestampToDate(b.uploadedAt)?.getTime() || 0) - (timestampToDate(a.uploadedAt)?.getTime() || 0));
+  const photos = getSortedTaskPhotos(task);
+  syncPhotoReportSelection(photos);
 
   state.photoViewerPhotos = photos;
   if (isPhotoViewerOpen()) {
@@ -6852,24 +7249,54 @@ function renderPhotoReportPageContent(task) {
   }
 
   if (els.photoReportGrid) {
+    const isAdmin = state.profile?.role === "admin";
+
     els.photoReportGrid.classList.toggle("empty-box", photos.length === 0);
     els.photoReportGrid.innerHTML = photos.length
-      ? photos.map((photo, index) => `
-        <button
-          class="photo-report-item"
-          type="button"
-          data-photo-viewer-index="${index}"
-          aria-label="Xem ${escapeHtml(photo.name || `ảnh báo cáo ${index + 1}`)}"
-        >
-          <img src="${escapeHtml(photo.url)}" alt="Ảnh báo cáo ${index + 1}" loading="lazy" />
-          <div>
-            <strong>${escapeHtml(photo.name || `Ảnh ${index + 1}`)}</strong>
-            <span>${escapeHtml(photo.uploadedByName || "Nhân viên")} • ${formatFullDateTime(photo.uploadedAt)} • ${formatFileSize(photo.size)}</span>
-          </div>
-        </button>
-      `).join("")
+      ? photos.map((photo, index) => {
+        const photoKey = getPhotoStableKey(photo, index);
+        const selected = isAdmin && state.photoReportSelectedKeys.has(photoKey);
+        const displayName = photo.name || `Ảnh ${index + 1}`;
+
+        return `
+          <article
+            class="photo-report-item ${selected ? "is-selected" : ""}"
+            data-photo-key="${escapeHtml(photoKey)}"
+          >
+            <button
+              class="photo-report-open"
+              type="button"
+              data-photo-viewer-index="${index}"
+              aria-label="Xem ${escapeHtml(displayName)}"
+            >
+              <img src="${escapeHtml(photo.url)}" alt="Ảnh báo cáo ${index + 1}" loading="lazy" />
+              <div>
+                <strong>${escapeHtml(displayName)}</strong>
+                <span>${escapeHtml(photo.uploadedByName || "Nhân viên")} • ${formatFullDateTime(photo.uploadedAt)} • ${formatFileSize(photo.size)}</span>
+              </div>
+            </button>
+
+            ${isAdmin ? `
+              <label
+                class="photo-report-select ${selected ? "is-checked" : ""}"
+                title="${selected ? "Bỏ chọn ảnh" : "Chọn ảnh"}"
+              >
+                <input
+                  type="checkbox"
+                  data-photo-select-key="${escapeHtml(photoKey)}"
+                  aria-label="${selected ? "Bỏ chọn" : "Chọn"} ${escapeHtml(displayName)}"
+                  ${selected ? "checked" : ""}
+                />
+                <span class="photo-report-select-mark" aria-hidden="true">✓</span>
+              </label>
+            ` : ""}
+          </article>
+        `;
+      }).join("")
       : `Chưa có hình báo cáo.`;
   }
+
+  updatePhotoSelectionToolbar(task, photos);
 
   if (els.downloadPhotoZipBtn) {
     const canDownload = state.profile?.role === "admin" && photos.length > 0;
@@ -6882,9 +7309,7 @@ function renderPhotoReportPageContent(task) {
     els.sharePhotoReportBtn.classList.toggle("hidden", !canShare);
     els.sharePhotoReportBtn.disabled = !canShare;
     if (!canShare) {
-      state.photoShareFile = null;
-      state.photoShareTaskId = null;
-      state.photoShareFileName = "";
+      resetPreparedPhotoShare();
     }
   }
 }
@@ -6905,9 +7330,8 @@ function openPhotoReportPage(taskId) {
   }
 
   state.photoReportTaskId = taskId;
-  state.photoShareFile = null;
-  state.photoShareTaskId = null;
-  state.photoShareFileName = "";
+  state.photoReportSelectedKeys = new Set();
+  resetPreparedPhotoShare();
   state.photoReportReturnView = state.profile?.role === "employee" ? "employee" : "admin";
   state.photoReportReturnTaskId = taskId;
   state.photoReportReturnScrollY = window.scrollY
