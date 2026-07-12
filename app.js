@@ -120,7 +120,9 @@ const state = {
   photoReportSelectedKeys: new Set(),
   deletingEmployeeUid: null,
   editingSupervisorUid: null,
-  mobileTaskDetailOverrides: new Map()
+  mobileTaskDetailOverrides: new Map(),
+  desktopTaskDetailOverrides: new Map(),
+  desktopTaskViewMode: "compact"
 };
 
 
@@ -271,6 +273,8 @@ const els = {
   adminWorkOrderSearchSummary: $("#adminWorkOrderSearchSummary"),
   adminEmployeeStatusSummary: $("#adminEmployeeStatusSummary"),
   adminTaskList: $("#adminTaskList"),
+  desktopCompactViewBtn: $("#desktopCompactViewBtn"),
+  desktopDetailedViewBtn: $("#desktopDetailedViewBtn"),
   employeeStatusFilter: $("#employeeStatusFilter"),
   employeeCompletedTypeFilter: $("#employeeCompletedTypeFilter"),
   employeeCompletedTypeReport: $("#employeeCompletedTypeReport"),
@@ -991,10 +995,10 @@ function setMobileTopbarMenuOpen(open) {
 }
 
 function setMobileDataMenuOpen(open) {
-  const isMobileLayout = window.matchMedia("(max-width: 768px)").matches;
-  const shouldOpen = isMobileLayout && Boolean(open);
+  const shouldOpen = Boolean(open);
   els.mobileDataMenu?.classList.toggle("is-open", shouldOpen);
-  els.mobileDataMenu?.setAttribute("aria-hidden", String(isMobileLayout ? !shouldOpen : false));
+  els.mobileDataActionsGroup?.classList.toggle("is-open", shouldOpen);
+  els.mobileDataMenu?.setAttribute("aria-hidden", String(!shouldOpen));
   els.mobileDataMenuBtn?.setAttribute("aria-expanded", String(shouldOpen));
 }
 
@@ -5542,14 +5546,16 @@ function renderTicketGroup(group, mode = "admin") {
 
   return `
     <section class="${ticketClasses}" data-work-order-id="${escapeHtml(group.key)}">
-      <div class="ticket-group-header">
-        <div>
-          <span class="ticket-badge ${isDraft ? "is-draft-badge" : ""}">${isDraft ? "Chưa giao việc" : "Phiếu công việc"}</span>
-          <h4>${escapeHtml(ticketTitle)}</h4>
-          ${hasSubmittedTask ? '<span class="admin-confirm-attention-badge">Chờ xác nhận hoàn thành</span>' : ""}
+      <div class="ticket-group-toolbar">
+        <div class="ticket-group-header">
+          <div>
+            <span class="ticket-badge ${isDraft ? "is-draft-badge" : ""}">${isDraft ? "Chưa giao việc" : "Phiếu công việc"}</span>
+            <h4 title="${escapeHtml(ticketTitle)}">${escapeHtml(ticketTitle)}</h4>
+            ${hasSubmittedTask ? '<span class="admin-confirm-attention-badge">Chờ xác nhận hoàn thành</span>' : ""}
+          </div>
         </div>
+        ${headerActions}
       </div>
-      ${headerActions}
       <div class="ticket-tasks">
         ${group.tasks.map((task) => renderTaskCard(task, mode)).join("")}
       </div>
@@ -5686,6 +5692,63 @@ function getAvailableReplacementEmployees(task) {
 }
 
 
+function isDesktopViewport() {
+  return window.matchMedia("(min-width: 769px)").matches;
+}
+
+function isTaskExpandedOnDesktop(task) {
+  const override = state.desktopTaskDetailOverrides.get(task?.id);
+  return typeof override === "boolean" ? override : false;
+}
+
+function readSavedDesktopTaskViewMode() {
+  try {
+    return localStorage.getItem("quanlynhansuDesktopTaskViewMode") === "detail"
+      ? "detail"
+      : "compact";
+  } catch (error) {
+    return "compact";
+  }
+}
+
+function applyDesktopTaskViewMode(mode = state.desktopTaskViewMode) {
+  state.desktopTaskViewMode = mode === "detail" ? "detail" : "compact";
+
+  document.documentElement.classList.toggle(
+    "desktop-task-detail-mode",
+    state.desktopTaskViewMode === "detail"
+  );
+
+  els.desktopCompactViewBtn?.classList.toggle("is-active", state.desktopTaskViewMode === "compact");
+  els.desktopDetailedViewBtn?.classList.toggle("is-active", state.desktopTaskViewMode === "detail");
+  els.desktopCompactViewBtn?.setAttribute("aria-pressed", String(state.desktopTaskViewMode === "compact"));
+  els.desktopDetailedViewBtn?.setAttribute("aria-pressed", String(state.desktopTaskViewMode === "detail"));
+
+  try {
+    localStorage.setItem("quanlynhansuDesktopTaskViewMode", state.desktopTaskViewMode);
+  } catch (error) {
+    // Trình duyệt có thể chặn localStorage ở chế độ riêng tư; giao diện vẫn hoạt động.
+  }
+
+  updateTaskDetailToggleLabels();
+}
+
+function updateTaskDetailToggleLabels() {
+  const desktop = isDesktopViewport();
+  document.querySelectorAll('[data-action="toggle-task-mobile-details"]').forEach((button) => {
+    const card = button.closest("[data-task-card]");
+    if (!card) return;
+
+    const expanded = desktop
+      ? (state.desktopTaskViewMode === "detail" || card.classList.contains("is-desktop-expanded"))
+      : card.classList.contains("is-mobile-expanded");
+    const label = button.querySelector("[data-mobile-toggle-label]");
+
+    button.setAttribute("aria-expanded", String(expanded));
+    if (label) label.textContent = expanded ? "Thu gọn" : "Chi tiết";
+  });
+}
+
 function shouldExpandTaskOnMobileByDefault(task, displayStatus = null) {
   const visibleStatus = displayStatus || getDisplayStatus(task);
 
@@ -5712,19 +5775,82 @@ function toggleTaskMobileDetails(button) {
   if (!card) return;
 
   const taskId = button.dataset.taskId || card.dataset.taskId;
-  const nextExpanded = !card.classList.contains("is-mobile-expanded");
-  const label = button.querySelector("[data-mobile-toggle-label]");
+  const desktop = isDesktopViewport();
+  const className = desktop ? "is-desktop-expanded" : "is-mobile-expanded";
+  const nextExpanded = !card.classList.contains(className);
 
-  card.classList.toggle("is-mobile-expanded", nextExpanded);
-  button.setAttribute("aria-expanded", String(nextExpanded));
-
-  if (label) {
-    label.textContent = nextExpanded ? "Thu gọn" : "Xem chi tiết";
-  }
+  card.classList.toggle(className, nextExpanded);
 
   if (taskId) {
-    state.mobileTaskDetailOverrides.set(taskId, nextExpanded);
+    if (desktop) {
+      state.desktopTaskDetailOverrides.set(taskId, nextExpanded);
+    } else {
+      state.mobileTaskDetailOverrides.set(taskId, nextExpanded);
+    }
   }
+
+  updateTaskDetailToggleLabels();
+}
+
+function renderDesktopTaskSummary(task, mode, employeeName, initialCountdownText) {
+  const photoCount = getTaskPhotoCount(task);
+  const requiredPhotoCount = getTaskRequiredPhotoCount(task);
+  const photoText = taskRequiresPhotos(task)
+    ? `${photoCount}/${requiredPhotoCount} hình`
+    : `${photoCount} hình`;
+
+  return `
+    <div class="task-desktop-summary" aria-label="Tóm tắt công việc trên desktop">
+      <div class="task-desktop-summary-item is-employee">
+        <span>Nhân viên</span>
+        <strong title="${escapeHtml(employeeName)}">${escapeHtml(employeeName)}</strong>
+      </div>
+      <div class="task-desktop-summary-item is-date">
+        <span>Ngày giao</span>
+        <strong title="${escapeHtml(formatDateOnly(getTaskDateValue(task)))}">${escapeHtml(formatDateOnly(getTaskDateValue(task)))}</strong>
+      </div>
+      <div class="task-desktop-summary-item is-countdown">
+        <span>Đếm ngược</span>
+        <strong data-countdown title="${escapeHtml(initialCountdownText)}">${initialCountdownText}</strong>
+      </div>
+      <div class="task-desktop-summary-item is-duration">
+        <span>Quy định</span>
+        <strong title="${escapeHtml(formatMinutes(task.deadlineMinutes))}">${formatMinutes(task.deadlineMinutes)}</strong>
+      </div>
+      <div class="task-desktop-summary-item is-photos">
+        <span>Ảnh báo cáo</span>
+        <strong title="${escapeHtml(photoText)}">${escapeHtml(photoText)}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderDesktopTaskQuickActions(task, mode) {
+  const buttons = [];
+  const photoCount = getTaskPhotoCount(task);
+  const canViewPhotos = photoCount > 0 && (mode === "admin" || mode === "employee");
+  const canEditPhotoRequirement = mode === "admin"
+    && hasPermission("managePhotoRequirements")
+    && task.status !== "completed";
+
+  if (canViewPhotos) {
+    buttons.push(`
+      <button class="btn ghost small" data-action="view-task-photos" data-task-id="${escapeHtml(task.id)}" type="button">
+        Ảnh (${photoCount})
+      </button>
+    `);
+  }
+
+  if (canEditPhotoRequirement) {
+    buttons.push(`
+      <button class="btn ghost small" data-action="edit-photo-requirement" data-task-id="${escapeHtml(task.id)}" type="button">
+        Chỉnh ảnh
+      </button>
+    `);
+  }
+
+  if (!buttons.length) return "";
+  return `<div class="task-desktop-quick-actions">${buttons.join("")}</div>`;
 }
 
 function renderTaskCard(task, mode) {
@@ -5755,8 +5881,13 @@ function renderTaskCard(task, mode) {
     : "";
 
   const mobileExpanded = isTaskExpandedOnMobile(task, displayStatus);
+  const desktopExpanded = isTaskExpandedOnDesktop(task);
   const mobileExpandedClass = mobileExpanded ? "is-mobile-expanded" : "";
-  const mobileToggleText = mobileExpanded ? "Thu gọn" : "Xem chi tiết";
+  const desktopExpandedClass = desktopExpanded ? "is-desktop-expanded" : "";
+  const activeExpanded = isDesktopViewport()
+    ? (state.desktopTaskViewMode === "detail" || desktopExpanded)
+    : mobileExpanded;
+  const mobileToggleText = activeExpanded ? "Thu gọn" : "Chi tiết";
   const mobileDetailsId = `task-mobile-details-${String(task.id || "task").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
   const initialCountdownText = getInitialCountdownText(task);
@@ -5771,11 +5902,11 @@ function renderTaskCard(task, mode) {
   });
 
   return `
-    <article class="task-card ${taskCardClass(displayStatus)} ${attentionClass} ${mobileExpandedClass}" data-task-card data-task-id="${escapeHtml(task.id)}" data-work-order-id="${escapeHtml(task.workOrderId || "legacy")}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
+    <article class="task-card ${taskCardClass(displayStatus)} ${attentionClass} ${mobileExpandedClass} ${desktopExpandedClass}" data-task-card data-task-id="${escapeHtml(task.id)}" data-work-order-id="${escapeHtml(task.workOrderId || "legacy")}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
       <div class="task-top">
         <div class="task-heading-copy">
-          <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
-          <p class="task-desc">${escapeHtml(task.description)}</p>
+          <h4 class="task-title" title="${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
+          <p class="task-desc" title="${escapeHtml(task.description)}">${escapeHtml(task.description)}</p>
         </div>
         <span class="status-pill status-${displayStatus}">${statusLabel(displayStatus)}</span>
       </div>
@@ -5795,17 +5926,23 @@ function renderTaskCard(task, mode) {
         </div>
       </div>
 
-      <button
-        class="task-mobile-details-toggle"
-        type="button"
-        data-action="toggle-task-mobile-details"
-        data-task-id="${escapeHtml(task.id)}"
-        aria-expanded="${mobileExpanded ? "true" : "false"}"
-        aria-controls="${escapeHtml(mobileDetailsId)}"
-      >
-        <span data-mobile-toggle-label>${mobileToggleText}</span>
-        <span class="task-mobile-toggle-icon" aria-hidden="true">⌄</span>
-      </button>
+      ${renderDesktopTaskSummary(task, mode, employeeName, initialCountdownText)}
+
+      <div class="task-compact-actions">
+        ${renderDesktopTaskQuickActions(task, mode)}
+        ${taskActions}
+        <button
+          class="task-mobile-details-toggle"
+          type="button"
+          data-action="toggle-task-mobile-details"
+          data-task-id="${escapeHtml(task.id)}"
+          aria-expanded="${activeExpanded ? "true" : "false"}"
+          aria-controls="${escapeHtml(mobileDetailsId)}"
+        >
+          <span data-mobile-toggle-label>${mobileToggleText}</span>
+          <span class="task-mobile-toggle-icon" aria-hidden="true">⌄</span>
+        </button>
+      </div>
 
       <div class="task-mobile-details" id="${escapeHtml(mobileDetailsId)}">
         <div class="task-meta task-meta-primary">
@@ -5850,8 +5987,6 @@ function renderTaskCard(task, mode) {
         ${renderLunchBreakHistoryBox(task)}
         ${renderResultBox(task)}
       </div>
-
-      ${taskActions}
     </article>
   `;
 }
@@ -6306,6 +6441,17 @@ function renderTaskActions(task, permissions) {
 
   return `<div class="task-actions">${buttons.join("")}</div>`;
 }
+
+els.desktopCompactViewBtn?.addEventListener("click", () => applyDesktopTaskViewMode("compact"));
+els.desktopDetailedViewBtn?.addEventListener("click", () => applyDesktopTaskViewMode("detail"));
+
+state.desktopTaskViewMode = readSavedDesktopTaskViewMode();
+applyDesktopTaskViewMode(state.desktopTaskViewMode);
+
+window.addEventListener("resize", () => {
+  window.clearTimeout(window.__taskDetailLabelResizeTimer);
+  window.__taskDetailLabelResizeTimer = window.setTimeout(updateTaskDetailToggleLabels, 120);
+});
 
 // Bắt riêng thao tác bấm vào toàn bộ ô “Ảnh báo cáo” của Admin.
 // Dùng capture để tránh bị các listener khác nuốt sự kiện trên desktop/mobile.

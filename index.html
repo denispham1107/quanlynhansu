@@ -3386,6 +3386,640 @@
         font-size: 12px !important;
       }
     }
+
+
+    /* =========================================================
+       Giao diện desktop compact: ưu tiên hiển thị nhiều Phiếu
+       công việc trong cùng một màn hình nhưng vẫn giữ đầy đủ
+       dữ liệu ở nút Chi tiết. Mobile tiếp tục dùng bố cục riêng.
+       ========================================================= */
+    .desktop-task-view-switch,
+    .task-desktop-summary,
+    .task-desktop-quick-actions {
+      display: none;
+    }
+
+    @media (min-width: 769px) {
+      .page {
+        width: min(1500px, calc(100% - 42px));
+      }
+
+      .management-dashboard-hero {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        align-items: center !important;
+        gap: 26px !important;
+        min-height: 0 !important;
+        padding: 24px 30px !important;
+      }
+
+      .management-dashboard-copy {
+        gap: 5px !important;
+      }
+
+      .management-dashboard-hero .eyebrow {
+        margin: 0 0 4px !important;
+        padding: 5px 10px !important;
+        font-size: 10px !important;
+      }
+
+      .management-dashboard-hero h2 {
+        margin: 0 !important;
+        font-size: clamp(25px, 2vw, 34px) !important;
+        line-height: 1.12 !important;
+      }
+
+      .management-dashboard-hero .dashboard-description {
+        margin: 6px 0 0 !important;
+        font-size: 13px !important;
+      }
+
+      .management-dashboard-actions {
+        display: grid !important;
+        grid-template-columns: repeat(4, minmax(135px, auto)) !important;
+        align-items: center !important;
+        gap: 10px !important;
+        width: auto !important;
+      }
+
+      .management-dashboard-actions > .btn,
+      .management-dashboard-actions .mobile-data-menu-trigger {
+        width: auto !important;
+        min-width: 145px !important;
+        min-height: 44px !important;
+        padding: 10px 15px !important;
+        border-radius: 13px !important;
+        font-size: 13px !important;
+        white-space: nowrap !important;
+      }
+
+      .dashboard-data-actions {
+        display: block !important;
+        position: relative;
+      }
+
+      .dashboard-data-actions .mobile-data-menu-trigger {
+        display: inline-flex !important;
+      }
+
+      .dashboard-data-actions .mobile-data-menu {
+        position: absolute !important;
+        top: calc(100% + 8px) !important;
+        right: 0 !important;
+        z-index: 30 !important;
+        display: none !important;
+        width: 190px !important;
+        padding: 8px !important;
+        border: 1px solid #dbe7f7 !important;
+        border-radius: 14px !important;
+        background: #ffffff !important;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16) !important;
+      }
+
+      .dashboard-data-actions.is-open .mobile-data-menu {
+        display: grid !important;
+        gap: 7px !important;
+      }
+
+      .dashboard-data-actions .mobile-data-menu .btn {
+        width: 100% !important;
+        min-height: 38px !important;
+        padding: 8px 10px !important;
+        font-size: 12px !important;
+      }
+
+      .management-stats-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 12px !important;
+        margin: 14px 0 !important;
+      }
+
+      .management-stats-grid .dashboard-stat-card {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        min-height: 68px !important;
+        padding: 13px 18px !important;
+        border-radius: 16px !important;
+      }
+
+      .management-stats-grid .dashboard-stat-card span {
+        font-size: 13px !important;
+      }
+
+      .management-stats-grid .dashboard-stat-card strong {
+        font-size: 27px !important;
+        line-height: 1 !important;
+      }
+
+      .task-panel {
+        padding: 18px 20px 22px !important;
+      }
+
+      .task-filter-row {
+        align-items: flex-start !important;
+        gap: 18px !important;
+      }
+
+      .task-filter-row > div:first-child {
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+      }
+
+      .task-filter-row h3 {
+        margin: 0 !important;
+        font-size: 21px !important;
+      }
+
+      .task-filter-row p.muted {
+        margin: 4px 0 0 !important;
+        font-size: 12.5px !important;
+      }
+
+      .task-panel-header-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 10px;
+        flex: 0 0 auto;
+      }
+
+      .desktop-task-view-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid #dbe7f7;
+        border-radius: 12px;
+        background: #f8fbff;
+      }
+
+      .desktop-task-view-btn {
+        min-height: 34px;
+        padding: 6px 11px;
+        border: 0;
+        border-radius: 9px;
+        background: transparent;
+        color: #64748b;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .desktop-task-view-btn.is-active {
+        background: #ffffff;
+        color: #1d4ed8;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);
+      }
+
+      .employee-status-summary {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 9px !important;
+        margin: 12px 0 14px !important;
+      }
+
+      .employee-status-card {
+        min-width: 0 !important;
+        padding: 10px 12px !important;
+        border-radius: 14px !important;
+        box-shadow: none !important;
+      }
+
+      .employee-status-card strong {
+        margin-bottom: 6px !important;
+        font-size: 11.5px !important;
+        line-height: 1.3 !important;
+      }
+
+      .employee-status-card .employee-status-names {
+        max-height: 48px;
+        overflow: auto;
+        gap: 4px !important;
+        font-size: 11px !important;
+      }
+
+      .employee-status-chip {
+        padding: 3px 7px !important;
+        font-size: 10.5px !important;
+      }
+
+      .task-filter-row-secondary {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.8fr) !important;
+        align-items: start !important;
+        gap: 10px !important;
+        margin-top: 4px !important;
+      }
+
+      .enhanced-filters {
+        display: grid !important;
+        grid-template-columns: repeat(5, minmax(130px, 1fr)) !important;
+        align-items: center !important;
+        gap: 8px !important;
+        width: 100% !important;
+      }
+
+      .enhanced-filters select,
+      .enhanced-filters input,
+      .enhanced-filters .btn {
+        min-width: 0 !important;
+        width: 100% !important;
+        min-height: 42px !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
+        border-radius: 12px !important;
+        font-size: 12px !important;
+      }
+
+      .admin-work-order-search {
+        width: 100% !important;
+        margin: 0 !important;
+      }
+
+      .admin-work-order-search-input {
+        min-height: 42px !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
+        font-size: 12.5px !important;
+      }
+
+      .admin-work-order-search-summary {
+        margin: 5px 0 0 !important;
+        font-size: 11px !important;
+      }
+
+      .filter-summary {
+        margin: 7px 0 10px !important;
+        font-size: 11.5px !important;
+      }
+
+      .task-list {
+        display: grid !important;
+        gap: 9px !important;
+      }
+
+      .ticket-group {
+        margin: 0 !important;
+        padding: 8px 10px !important;
+        border-radius: 15px !important;
+        box-shadow: none !important;
+      }
+
+      .ticket-group-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-width: 0;
+        margin-bottom: 7px;
+      }
+
+      .ticket-group-header {
+        min-width: 0;
+        margin: 0 !important;
+      }
+
+      .ticket-group-header > div {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+
+      .ticket-group-header h4 {
+        min-width: 0;
+        margin: 0 !important;
+        overflow: hidden;
+        color: #334e78;
+        font-size: 13.5px !important;
+        line-height: 1.25 !important;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ticket-badge,
+      .admin-confirm-attention-badge {
+        flex: 0 0 auto;
+        margin: 0 !important;
+        padding: 4px 8px !important;
+        font-size: 10px !important;
+        line-height: 1.15 !important;
+      }
+
+      .ticket-actions {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        gap: 6px !important;
+        margin: 0 !important;
+        flex: 0 0 auto;
+      }
+
+      .ticket-actions .btn {
+        min-height: 34px !important;
+        padding: 6px 9px !important;
+        border-radius: 10px !important;
+        font-size: 11px !important;
+        white-space: nowrap !important;
+      }
+
+      .ticket-tasks {
+        display: grid !important;
+        gap: 6px !important;
+      }
+
+      .task-card {
+        display: grid !important;
+        grid-template-columns: minmax(260px, 1.25fr) minmax(540px, 2.55fr) auto !important;
+        grid-template-areas:
+          "task-top task-summary task-actions"
+          "task-details task-details task-details" !important;
+        align-items: center !important;
+        gap: 9px 14px !important;
+        min-height: 72px !important;
+        padding: 9px 11px !important;
+        border-left-width: 5px !important;
+        border-radius: 13px !important;
+        box-shadow: none !important;
+      }
+
+      .task-card.is-draft {
+        border-left-width: 5px !important;
+        box-shadow: none !important;
+      }
+
+      .task-card.is-draft::after {
+        display: none !important;
+      }
+
+      .task-top {
+        grid-area: task-top;
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start !important;
+        gap: 7px !important;
+        min-width: 0;
+        margin: 0 !important;
+      }
+
+      .task-heading-copy {
+        min-width: 0;
+      }
+
+      .task-title {
+        margin: 0 !important;
+        overflow: hidden;
+        font-size: 14px !important;
+        line-height: 1.25 !important;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .task-desc {
+        display: block !important;
+        margin: 3px 0 0 !important;
+        overflow: hidden;
+        color: #64748b;
+        font-size: 11px !important;
+        line-height: 1.25 !important;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .task-desc:empty {
+        display: none !important;
+      }
+
+      .status-pill {
+        max-width: 108px;
+        padding: 4px 7px !important;
+        font-size: 9.5px !important;
+        line-height: 1.15 !important;
+        text-align: center;
+        white-space: normal !important;
+      }
+
+      .task-desktop-summary {
+        grid-area: task-summary;
+        display: grid;
+        grid-template-columns: 0.9fr 0.92fr 1.45fr 0.75fr 0.78fr;
+        align-items: stretch;
+        min-width: 0;
+        border-left: 1px solid #e2e8f0;
+      }
+
+      .task-desktop-summary-item {
+        display: grid;
+        align-content: center;
+        min-width: 0;
+        padding: 2px 10px;
+        border-right: 1px solid #e2e8f0;
+      }
+
+      .task-desktop-summary-item span,
+      .task-desktop-summary-item strong {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .task-desktop-summary-item span {
+        margin-bottom: 3px;
+        color: #64748b;
+        font-size: 9.5px;
+        font-weight: 800;
+      }
+
+      .task-desktop-summary-item strong {
+        color: #334e78;
+        font-size: 11.5px;
+        line-height: 1.25;
+      }
+
+      .task-desktop-summary-item.is-countdown strong {
+        color: #1d4ed8;
+      }
+
+      .task-card.is-overdue .task-desktop-summary-item.is-countdown strong,
+      .task-card.is-near-due .task-desktop-summary-item.is-countdown strong {
+        color: #b45309;
+      }
+
+      .task-compact-actions {
+        grid-area: task-actions;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        min-width: max-content;
+      }
+
+      .task-desktop-quick-actions {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .task-actions {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        gap: 5px !important;
+        margin: 0 !important;
+      }
+
+      .task-actions .btn,
+      .task-desktop-quick-actions .btn {
+        min-height: 34px !important;
+        padding: 6px 8px !important;
+        border-radius: 10px !important;
+        font-size: 10.5px !important;
+        white-space: nowrap !important;
+      }
+
+      .task-mobile-details-toggle {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        width: auto !important;
+        min-width: 72px;
+        min-height: 34px;
+        margin: 0 !important;
+        padding: 6px 8px;
+        border: 1px solid #dbe7f7;
+        border-radius: 10px;
+        background: #f8fbff;
+        color: #1d4ed8;
+        font: inherit;
+        font-size: 10.5px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .task-mobile-toggle-icon {
+        font-size: 14px;
+        line-height: 1;
+        transition: transform 0.18s ease;
+      }
+
+      .task-card.is-desktop-expanded .task-mobile-toggle-icon,
+      html.desktop-task-detail-mode .task-mobile-toggle-icon {
+        transform: rotate(180deg);
+      }
+
+      .task-mobile-summary {
+        display: none !important;
+      }
+
+      .task-mobile-details {
+        display: none !important;
+        grid-area: task-details;
+        min-width: 0;
+        padding-top: 8px;
+        border-top: 1px dashed #dbe7f7;
+      }
+
+      .task-card.is-desktop-expanded,
+      html.desktop-task-detail-mode .task-card {
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        grid-template-areas:
+          "task-top task-actions"
+          "task-details task-details" !important;
+        align-items: start !important;
+        padding: 12px 14px !important;
+      }
+
+      .task-card.is-desktop-expanded .task-desktop-summary,
+      html.desktop-task-detail-mode .task-desktop-summary {
+        display: none !important;
+      }
+
+      .task-card.is-desktop-expanded .task-mobile-details,
+      html.desktop-task-detail-mode .task-mobile-details {
+        display: block !important;
+      }
+
+      .task-card.is-desktop-expanded .task-title,
+      html.desktop-task-detail-mode .task-title,
+      .task-card.is-desktop-expanded .task-desc,
+      html.desktop-task-detail-mode .task-desc {
+        overflow: visible;
+        text-overflow: clip;
+        white-space: normal;
+      }
+
+      .task-mobile-details .task-meta {
+        display: grid !important;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 7px !important;
+        margin-top: 7px !important;
+      }
+
+      .task-mobile-details .meta-box {
+        min-height: 0 !important;
+        padding: 8px 10px !important;
+        border-radius: 11px !important;
+      }
+
+      .task-mobile-details .meta-box span {
+        margin-bottom: 2px !important;
+        font-size: 9.5px !important;
+      }
+
+      .task-mobile-details .meta-box strong {
+        font-size: 11px !important;
+      }
+
+      .task-mobile-details .photo-report-box,
+      .task-mobile-details .hotel-info-box,
+      .task-mobile-details .extension-box,
+      .task-mobile-details .result-box {
+        margin-top: 8px !important;
+        padding: 9px 11px !important;
+        border-radius: 12px !important;
+      }
+
+      .task-mobile-details .photo-report-box span,
+      .task-mobile-details .photo-report-hint {
+        font-size: 10.5px !important;
+      }
+
+      .task-card.is-awaiting-admin-confirmation {
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.10) !important;
+      }
+    }
+
+    @media (min-width: 769px) and (max-width: 1180px) {
+      .management-dashboard-hero {
+        grid-template-columns: 1fr !important;
+      }
+
+      .management-dashboard-actions {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        width: 100% !important;
+      }
+
+      .task-filter-row-secondary {
+        grid-template-columns: 1fr !important;
+      }
+
+      .task-card {
+        grid-template-columns: minmax(220px, 1fr) minmax(460px, 2.1fr) !important;
+        grid-template-areas:
+          "task-top task-summary"
+          "task-actions task-actions"
+          "task-details task-details" !important;
+      }
+
+      .task-compact-actions {
+        justify-content: flex-end;
+      }
+    }
 </style>
 </head>
 <body>
@@ -3482,7 +4116,7 @@
               aria-expanded="false"
               aria-controls="mobileDataMenu"
             >Xuất / Nhập dữ liệu</button>
-            <div id="mobileDataMenu" class="mobile-data-menu" aria-hidden="false">
+            <div id="mobileDataMenu" class="mobile-data-menu" aria-hidden="true">
               <button id="exportDataBtn" class="btn ghost large" type="button">Xuất dữ liệu</button>
               <button id="importDataBtn" class="btn ghost large" type="button">Nhập dữ liệu</button>
             </div>
@@ -3516,7 +4150,13 @@
             <p class="muted">Admin thấy toàn bộ công việc của shop.</p>
             <div id="adminEmployeeStatusSummary" class="employee-status-summary hidden"></div>
           </div>
-          <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
+          <div class="task-panel-header-actions">
+            <div class="desktop-task-view-switch" role="group" aria-label="Chế độ hiển thị Phiếu công việc trên desktop">
+              <button id="desktopCompactViewBtn" class="desktop-task-view-btn is-active" type="button" aria-pressed="true">Thu gọn</button>
+              <button id="desktopDetailedViewBtn" class="desktop-task-view-btn" type="button" aria-pressed="false">Chi tiết</button>
+            </div>
+            <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
+          </div>
         </div>
         <div class="task-filter-row-secondary">
           <div class="filters enhanced-filters">
@@ -3556,27 +4196,28 @@
             <input id="adminDateTo" class="date-filter-control hidden" type="date" aria-label="Đến ngày" />
             <button id="adminClearDateFilter" class="btn ghost small" type="button">Xóa lọc ngày</button>
           </div>
+          <div class="admin-work-order-search">
+            <div class="admin-work-order-search-control">
+              <span class="admin-work-order-search-icon" aria-hidden="true">⌕</span>
+              <input
+                id="adminWorkOrderSearch"
+                class="admin-work-order-search-input"
+                type="search"
+                placeholder="Tìm kiếm Phiếu công việc"
+                autocomplete="off"
+                aria-label="Tìm kiếm tên Phiếu công việc"
+                aria-autocomplete="list"
+                aria-controls="adminWorkOrderSuggestions"
+                aria-expanded="false"
+              />
+              <button id="adminClearWorkOrderSearch" class="admin-work-order-search-clear hidden" type="button" aria-label="Xóa nội dung tìm kiếm">×</button>
+              <div id="adminWorkOrderSuggestions" class="admin-work-order-suggestions hidden" role="listbox" aria-label="Gợi ý tên Phiếu công việc"></div>
+            </div>
+            <p id="adminWorkOrderSearchSummary" class="admin-work-order-search-summary hidden"></p>
+          </div>
         </div>
         <p id="adminDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
-        <div class="admin-work-order-search">
-          <div class="admin-work-order-search-control">
-            <span class="admin-work-order-search-icon" aria-hidden="true">⌕</span>
-            <input
-              id="adminWorkOrderSearch"
-              class="admin-work-order-search-input"
-              type="search"
-              placeholder="Tìm kiếm"
-              autocomplete="off"
-              aria-label="Tìm kiếm tên Phiếu công việc"
-              aria-autocomplete="list"
-              aria-controls="adminWorkOrderSuggestions"
-              aria-expanded="false"
-            />
-            <button id="adminClearWorkOrderSearch" class="admin-work-order-search-clear hidden" type="button" aria-label="Xóa nội dung tìm kiếm">×</button>
-            <div id="adminWorkOrderSuggestions" class="admin-work-order-suggestions hidden" role="listbox" aria-label="Gợi ý tên Phiếu công việc"></div>
-          </div>
-          <p id="adminWorkOrderSearchSummary" class="admin-work-order-search-summary hidden"></p>
-        </div>
+
         <div id="adminCompletedTypeReport" class="completed-type-report hidden"></div>
         <div id="adminTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>
