@@ -16,8 +16,39 @@ service cloud.firestore {
         && get(userDoc(request.auth.uid)).data.role == "admin";
     }
 
+    function isSupervisor() {
+      return signedIn()
+        && exists(userDoc(request.auth.uid))
+        && get(userDoc(request.auth.uid)).data.role == "supervisor";
+    }
+
+    function isManagement() {
+      return isAdmin() || isSupervisor();
+    }
+
+    function hasPermission(permissionKey) {
+      return isAdmin()
+        || (
+          isSupervisor()
+          && get(userDoc(request.auth.uid)).data.keys().hasAny(["permissions"])
+          && get(userDoc(request.auth.uid)).data.permissions is map
+          && get(userDoc(request.auth.uid)).data.permissions.get(permissionKey, false) == true
+        );
+    }
+
+    function canCreateManagementNotification() {
+      return hasPermission("createWorkOrder")
+        || hasPermission("editWorkOrder")
+        || hasPermission("dispatchWorkOrder")
+        || hasPermission("reviewTasks")
+        || hasPermission("reassignTasks")
+        || hasPermission("extendTaskTime")
+        || hasPermission("manageEmployeeAccounts")
+        || hasPermission("importData");
+    }
+
     function isValidRole(role) {
-      return role in ["admin", "employee"];
+      return role in ["admin", "supervisor", "employee"];
     }
 
     function isValidTaskStatus(status) {
@@ -86,7 +117,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       // Admin đọc tất cả user; nhân viên chỉ đọc hồ sơ của chính mình.
-      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow read: if isManagement() || (signedIn() && request.auth.uid == userId);
 
       // Admin được nhập/khôi phục dữ liệu users từ file backup JSON.
       allow create, update: if isAdmin();
@@ -107,10 +138,28 @@ service cloud.firestore {
       allow update: if isAdmin()
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.email == resource.data.email
-        && request.resource.data.role in ["admin", "employee"];
+        && request.resource.data.role in ["admin", "supervisor", "employee"];
 
-      // Có thể xoá hồ sơ nhân viên, nhưng không cho Admin tự xoá chính mình từ client.
-      allow delete: if isAdmin() && request.auth.uid != userId;
+      // Giám sát có quyền Quản lý tài khoản chỉ được tạo hồ sơ Nhân viên thường.
+      // Không được tạo Admin/Giám sát và không được tự thêm field phân quyền.
+      allow create: if hasPermission("manageEmployeeAccounts")
+        && !isAdmin()
+        && request.resource.data.keys().hasOnly(["uid", "name", "email", "role", "createdByUid", "createdAt"])
+        && request.resource.data.uid == userId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.email is string
+        && request.resource.data.role == "employee"
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+
+      // Có thể xoá hồ sơ nhân viên, nhưng không cho người quản lý tự xoá chính mình.
+      // Giám sát chỉ được xoá tài khoản Nhân viên, không được xoá Admin hoặc Giám sát khác.
+      allow delete: if request.auth.uid != userId
+        && (
+          isAdmin()
+          || (hasPermission("manageEmployeeAccounts") && resource.data.role == "employee")
+        );
     }
 
     match /workOrders/{workOrderId} {
@@ -121,7 +170,7 @@ service cloud.firestore {
       // Admin được nhập/khôi phục dữ liệu phiếu từ file backup JSON.
       allow create, update: if isAdmin();
 
-      allow create: if isAdmin()
+      allow create: if (hasPermission("createWorkOrder") || hasPermission("editWorkOrder") || hasPermission("importData"))
         && request.resource.data.keys().hasOnly([
           "id",
           "name",
@@ -139,7 +188,8 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.taskCount is int
         && request.resource.data.taskCount > 0
-        && request.resource.data.status in ["draft", "dispatched"];
+        && request.resource.data.status in ["draft", "dispatched"]
+        && (request.resource.data.status == "draft" || hasPermission("dispatchWorkOrder"));
 
       // Chỉ cho phép chuyển từ "draft" (chưa giao việc) sang "dispatched" (đã giao việc).
       // Việc sửa nội dung phiếu nháp được xử lý bằng cách xoá + tạo lại (create/delete ở trên).
@@ -148,12 +198,32 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status"])
         && request.resource.data.status == "dispatched";
 
-      allow delete: if isAdmin();
+      // Giám sát có quyền Giao Phiếu chỉ được chuyển Phiếu nháp sang đã giao.
+      allow update: if hasPermission("dispatchWorkOrder")
+        && resource.data.status == "draft"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status"])
+        && request.resource.data.status == "dispatched";
+
+      // Khi xoá nhân viên, cập nhật lại số lượng công việc còn lại trong Phiếu.
+      allow update: if hasPermission("manageEmployeeAccounts")
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["taskCount"])
+        && request.resource.data.taskCount is int
+        && request.resource.data.taskCount > 0;
+
+      // Quyền Nhập dữ liệu được ghi đè metadata Phiếu từ file sao lưu.
+      allow update: if hasPermission("importData");
+
+      allow delete: if isAdmin()
+        || hasPermission("deleteWorkOrder")
+        || (hasPermission("editWorkOrder") && resource.data.status == "draft")
+        || hasPermission("deleteAllWorkOrders")
+        || hasPermission("manageEmployeeAccounts")
+        || hasPermission("importData");
     }
 
     match /tasks/{taskId} {
       // Admin đọc tất cả task; nhân viên chỉ đọc task được giao cho chính mình.
-      allow read: if isAdmin()
+      allow read: if isManagement()
         || (signedIn() && resource.data.assignedToUid == request.auth.uid);
 
       // Admin được nhập/khôi phục dữ liệu task từ file backup JSON.
@@ -161,7 +231,7 @@ service cloud.firestore {
 
       // Chỉ Admin được giao việc. Cho phép tạo ở trạng thái "draft" (chưa giao việc,
       // thông tin có thể chưa đầy đủ) hoặc "doing" (đã giao việc chính thức, bắt đầu đếm giờ).
-      allow create: if isAdmin()
+      allow create: if (hasPermission("createWorkOrder") || hasPermission("editWorkOrder") || hasPermission("importData"))
         && request.resource.data.keys().hasOnly([
           "id",
           "title",
@@ -275,6 +345,7 @@ service cloud.firestore {
         && request.resource.data.photoCount is int
         && request.resource.data.photoCount == 0
         && request.resource.data.lastPhotoUploadedAt == null
+        && (request.resource.data.status == "draft" || hasPermission("dispatchWorkOrder"))
         && (
           (
             request.resource.data.status == "draft"
@@ -437,12 +508,132 @@ service cloud.firestore {
         && request.resource.data.assignedByUid == resource.data.assignedByUid
         && isValidTaskStatus(request.resource.data.status);
 
-      allow delete: if isAdmin();
+      // Giao task nháp: chỉ được thay đổi các field bắt đầu/xếp hàng thời gian.
+      allow update: if hasPermission("dispatchWorkOrder")
+        && resource.data.status == "draft"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "dispatchedAt",
+          "queueStartAt",
+          "deadlineAt",
+          "pauseStartedAt",
+          "remainingMsAtPause",
+          "accumulatedWorkedMs"
+        ])
+        && request.resource.data.status in ["waiting_assignee", "doing", "lunch_break", "hotel"];
+
+      // Đổi nhân viên, chuyển về Chờ chọn người hoặc bắt đầu lại task đang chờ.
+      allow update: if hasPermission("reassignTasks")
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.assignedByUid == resource.data.assignedByUid
+        && request.resource.data.workOrderId == resource.data.workOrderId
+        && request.resource.data.workOrderName == resource.data.workOrderName
+        && request.resource.data.deadlineMinutes == resource.data.deadlineMinutes
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "assignedToUid",
+          "assignedToName",
+          "status",
+          "dispatchedAt",
+          "queueStartAt",
+          "deadlineAt",
+          "pauseStartedAt",
+          "remainingMsAtPause",
+          "accumulatedWorkedMs",
+          "assigneeChangeHistory"
+        ])
+        && request.resource.data.assignedToUid is string
+        && (
+          request.resource.data.assignedToUid == ""
+          || (
+            exists(userDoc(request.resource.data.assignedToUid))
+            && get(userDoc(request.resource.data.assignedToUid)).data.role == "employee"
+          )
+        )
+        && request.resource.data.assignedToName is string
+        && isValidTaskStatus(request.resource.data.status);
+
+      // Thêm giờ và lưu lịch sử thêm giờ.
+      allow update: if hasPermission("extendTaskTime")
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.assignedToUid == resource.data.assignedToUid
+        && request.resource.data.assignedByUid == resource.data.assignedByUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "deadlineMinutes",
+          "deadlineAt",
+          "status",
+          "timeExtensionCount",
+          "timeExtensionTotalMinutes",
+          "timeExtensions",
+          "lastTimeExtendedAt",
+          "lastTimeExtendedByUid",
+          "lastTimeExtendedByName"
+        ])
+        && request.resource.data.deadlineMinutes is int
+        && request.resource.data.deadlineMinutes >= resource.data.deadlineMinutes
+        && request.resource.data.deadlineMinutes <= 10080
+        && isValidTaskStatus(request.resource.data.status);
+
+      // Duyệt hoàn thành, yêu cầu làm lại, kết thúc Nghỉ trưa và dồn lại hàng đợi.
+      allow update: if hasPermission("reviewTasks")
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.assignedToUid == resource.data.assignedToUid
+        && request.resource.data.assignedByUid == resource.data.assignedByUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "submittedAt",
+          "approvedAt",
+          "actualMinutes",
+          "resultType",
+          "differenceMinutes",
+          "differencePercent",
+          "queueStartAt",
+          "deadlineAt"
+        ])
+        && isValidTaskStatus(request.resource.data.status);
+
+      // Chỉnh số lượng ảnh báo cáo bắt buộc.
+      allow update: if hasPermission("managePhotoRequirements")
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["photoRequired", "requiredPhotoCount"])
+        && request.resource.data.photoRequired is bool
+        && request.resource.data.requiredPhotoCount is int
+        && request.resource.data.requiredPhotoCount >= 0
+        && request.resource.data.requiredPhotoCount <= 100;
+
+      // Xóa ảnh báo cáo: chỉ được cập nhật metadata ảnh, file thật do Storage Rules kiểm tra riêng.
+      allow update: if hasPermission("deleteReportPhotos")
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["photos", "photoCount", "lastPhotoUploadedAt"])
+        && request.resource.data.photos is list
+        && request.resource.data.photos.size() <= 200
+        && request.resource.data.photoCount is int
+        && request.resource.data.photoCount == request.resource.data.photos.size();
+
+      // Xóa nhân viên có thể làm thay đổi thứ tự/số lượng task còn lại trong cùng Phiếu.
+      allow update: if hasPermission("manageEmployeeAccounts")
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["rowIndex", "workOrderTaskCount"])
+        && request.resource.data.rowIndex is int
+        && request.resource.data.rowIndex >= 0
+        && request.resource.data.workOrderTaskCount is int
+        && request.resource.data.workOrderTaskCount > 0;
+
+      // Nhập dữ liệu có thể khôi phục toàn bộ field task, nhưng không cho phép qua collection users.
+      allow update: if hasPermission("importData");
+
+      allow delete: if isAdmin()
+        || hasPermission("deleteWorkOrder")
+        || (hasPermission("editWorkOrder") && resource.data.status == "draft")
+        || hasPermission("deleteAllWorkOrders")
+        || hasPermission("manageEmployeeAccounts")
+        || hasPermission("importData");
     }
 
     match /notifications/{notificationId} {
       // Mỗi người chỉ đọc thông báo gửi cho chính mình. Admin có thể đọc tất cả để hỗ trợ kiểm tra lỗi.
       allow read: if isAdmin()
+        || hasPermission("exportData")
+        || hasPermission("deleteAllWorkOrders")
+        || hasPermission("manageEmployeeAccounts")
+        || hasPermission("importData")
         || (signedIn() && resource.data.recipientUid == request.auth.uid);
 
       // Admin được nhập/khôi phục thông báo từ file backup JSON.
@@ -479,7 +670,7 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.readAt == null
         && (
-          isAdmin()
+          canCreateManagementNotification()
           || (
             request.resource.data.type == "task_submitted"
             && get(taskDoc(request.resource.data.taskId)).data.assignedToUid == request.auth.uid
@@ -493,19 +684,34 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readAt"])
         && request.resource.data.readAt == request.time;
 
+      // Giám sát có quyền Nhập dữ liệu được khôi phục notification từ backup.
+      allow create, update: if hasPermission("importData");
+
       allow delete: if isAdmin()
-        || (signedIn() && resource.data.recipientUid == request.auth.uid);
+        || (signedIn() && resource.data.recipientUid == request.auth.uid)
+        || hasPermission("deleteAllWorkOrders")
+        || hasPermission("manageEmployeeAccounts")
+        || hasPermission("importData");
     }
 
 
     match /hotelDailyReports/{reportId} {
-      // Admin lưu và xem tổng kết Hotel từng ngày.
-      allow read, create, update, delete: if isAdmin();
+      // Admin và Giám sát đều được xem kết quả Hotel.
+      allow read: if isManagement();
+
+      allow create, update: if isAdmin()
+        || hasPermission("manageHotelReports")
+        || hasPermission("manageEmployeeAccounts")
+        || hasPermission("importData");
+
+      allow delete: if isAdmin()
+        || hasPermission("deleteAllWorkOrders")
+        || hasPermission("importData");
     }
 
     match /workTemplates/{templateId} {
       // Admin quản lý danh sách công việc mẫu kèm thời gian hoàn thành.
-      allow read: if isAdmin();
+      allow read: if isManagement();
 
       // Admin được nhập/khôi phục danh sách công việc mẫu từ file backup JSON.
       allow create, update: if isAdmin();
@@ -537,7 +743,9 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == null;
 
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin()
+        || hasPermission("manageWorkTemplates")
+        || hasPermission("importData");
     }
 
     match /timeExtensionReasons/{reasonId} {
@@ -564,7 +772,9 @@ service cloud.firestore {
         && request.resource.data.createdByName is string
         && request.resource.data.createdAt == request.time;
 
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin()
+        || hasPermission("extendTaskTime")
+        || hasPermission("importData");
     }
 
 

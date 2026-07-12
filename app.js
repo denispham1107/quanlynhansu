@@ -70,6 +70,8 @@ const state = {
   user: null,
   profile: null,
   employees: [],
+  supervisors: [],
+  staffAccounts: [],
   tasks: [],
   workOrders: [],
   timeExtensionReasons: [],
@@ -116,8 +118,73 @@ const state = {
   photoViewerPhotos: [],
   photoViewerIndex: -1,
   photoReportSelectedKeys: new Set(),
-  deletingEmployeeUid: null
+  deletingEmployeeUid: null,
+  editingSupervisorUid: null
 };
+
+
+// =========================
+// Vai trò Giám sát và phân quyền
+// =========================
+const SUPERVISOR_PERMISSION_DEFINITIONS = [
+  { key: "createWorkOrder", label: "Quyền tạo phiếu", description: "Tạo Phiếu công việc mới và lưu ở trạng thái Chưa giao việc.", primary: true },
+  { key: "deleteWorkOrder", label: "Quyền xóa phiếu", description: "Xóa từng Phiếu công việc và dữ liệu liên quan trong phiếu.", primary: true },
+  { key: "accessEmployeeManager", label: "Quyền truy cập trang Danh sách nhân viên", description: "Mở trang tài khoản nhân viên/giám sát. Nếu không có quyền quản lý tài khoản thì chỉ được xem.", primary: true },
+  { key: "accessWorkTemplates", label: "Quyền truy cập trang Danh sách công việc", description: "Mở và xem danh sách công việc mẫu đã tạo.", primary: true },
+  { key: "dispatchWorkOrder", label: "Giao Phiếu công việc", description: "Giao một Phiếu đang nháp hoặc tạo và giao ngay cho nhân viên." },
+  { key: "editWorkOrder", label: "Sửa Phiếu chưa giao", description: "Sửa tên Phiếu, các dòng công việc, nhân viên, thời gian và yêu cầu ảnh trước khi giao." },
+  { key: "reviewTasks", label: "Duyệt kết quả công việc", description: "Xác nhận hoàn thành, yêu cầu làm lại và kết thúc Phiếu nghỉ trưa." },
+  { key: "reassignTasks", label: "Đổi nhân viên phụ trách", description: "Chuyển công việc sang nhân viên khác hoặc đưa về trạng thái Chờ chọn người." },
+  { key: "extendTaskTime", label: "Thêm giờ công việc", description: "Cộng thêm thời gian và quản lý danh sách mục đích thêm giờ." },
+  { key: "managePhotoRequirements", label: "Chỉnh số ảnh bắt buộc", description: "Thay đổi số lượng ảnh báo cáo bắt buộc của công việc chưa hoàn thành." },
+  { key: "deleteReportPhotos", label: "Xóa ảnh báo cáo", description: "Xóa ảnh đã chọn khỏi Phiếu và xóa file thật trên Firebase Storage." },
+  { key: "manageHotelReports", label: "Lưu Tổng kết Hotel", description: "Nhập vệ sinh, số lượng bé và lưu báo cáo Hotel theo ngày." },
+  { key: "manageWorkTemplates", label: "Quản lý công việc mẫu", description: "Tạo, chỉnh sửa và xóa công việc trong trang Danh sách công việc." },
+  { key: "exportData", label: "Xuất dữ liệu", description: "Tải bản sao lưu JSON của dữ liệu hệ thống." },
+  { key: "importData", label: "Nhập dữ liệu", description: "Khôi phục hoặc ghi đè dữ liệu từ file JSON. Đây là quyền có mức ảnh hưởng cao." },
+  { key: "deleteAllWorkOrders", label: "Xóa toàn bộ Phiếu", description: "Xóa toàn bộ Phiếu, công việc, ảnh báo cáo và thông báo liên quan. Đây là quyền nguy hiểm." },
+  { key: "manageEmployeeAccounts", label: "Quản lý tài khoản nhân viên", description: "Tạo và xóa tài khoản Nhân viên. Không được tạo Giám sát hoặc tự thay đổi quyền Giám sát." }
+];
+
+const SUPERVISOR_PERMISSION_KEYS = SUPERVISOR_PERMISSION_DEFINITIONS.map((item) => item.key);
+
+function isAdminProfile(profile = state.profile) {
+  return profile?.role === "admin";
+}
+
+function isSupervisorProfile(profile = state.profile) {
+  return profile?.role === "supervisor";
+}
+
+function isManagementProfile(profile = state.profile) {
+  return isAdminProfile(profile) || isSupervisorProfile(profile);
+}
+
+function normalizeSupervisorPermissions(value = {}) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return SUPERVISOR_PERMISSION_KEYS.reduce((result, key) => {
+    result[key] = input[key] === true;
+    return result;
+  }, {});
+}
+
+function hasPermission(permissionKey, profile = state.profile) {
+  if (isAdminProfile(profile)) return true;
+  if (!isSupervisorProfile(profile)) return false;
+  return normalizeSupervisorPermissions(profile?.permissions)[permissionKey] === true;
+}
+
+function getGrantedSupervisorPermissionCount(profile) {
+  if (!isSupervisorProfile(profile)) return 0;
+  const permissions = normalizeSupervisorPermissions(profile.permissions);
+  return SUPERVISOR_PERMISSION_KEYS.filter((key) => permissions[key]).length;
+}
+
+function getRoleDisplayName(role) {
+  if (role === "admin") return "Admin";
+  if (role === "supervisor") return "Giám sát";
+  return "Nhân viên";
+}
 
 // =========================
 // DOM helpers
@@ -135,6 +202,18 @@ const els = {
   logoutBtn: $("#logoutBtn"),
   createEmployeeForm: $("#createEmployeeForm"),
   employeeList: $("#employeeList"),
+  createStaffAccountPanel: $("#createStaffAccountPanel"),
+  staffAccountRole: $("#staffAccountRole"),
+  createSupervisorPermissions: $("#createSupervisorPermissions"),
+  createSupervisorPermissionList: $("#createSupervisorPermissionList"),
+  selectAllCreateSupervisorPermissions: $("#selectAllCreateSupervisorPermissions"),
+  clearCreateSupervisorPermissions: $("#clearCreateSupervisorPermissions"),
+  supervisorPermissionModal: $("#supervisorPermissionModal"),
+  supervisorPermissionModalAccount: $("#supervisorPermissionModalAccount"),
+  editSupervisorPermissionList: $("#editSupervisorPermissionList"),
+  selectAllEditSupervisorPermissions: $("#selectAllEditSupervisorPermissions"),
+  clearEditSupervisorPermissions: $("#clearEditSupervisorPermissions"),
+  saveSupervisorPermissionsBtn: $("#saveSupervisorPermissionsBtn"),
   openTaskModalBtn: $("#openTaskModalBtn"),
   floatingCreateTaskBtn: $("#floatingCreateTaskBtn"),
   openWorkTemplatePageBtn: $("#openWorkTemplatePageBtn"),
@@ -142,6 +221,8 @@ const els = {
   exportDataBtn: $("#exportDataBtn"),
   importDataBtn: $("#importDataBtn"),
   importDataInput: $("#importDataInput"),
+  managementDashboardEyebrow: $("#managementDashboardEyebrow"),
+  supervisorPermissionBanner: $("#supervisorPermissionBanner"),
   employeeManagerView: $("#employeeManagerView"),
   backToAdminFromEmployeesBtn: $("#backToAdminFromEmployeesBtn"),
   workTemplateView: $("#workTemplateView"),
@@ -276,6 +357,12 @@ function toast(message, type = "info") {
   $("#toastHost").appendChild(item);
 
   setTimeout(() => item.remove(), 4200);
+}
+
+function requirePermission(permissionKey, deniedMessage = "Tài khoản của bạn chưa được Admin cấp quyền thực hiện chức năng này.") {
+  if (hasPermission(permissionKey)) return true;
+  toast(deniedMessage, "error");
+  return false;
 }
 
 function timestampToDate(value) {
@@ -1058,7 +1145,7 @@ function syncSelectValue(element, value) {
 function showTaskInCurrentDashboard(task) {
   const taskDate = getTaskDateValue(task);
 
-  if (state.profile?.role === "admin") {
+  if (isManagementProfile()) {
     backToAdminDashboard();
 
     state.adminStatusFilter = "all";
@@ -1412,6 +1499,8 @@ onAuthStateChanged(auth, async (user) => {
   state.user = user;
   state.profile = null;
   state.employees = [];
+  state.supervisors = [];
+  state.staffAccounts = [];
   state.tasks = [];
   state.workOrders = [];
   state.adminWorkOrderSearch = "";
@@ -1444,7 +1533,7 @@ onAuthStateChanged(auth, async (user) => {
     showApp();
     setupNotificationListener();
 
-    if (state.profile.role === "admin") {
+    if (isManagementProfile()) {
       setupAdminDashboard();
     } else {
       setupEmployeeDashboard();
@@ -1471,7 +1560,7 @@ function showApp() {
   els.loginView.classList.add("hidden");
   els.appView.classList.remove("hidden");
 
-  const roleText = state.profile.role === "admin" ? "Admin" : "Nhân viên";
+  const roleText = getRoleDisplayName(state.profile.role);
 
   els.currentUserText.textContent = `${state.profile.name || state.user.email} • ${roleText}`;
   updateNotificationPermissionButton();
@@ -1483,7 +1572,216 @@ function cleanupSubscriptions() {
 }
 
 // =========================
-// Admin dashboard
+// Giao diện phân quyền Giám sát
+// =========================
+function permissionChecklistHtml(permissions = {}) {
+  const normalized = normalizeSupervisorPermissions(permissions);
+
+  return SUPERVISOR_PERMISSION_DEFINITIONS.map((permission) => `
+    <label class="supervisor-permission-option ${permission.primary ? "is-primary" : ""}">
+      <input type="checkbox" data-supervisor-permission-key="${escapeHtml(permission.key)}" ${normalized[permission.key] ? "checked" : ""} />
+      <span class="supervisor-permission-copy">
+        ${permission.primary ? '<span class="supervisor-permission-primary-tag">Quyền chính</span>' : ""}
+        <strong>${escapeHtml(permission.label)}</strong>
+        <span>${escapeHtml(permission.description)}</span>
+      </span>
+    </label>
+  `).join("");
+}
+
+function renderSupervisorPermissionChecklist(container, permissions = {}) {
+  if (!container) return;
+  container.innerHTML = permissionChecklistHtml(permissions);
+}
+
+function readSupervisorPermissionChecklist(container) {
+  const permissions = normalizeSupervisorPermissions({});
+  if (!container) return permissions;
+
+  container.querySelectorAll("[data-supervisor-permission-key]").forEach((checkbox) => {
+    const key = checkbox.dataset.supervisorPermissionKey;
+    if (SUPERVISOR_PERMISSION_KEYS.includes(key)) permissions[key] = checkbox.checked === true;
+  });
+
+  return permissions;
+}
+
+function setSupervisorPermissionChecklist(container, checked) {
+  container?.querySelectorAll("[data-supervisor-permission-key]").forEach((checkbox) => {
+    checkbox.checked = Boolean(checked);
+  });
+}
+
+function updateCreateAccountRoleUI() {
+  if (!els.staffAccountRole) return;
+
+  const canCreateSupervisor = isAdminProfile();
+  const supervisorOption = els.staffAccountRole.querySelector('option[value="supervisor"]');
+
+  if (supervisorOption) supervisorOption.hidden = !canCreateSupervisor;
+  if (!canCreateSupervisor && els.staffAccountRole.value === "supervisor") {
+    els.staffAccountRole.value = "employee";
+  }
+
+  const isSupervisorAccount = canCreateSupervisor && els.staffAccountRole.value === "supervisor";
+  els.createSupervisorPermissions?.classList.toggle("hidden", !isSupervisorAccount);
+
+  const createButton = $("#createEmployeeBtn");
+  if (createButton && !createButton.disabled) {
+    createButton.textContent = isSupervisorAccount ? "Tạo Giám sát" : "Tạo Nhân viên";
+  }
+}
+
+function applyManagementPermissionUI() {
+  if (!isManagementProfile()) return;
+
+  const isAdmin = isAdminProfile();
+  const canCreate = hasPermission("createWorkOrder");
+  const canAccessTemplates = hasPermission("accessWorkTemplates");
+  const canAccessEmployees = hasPermission("accessEmployeeManager");
+  const canExport = hasPermission("exportData");
+  const canImport = hasPermission("importData");
+
+  if (els.managementDashboardEyebrow) {
+    els.managementDashboardEyebrow.textContent = isAdmin ? "Admin Dashboard" : "Giám sát Dashboard";
+  }
+  document.querySelectorAll(".management-section-eyebrow").forEach((element) => {
+    element.textContent = isAdmin ? "Admin Dashboard" : "Giám sát Dashboard";
+  });
+
+  if (els.supervisorPermissionBanner) {
+    if (isSupervisorProfile()) {
+      const permissions = normalizeSupervisorPermissions(state.profile?.permissions);
+      const grantedLabels = SUPERVISOR_PERMISSION_DEFINITIONS
+        .filter((item) => permissions[item.key])
+        .map((item) => item.label);
+
+      els.supervisorPermissionBanner.innerHTML = `
+        <strong>Tài khoản Giám sát • ${grantedLabels.length}/${SUPERVISOR_PERMISSION_KEYS.length} quyền đang bật</strong>
+        <span>${grantedLabels.length ? escapeHtml(grantedLabels.join(" • ")) : "Admin chưa cấp quyền thao tác. Bạn vẫn được xem toàn bộ Phiếu công việc và kết quả báo cáo."}</span>
+      `;
+      els.supervisorPermissionBanner.classList.remove("hidden");
+    } else {
+      els.supervisorPermissionBanner.classList.add("hidden");
+      els.supervisorPermissionBanner.innerHTML = "";
+    }
+  }
+
+  els.openTaskModalBtn?.classList.toggle("hidden", !canCreate);
+  els.floatingCreateTaskBtn?.classList.toggle("hidden", !canCreate);
+  els.openWorkTemplatePageBtn?.classList.toggle("hidden", !canAccessTemplates);
+  els.openEmployeeManagerPageBtn?.classList.toggle("hidden", !canAccessEmployees);
+  els.exportDataBtn?.classList.toggle("hidden", !canExport);
+  els.importDataBtn?.classList.toggle("hidden", !canImport);
+  els.deleteAllWorkOrdersBtn?.classList.toggle("hidden", !hasPermission("deleteAllWorkOrders"));
+  els.openWorkTemplateModalBtn?.classList.toggle("hidden", !hasPermission("manageWorkTemplates"));
+
+  const backupActions = els.exportDataBtn?.closest(".backup-actions");
+  backupActions?.classList.toggle("hidden", !canExport && !canImport);
+
+  const canManageEmployeeAccounts = isAdmin || hasPermission("manageEmployeeAccounts");
+  els.createStaffAccountPanel?.classList.toggle("hidden", !canManageEmployeeAccounts);
+
+  // Nếu Admin vừa thu hồi quyền trong lúc Giám sát đang mở một trang/modal,
+  // đóng ngay khu vực đó để quyền mới có hiệu lực realtime, không cần đăng xuất lại.
+  if (!canAccessTemplates && els.workTemplateView && !els.workTemplateView.classList.contains("hidden")) {
+    els.workTemplateView.classList.add("hidden");
+    els.workTemplateModal?.classList.add("hidden");
+    els.adminView?.classList.remove("hidden");
+  }
+
+  if (!canAccessEmployees && els.employeeManagerView && !els.employeeManagerView.classList.contains("hidden")) {
+    els.employeeManagerView.classList.add("hidden");
+    els.adminView?.classList.remove("hidden");
+  }
+
+  if (!canCreate && els.taskModal && !els.taskModal.classList.contains("hidden")) {
+    els.taskModal.classList.add("hidden");
+    state.editingWorkOrderId = null;
+  }
+
+  if (!isAdmin) closeSupervisorPermissionModal();
+
+  updateCreateAccountRoleUI();
+  renderEmployees();
+  renderWorkTemplateList();
+  renderAdminTasks();
+  refreshPhotoReportPageIfOpen();
+}
+
+function closeSupervisorPermissionModal() {
+  state.editingSupervisorUid = null;
+  els.supervisorPermissionModal?.classList.add("hidden");
+}
+
+function openSupervisorPermissionModal(supervisorUid) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được thay đổi quyền của tài khoản Giám sát.", "error");
+    return;
+  }
+
+  const supervisor = state.supervisors.find((item) => item.uid === supervisorUid);
+  if (!supervisor) {
+    toast("Không tìm thấy tài khoản Giám sát cần phân quyền.", "error");
+    return;
+  }
+
+  state.editingSupervisorUid = supervisorUid;
+  if (els.supervisorPermissionModalAccount) {
+    els.supervisorPermissionModalAccount.textContent = `${supervisor.name || "Giám sát"} • ${supervisor.email || ""}`;
+  }
+  renderSupervisorPermissionChecklist(els.editSupervisorPermissionList, supervisor.permissions);
+  els.supervisorPermissionModal?.classList.remove("hidden");
+}
+
+function bindSupervisorPermissionUI() {
+  renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {});
+  updateCreateAccountRoleUI();
+
+  els.staffAccountRole?.addEventListener("change", updateCreateAccountRoleUI);
+  els.selectAllCreateSupervisorPermissions?.addEventListener("click", () => setSupervisorPermissionChecklist(els.createSupervisorPermissionList, true));
+  els.clearCreateSupervisorPermissions?.addEventListener("click", () => setSupervisorPermissionChecklist(els.createSupervisorPermissionList, false));
+  els.selectAllEditSupervisorPermissions?.addEventListener("click", () => setSupervisorPermissionChecklist(els.editSupervisorPermissionList, true));
+  els.clearEditSupervisorPermissions?.addEventListener("click", () => setSupervisorPermissionChecklist(els.editSupervisorPermissionList, false));
+
+  document.querySelectorAll("[data-close-supervisor-permission-modal]").forEach((button) => {
+    button.addEventListener("click", closeSupervisorPermissionModal);
+  });
+
+  els.saveSupervisorPermissionsBtn?.addEventListener("click", async () => {
+    if (!isAdminProfile() || !state.editingSupervisorUid) return;
+
+    const supervisor = state.supervisors.find((item) => item.uid === state.editingSupervisorUid);
+    if (!supervisor) {
+      toast("Không tìm thấy tài khoản Giám sát cần cập nhật.", "error");
+      return;
+    }
+
+    const permissions = readSupervisorPermissionChecklist(els.editSupervisorPermissionList);
+    setButtonLoading(els.saveSupervisorPermissionsBtn, true, "Đang lưu...");
+
+    try {
+      await updateDoc(doc(db, "users", supervisor.uid), {
+        permissions,
+        permissionsUpdatedAt: serverTimestamp(),
+        permissionsUpdatedByUid: state.user.uid,
+        permissionsUpdatedByName: state.profile?.name || state.user?.email || "Admin"
+      });
+      closeSupervisorPermissionModal();
+      toast(`Đã cập nhật phân quyền cho ${supervisor.name || supervisor.email}.`, "success");
+    } catch (error) {
+      console.error(error);
+      toast(error.message || "Không lưu được phân quyền Giám sát.", "error");
+    } finally {
+      setButtonLoading(els.saveSupervisorPermissionsBtn, false);
+    }
+  });
+}
+
+bindSupervisorPermissionUI();
+
+// =========================
+// Admin / Giám sát dashboard
 // =========================
 function setupAdminDashboard() {
   els.adminView.classList.remove("hidden");
@@ -1491,18 +1789,36 @@ function setupAdminDashboard() {
   els.employeeManagerView?.classList.add("hidden");
   els.photoReportView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
+  applyManagementPermissionUI();
 
   const unsubUsers = onSnapshot(
     collection(db, "users"),
     (snapshot) => {
-      state.employees = snapshot.docs
-        .map((item) => ({ id: item.id, ...item.data() }))
+      const users = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }));
+
+      const currentProfile = users.find((item) => item.uid === state.user?.uid || item.id === state.user?.uid);
+      if (currentProfile && isManagementProfile(currentProfile)) {
+        state.profile = currentProfile;
+        showApp();
+      }
+
+      state.employees = users
         .filter((user) => user.role === "employee")
         .sort((a, b) => (a.name || "").localeCompare(b.name || "", "vi"));
 
-      renderEmployees();
+      state.supervisors = users
+        .filter((user) => user.role === "supervisor")
+        .sort((a, b) => (a.name || "").localeCompare(b.name || "", "vi"));
+
+      state.staffAccounts = [...state.employees, ...state.supervisors]
+        .sort((a, b) => {
+          const roleDifference = (a.role === "supervisor" ? 1 : 0) - (b.role === "supervisor" ? 1 : 0);
+          return roleDifference || (a.name || "").localeCompare(b.name || "", "vi");
+        });
+
+      applyManagementPermissionUI();
       renderEmployeeSelects();
-      renderAdminTasks();
     },
     handleSnapshotError
   );
@@ -1515,8 +1831,9 @@ function setupAdminDashboard() {
       state.tasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       renderAdminTasks();
 
-      // Admin mở dashboard thì hệ thống tự đánh dấu quá hạn để trạng thái được lưu vào database.
-      await syncOverdueTasksByAdmin();
+      // Chỉ tài khoản Admin tự đồng bộ trạng thái quá hạn vào database.
+      // Giám sát vẫn nhìn thấy trạng thái tính toán realtime nhưng không tự ghi dữ liệu nếu không phải Admin.
+      if (isAdminProfile()) await syncOverdueTasksByAdmin();
     },
     handleSnapshotError
   );
@@ -1586,35 +1903,58 @@ function handleSnapshotError(error) {
 }
 
 function renderEmployees() {
-  if (!state.employees.length) {
-    els.employeeList.innerHTML = "Chưa có nhân viên.";
+  if (!els.employeeList) return;
+
+  if (!state.staffAccounts.length) {
+    els.employeeList.innerHTML = "Chưa có tài khoản nhân viên hoặc giám sát.";
     els.employeeList.classList.add("empty");
     return;
   }
 
   els.employeeList.classList.remove("empty");
 
-  els.employeeList.innerHTML = state.employees
-    .map((employee) => {
-      const isDeleting = state.deletingEmployeeUid === employee.uid;
-      const employeeLabel = employee.name || employee.email || "nhân viên này";
+  els.employeeList.innerHTML = state.staffAccounts
+    .map((account) => {
+      const isDeleting = state.deletingEmployeeUid === account.uid;
+      const accountLabel = account.name || account.email || "tài khoản này";
+      const isSupervisor = account.role === "supervisor";
+      const canEditPermissions = isAdminProfile() && isSupervisor;
+      const canDeleteAccount = isAdminProfile()
+        || (hasPermission("manageEmployeeAccounts") && account.role === "employee");
+      const grantedCount = isSupervisor ? getGrantedSupervisorPermissionCount(account) : 0;
 
       return `
-        <div class="employee-item" data-employee-uid="${escapeHtml(employee.uid)}">
-          <div class="avatar">${escapeHtml(initials(employee.name))}</div>
+        <div class="employee-item" data-employee-uid="${escapeHtml(account.uid)}">
+          <div class="avatar">${escapeHtml(initials(account.name))}</div>
           <div class="employee-item-info">
-            <strong>${escapeHtml(employee.name)}</strong>
-            <span>${escapeHtml(employee.email)}</span>
+            <strong>${escapeHtml(account.name || "Chưa đặt tên")}</strong>
+            <span>${escapeHtml(account.email || "")}</span>
+            <div class="staff-account-meta">
+              <span class="staff-role-badge ${isSupervisor ? "is-supervisor" : ""}">${isSupervisor ? "Giám sát" : "Nhân viên"}</span>
+              ${isSupervisor ? `<span class="staff-permission-count">Đã cấp ${grantedCount}/${SUPERVISOR_PERMISSION_KEYS.length} quyền</span>` : ""}
+            </div>
           </div>
-          <button
-            type="button"
-            class="employee-delete-btn"
-            data-action="delete-employee"
-            data-employee-uid="${escapeHtml(employee.uid)}"
-            aria-label="Xóa toàn bộ dữ liệu của ${escapeHtml(employeeLabel)}"
-            title="Xóa toàn bộ dữ liệu nhân viên"
-            ${isDeleting ? "disabled" : ""}
-          >${isDeleting ? "…" : "×"}</button>
+          <div class="staff-account-actions">
+            ${canEditPermissions ? `
+              <button
+                type="button"
+                class="btn ghost small staff-permission-btn"
+                data-action="edit-supervisor-permissions"
+                data-supervisor-uid="${escapeHtml(account.uid)}"
+              >Phân quyền</button>
+            ` : ""}
+            ${canDeleteAccount ? `
+              <button
+                type="button"
+                class="employee-delete-btn"
+                data-action="delete-employee"
+                data-employee-uid="${escapeHtml(account.uid)}"
+                aria-label="Xóa toàn bộ dữ liệu của ${escapeHtml(accountLabel)}"
+                title="Xóa toàn bộ dữ liệu tài khoản"
+                ${isDeleting ? "disabled" : ""}
+              >${isDeleting ? "…" : "×"}</button>
+            ` : ""}
+          </div>
         </div>
       `;
     })
@@ -1654,19 +1994,28 @@ function hotelReportEntryBelongsToEmployee(entry, employee) {
 }
 
 async function deleteEmployeeData(employeeUid) {
-  if (state.profile?.role !== "admin" || !employeeUid) return;
-  if (employeeUid === state.user?.uid) {
-    toast("Admin không thể tự xóa tài khoản của chính mình.", "error");
-    return;
-  }
+  if (!employeeUid) return;
 
-  const employee = state.employees.find((item) => item.uid === employeeUid);
+  const employee = state.staffAccounts.find((item) => item.uid === employeeUid);
   if (!employee) {
-    toast("Không tìm thấy nhân viên cần xóa.", "error");
+    toast("Không tìm thấy tài khoản cần xóa.", "error");
     return;
   }
 
-  const employeeName = employee.name || employee.email || "nhân viên này";
+  const canDelete = isAdminProfile()
+    || (hasPermission("manageEmployeeAccounts") && employee.role === "employee");
+
+  if (!canDelete) {
+    toast("Tài khoản của bạn chưa được cấp quyền xóa tài khoản này.", "error");
+    return;
+  }
+
+  if (employeeUid === state.user?.uid) {
+    toast("Bạn không thể tự xóa tài khoản đang đăng nhập.", "error");
+    return;
+  }
+
+  const employeeName = employee.name || employee.email || "tài khoản này";
   const currentEmployeeTasks = state.tasks.filter((task) => task.assignedToUid === employeeUid);
   const currentPhotoCount = getTaskPhotoStoragePaths(currentEmployeeTasks).length;
   const affectedTicketCount = new Set(
@@ -1676,9 +2025,9 @@ async function deleteEmployeeData(employeeUid) {
   ).size;
 
   const confirmed = window.confirm(
-    `Bạn có chắc chắn muốn xóa toàn bộ dữ liệu của nhân viên “${employeeName}” không?\n\n`
-    + `Hệ thống sẽ xóa hồ sơ nhân viên, ${currentEmployeeTasks.length} công việc, dữ liệu trong ${affectedTicketCount} phiếu liên quan, ${currentPhotoCount} hình ảnh báo cáo, thông báo và phần thống kê Hotel của nhân viên này.\n\n`
-    + "Các công việc của nhân viên khác trong cùng Phiếu công việc vẫn được giữ lại. Hành động này không thể hoàn tác."
+    `Bạn có chắc chắn muốn xóa toàn bộ dữ liệu của tài khoản “${employeeName}” không?\n\n`
+    + `Hệ thống sẽ xóa hồ sơ tài khoản, ${currentEmployeeTasks.length} công việc được giao, dữ liệu trong ${affectedTicketCount} phiếu liên quan, ${currentPhotoCount} hình ảnh báo cáo, thông báo và phần thống kê Hotel có liên quan.\n\n`
+    + "Các công việc của người khác trong cùng Phiếu công việc vẫn được giữ lại. Hành động này không thể hoàn tác."
   );
 
   if (!confirmed) return;
@@ -1800,9 +2149,15 @@ async function deleteEmployeeData(employeeUid) {
 }
 
 els.employeeList?.addEventListener("click", (event) => {
-  const button = event.target.closest('[data-action="delete-employee"]');
-  if (!button || button.disabled) return;
-  deleteEmployeeData(button.dataset.employeeUid);
+  const permissionButton = event.target.closest('[data-action="edit-supervisor-permissions"]');
+  if (permissionButton) {
+    openSupervisorPermissionModal(permissionButton.dataset.supervisorUid);
+    return;
+  }
+
+  const deleteButton = event.target.closest('[data-action="delete-employee"]');
+  if (!deleteButton || deleteButton.disabled) return;
+  deleteEmployeeData(deleteButton.dataset.employeeUid);
 });
 
 function employeeOptionsHtml() {
@@ -2270,29 +2625,35 @@ function renderWorkTemplateList() {
     return;
   }
 
+  const canManageTemplates = hasPermission("manageWorkTemplates");
+
   els.workTemplateList.classList.remove("empty");
   els.workTemplateList.innerHTML = filteredTemplates
     .map((template) => {
       const minutes = Number(template.deadlineMinutes || 0);
       const createdAt = template.createdAt ? formatFullDateTime(template.createdAt) : "--";
+      const tagName = canManageTemplates ? "button" : "div";
+      const attributes = canManageTemplates
+        ? `type="button" data-edit-template-id="${escapeHtml(template.id)}" aria-label="Chỉnh sửa công việc ${escapeHtml(template.name || "Không tên")}"`
+        : `role="group" aria-label="Công việc ${escapeHtml(template.name || "Không tên")}"`;
 
       return `
-        <button class="work-template-item" type="button" data-edit-template-id="${escapeHtml(template.id)}" aria-label="Chỉnh sửa công việc ${escapeHtml(template.name || "Không tên")}">
+        <${tagName} class="work-template-item" ${attributes}>
           <div>
             <strong>${escapeHtml(template.name || "Không tên")}</strong>
             <span>Thời gian phải hoàn thành: ${escapeHtml(formatMinutes(minutes))}</span>
             <span>Tạo lúc: ${escapeHtml(createdAt)}${template.createdByName ? ` • ${escapeHtml(template.createdByName)}` : ""}</span>
-            <span class="work-template-hint">Bấm vào dòng này để chỉnh sửa hoặc xoá</span>
+            <span class="work-template-hint">${canManageTemplates ? "Bấm vào dòng này để chỉnh sửa hoặc xoá" : "Tài khoản chỉ có quyền xem danh sách"}</span>
           </div>
           <div class="work-template-duration">${escapeHtml(formatMinutes(minutes))}</div>
-        </button>
+        </${tagName}>
       `;
     })
     .join("");
 }
 
 function openWorkTemplatePage() {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("accessWorkTemplates", "Tài khoản của bạn chưa được cấp quyền truy cập trang Danh sách công việc.")) return;
 
   els.adminView.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
@@ -2303,7 +2664,7 @@ function openWorkTemplatePage() {
 }
 
 function openEmployeeManagerPage() {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("accessEmployeeManager", "Tài khoản của bạn chưa được cấp quyền truy cập trang Danh sách nhân viên.")) return;
 
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
@@ -2322,7 +2683,7 @@ function backToAdminDashboard() {
 }
 
 function openWorkTemplateModal(templateId = null) {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("manageWorkTemplates", "Tài khoản của bạn chỉ được xem Danh sách công việc, chưa được cấp quyền tạo hoặc chỉnh sửa.")) return;
 
   const template = templateId
     ? state.workTemplates.find((item) => item.id === templateId)
@@ -2496,7 +2857,7 @@ function countBackupDocuments(collections = {}) {
 }
 
 async function exportAllDataToJson() {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("exportData", "Tài khoản của bạn chưa được cấp quyền Xuất dữ liệu.")) return;
 
   try {
     setButtonLoading(els.exportDataBtn, true, "Đang xuất...");
@@ -2553,7 +2914,7 @@ function readTextFile(file) {
 }
 
 async function importBackupJsonFile(file) {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("importData", "Tài khoản của bạn chưa được cấp quyền Nhập dữ liệu.")) return;
   if (!file) return;
 
   try {
@@ -2566,7 +2927,13 @@ async function importBackupJsonFile(file) {
       throw new Error("File JSON không đúng định dạng backup của hệ thống.");
     }
 
-    const totalDocuments = countBackupDocuments(backup.collections);
+    const importCollections = isAdminProfile()
+      ? BACKUP_COLLECTIONS
+      : BACKUP_COLLECTIONS.filter((collectionName) => collectionName !== "users");
+    const totalDocuments = importCollections.reduce((total, collectionName) => {
+      const collectionData = normalizeBackupCollection(backup.collections[collectionName]);
+      return total + Object.keys(collectionData).length;
+    }, 0);
     if (totalDocuments <= 0) {
       throw new Error("File JSON không có dữ liệu để nhập.");
     }
@@ -2593,7 +2960,7 @@ async function importBackupJsonFile(file) {
       batchCount = 0;
     }
 
-    for (const collectionName of BACKUP_COLLECTIONS) {
+    for (const collectionName of importCollections) {
       const collectionData = normalizeBackupCollection(backup.collections[collectionName]);
       const entries = Object.entries(collectionData);
 
@@ -2622,7 +2989,7 @@ async function importBackupJsonFile(file) {
 
 els.exportDataBtn?.addEventListener("click", exportAllDataToJson);
 els.importDataBtn?.addEventListener("click", () => {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("importData", "Tài khoản của bạn chưa được cấp quyền Nhập dữ liệu.")) return;
   els.importDataInput?.click();
 });
 els.importDataInput?.addEventListener("change", (event) => {
@@ -2643,7 +3010,7 @@ $$('[data-close-work-template-modal]').forEach((button) => {
 els.workTemplateForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("manageWorkTemplates", "Tài khoản của bạn chưa được cấp quyền quản lý công việc mẫu.")) return;
 
   const name = els.workTemplateName?.value.trim() || "";
   const hours = Number(els.workTemplateHours?.value || 0);
@@ -2712,7 +3079,8 @@ els.workTemplateForm?.addEventListener("submit", async (event) => {
 });
 
 els.deleteWorkTemplateBtn?.addEventListener("click", async () => {
-  if (state.profile?.role !== "admin" || !state.editingWorkTemplateId) return;
+  if (!state.editingWorkTemplateId) return;
+  if (!requirePermission("manageWorkTemplates", "Tài khoản của bạn chưa được cấp quyền xóa công việc mẫu.")) return;
 
   const template = state.workTemplates.find((item) => item.id === state.editingWorkTemplateId);
   const templateName = template?.name || "công việc này";
@@ -2755,7 +3123,11 @@ function renderEmployeeSelects() {
 els.createEmployeeForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  if (state.profile?.role !== "admin") return;
+  const canManageEmployeeAccounts = isAdminProfile() || hasPermission("manageEmployeeAccounts");
+  if (!canManageEmployeeAccounts) {
+    toast("Tài khoản của bạn chưa được cấp quyền tạo tài khoản nhân viên.", "error");
+    return;
+  }
 
   const button = $("#createEmployeeBtn");
   setButtonLoading(button, true, "Đang tạo...");
@@ -2763,35 +3135,55 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
   const name = $("#employeeName").value.trim();
   const email = $("#employeeEmail").value.trim().toLowerCase();
   const password = $("#employeePassword").value;
+  const requestedRole = els.staffAccountRole?.value || "employee";
+  const role = isAdminProfile() && requestedRole === "supervisor" ? "supervisor" : "employee";
+  const permissions = role === "supervisor"
+    ? readSupervisorPermissionChecklist(els.createSupervisorPermissionList)
+    : null;
 
   try {
     const sAuth = getSecondaryAuth();
-
     const credential = await createUserWithEmailAndPassword(sAuth, email, password);
 
     await updateProfile(credential.user, {
       displayName: name
     });
 
-    await setDoc(doc(db, "users", credential.user.uid), {
+    const userData = {
       uid: credential.user.uid,
       name,
       email,
-      role: "employee",
+      role,
       createdByUid: state.user.uid,
       createdAt: serverTimestamp()
-    });
+    };
 
+    if (role === "supervisor") {
+      userData.permissions = normalizeSupervisorPermissions(permissions);
+      userData.permissionsUpdatedAt = serverTimestamp();
+      userData.permissionsUpdatedByUid = state.user.uid;
+      userData.permissionsUpdatedByName = state.profile?.name || state.user?.email || "Admin";
+    }
+
+    await setDoc(doc(db, "users", credential.user.uid), userData);
     await signOut(sAuth);
 
     els.createEmployeeForm.reset();
+    renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {});
+    updateCreateAccountRoleUI();
 
-    toast(`Đã tạo nhân viên ${name}.`, "success");
+    toast(
+      role === "supervisor"
+        ? `Đã tạo Giám sát ${name} với ${getGrantedSupervisorPermissionCount({ role, permissions })} quyền.`
+        : `Đã tạo Nhân viên ${name}.`,
+      "success"
+    );
   } catch (error) {
     console.error(error);
     toast(getFriendlyFirebaseError(error), "error");
   } finally {
     setButtonLoading(button, false);
+    updateCreateAccountRoleUI();
   }
 });
 
@@ -3216,6 +3608,8 @@ els.taskRowsContainer.addEventListener("change", (event) => {
 });
 
 function openCreateWorkOrderModal() {
+  if (!requirePermission("createWorkOrder", "Tài khoản của bạn chưa được cấp quyền tạo Phiếu công việc.")) return;
+
   state.editingWorkOrderId = null;
   $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
   els.workOrderName.value = "";
@@ -3229,6 +3623,8 @@ els.openTaskModalBtn?.addEventListener("click", openCreateWorkOrderModal);
 els.floatingCreateTaskBtn?.addEventListener("click", openCreateWorkOrderModal);
 
 function openEditWorkOrderModal(workOrderId) {
+  if (!requirePermission("editWorkOrder", "Tài khoản của bạn chưa được cấp quyền sửa Phiếu chưa giao.")) return;
+
   const tasksInGroup = state.tasks
     .filter((task) => (task.workOrderId || "legacy") === workOrderId)
     .sort((a, b) => Number(a.rowIndex ?? 0) - Number(b.rowIndex ?? 0));
@@ -3468,6 +3864,15 @@ function reserveQueueSlot(employeeQueueEnd, uid, deadlineMinutes, now) {
 // Dùng chung cho cả 3 luồng: Lưu nháp mới, Sửa & lưu lại nháp, Sửa & giao việc luôn,
 // và Tạo phiếu & giao việc ngay (trường hợp không sửa phiếu có sẵn).
 async function persistWorkOrder(dispatch, button) {
+  const isEditing = Boolean(state.editingWorkOrderId);
+  const basePermission = isEditing ? "editWorkOrder" : "createWorkOrder";
+  const baseMessage = isEditing
+    ? "Tài khoản của bạn chưa được cấp quyền sửa Phiếu chưa giao."
+    : "Tài khoản của bạn chưa được cấp quyền tạo Phiếu công việc.";
+
+  if (!requirePermission(basePermission, baseMessage)) return;
+  if (dispatch && !requirePermission("dispatchWorkOrder", "Tài khoản của bạn chưa được cấp quyền giao Phiếu công việc.")) return;
+
   setButtonLoading(button, true, dispatch ? "Đang giao việc..." : "Đang lưu...");
 
   try {
@@ -3647,19 +4052,16 @@ async function persistWorkOrder(dispatch, button) {
 
 els.createTaskForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-
-  if (state.profile?.role !== "admin") return;
-
   await persistWorkOrder(true, $("#createTaskBtn"));
 });
 
 els.saveDraftBtn.addEventListener("click", async () => {
-  if (state.profile?.role !== "admin") return;
-
   await persistWorkOrder(false, els.saveDraftBtn);
 });
 
 async function dispatchWorkOrder(workOrderId, button) {
+  if (!requirePermission("dispatchWorkOrder", "Tài khoản của bạn chưa được cấp quyền giao Phiếu công việc.")) return;
+
   const tasksInGroup = state.tasks
     .filter((task) => (task.workOrderId || "legacy") === workOrderId)
     // Sắp theo đúng thứ tự công việc trong phiếu (rowIndex) để hàng đợi theo nhân viên
@@ -3855,6 +4257,8 @@ async function getCollectionDeleteOperations(collectionName) {
 }
 
 async function deleteWorkOrder(workOrderId, button) {
+  if (!requirePermission("deleteWorkOrder", "Tài khoản của bạn chưa được cấp quyền xóa Phiếu công việc.")) return;
+
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
   if (!window.confirm(`Xoá phiếu này cùng ${tasksInGroup.length} công việc bên trong? Hình ảnh báo cáo trong phiếu cũng sẽ bị xoá. Không thể hoàn tác.`)) {
@@ -3894,6 +4298,8 @@ async function commitInChunks(operations, chunkSize = 450) {
 }
 
 async function deleteAllWorkOrders(button) {
+  if (!requirePermission("deleteAllWorkOrders", "Tài khoản của bạn chưa được cấp quyền xóa toàn bộ Phiếu công việc.")) return;
+
   const hasAnyWorkData = Boolean(
     state.tasks.length
     || state.workOrders.length
@@ -3996,6 +4402,7 @@ els.adminCompletedTypeReport?.addEventListener("click", async (event) => {
   const target = event.target;
 
   if (!target?.matches?.("[data-admin-hotel-report-ok]")) return;
+  if (!requirePermission("manageHotelReports", "Tài khoản của bạn chưa được cấp quyền lưu Tổng kết Hotel.")) return;
 
   const dateKey = getAdminHotelReportDateKey();
 
@@ -4061,7 +4468,7 @@ els.adminEmployeeFilter.addEventListener("change", (event) => {
 });
 
 async function syncOverdueTasksByAdmin() {
-  if (state.profile?.role !== "admin") return;
+  if (!isAdminProfile()) return;
 
   const updates = state.tasks
     .filter((task) => ["doing", "hotel", "redo"].includes(task.status))
@@ -4371,7 +4778,7 @@ function scheduleSaveAdminHotelDailyReport() {
 }
 
 async function saveAdminHotelDailyReport() {
-  if (state.profile?.role !== "admin") return;
+  if (!hasPermission("manageHotelReports")) return;
 
   const payload = buildAdminHotelDailyReportPayload();
   if (!payload.dateKey) return;
@@ -4411,6 +4818,8 @@ async function saveAdminHotelDailyReport() {
 }
 
 function renderAdminHotelReportControls() {
+  const canManageHotelReport = hasPermission("manageHotelReports");
+  const disabledAttribute = canManageHotelReport ? "" : " disabled";
   const dateKey = getAdminHotelReportDateKey();
   const saved = getSavedHotelDailyReport(dateKey);
   const draft = getAdminHotelReportDraft(dateKey);
@@ -4424,7 +4833,7 @@ function renderAdminHotelReportControls() {
   return `
     <label class="hotel-report-control">
       <span>Vệ sinh</span>
-      <select data-admin-hotel-hygiene>
+      <select data-admin-hotel-hygiene${disabledAttribute}>
         <option value="pending" ${hygieneValue === "pending" ? "selected" : ""}>Chưa đánh giá</option>
         <option value="pass" ${hygieneValue === "pass" ? "selected" : ""}>Đạt</option>
         <option value="fail" ${hygieneValue === "fail" ? "selected" : ""}>Không đạt</option>
@@ -4432,9 +4841,10 @@ function renderAdminHotelReportControls() {
     </label>
     <label class="hotel-report-control hotel-report-pet-control">
       <span>Số lượng bé ở hotel khi cho ăn và vệ sinh</span>
-      <input data-admin-hotel-end-pet-count type="number" min="1" max="500" step="1" value="${escapeHtml(endPetCountRaw)}" placeholder="Nhập số bé" />
+      <input data-admin-hotel-end-pet-count type="number" min="1" max="500" step="1" value="${escapeHtml(endPetCountRaw)}" placeholder="Nhập số bé"${disabledAttribute} />
     </label>
-    <button type="button" class="hotel-report-ok-btn" data-admin-hotel-report-ok>OK</button>
+    <button type="button" class="hotel-report-ok-btn" data-admin-hotel-report-ok${disabledAttribute}>OK</button>
+    ${canManageHotelReport ? "" : '<span class="small-note">Chỉ xem • Chưa được cấp quyền lưu Tổng kết Hotel</span>'}
     <span class="hotel-report-hygiene-status">${escapeHtml(savedHygieneText)}</span>
     <span class="hotel-report-end-time">Thời gian làm hotel: ${savedEndPetCount ? escapeHtml(formatMinutes(savedAllowedMinutes)) : "--"}</span>
     <span class="hotel-report-time-status">${escapeHtml(savedTimeStatusText)}</span>
@@ -4980,14 +5390,16 @@ function renderTicketGroup(group, mode = "admin") {
   const actionButtons = [];
 
   if (mode === "admin" && isDraft) {
-    actionButtons.push(`<button class="btn ghost small" data-action="edit-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Sửa phiếu</button>`);
+    if (hasPermission("editWorkOrder")) {
+      actionButtons.push(`<button class="btn ghost small" data-action="edit-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Sửa phiếu</button>`);
+    }
 
-    if (group.tasks.length) {
+    if (group.tasks.length && hasPermission("dispatchWorkOrder")) {
       actionButtons.push(`<button class="btn secondary small" data-action="dispatch-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">🚀 Giao việc</button>`);
     }
   }
 
-  if (mode === "admin") {
+  if (mode === "admin" && hasPermission("deleteWorkOrder")) {
     actionButtons.push(`<button class="btn danger small" data-action="delete-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">🗑 Xoá phiếu</button>`);
   }
 
@@ -5054,7 +5466,7 @@ function renderEmployeeTasks() {
 }
 
 function canAdminReassignTask(task, mode, displayStatus = null) {
-  if (mode !== "admin" || state.profile?.role !== "admin") return false;
+  if (mode !== "admin" || !hasPermission("reassignTasks")) return false;
   if (!task?.id) return false;
 
   const visibleStatus = displayStatus || getDisplayStatus(task);
@@ -5164,6 +5576,7 @@ function renderTaskCard(task, mode) {
 
   const canAdminReview =
     mode === "admin" &&
+    hasPermission("reviewTasks") &&
     task.status === "submitted";
 
   const attentionClass = mode === "admin" && task.status === "submitted"
@@ -5363,7 +5776,7 @@ function renderPhotoReportBox(task, mode) {
     : "Nhân viên có thể hoàn thành mà không cần đăng hình";
 
   const canView = photoCount > 0 && (mode === "admin" || mode === "employee");
-  const editableByAdmin = state.profile?.role === "admin" && !["completed"].includes(task.status);
+  const editableByAdmin = hasPermission("managePhotoRequirements") && !["completed"].includes(task.status);
   const titleText = editableByAdmin
     ? "Admin bấm để chỉnh số lượng ảnh báo cáo bắt buộc"
     : "";
@@ -5475,8 +5888,8 @@ function openPhotoRequirementEditor({ task, currentRequired, currentCount, photo
 }
 
 async function editTaskPhotoRequirement(taskId) {
-  if (state.profile?.role !== "admin") {
-    showToast("Chỉ Admin mới được chỉnh số lượng ảnh báo cáo.");
+  if (!hasPermission("managePhotoRequirements")) {
+    showToast("Tài khoản của bạn chưa được cấp quyền chỉnh số lượng ảnh báo cáo.");
     return;
   }
 
@@ -5578,13 +5991,15 @@ function normalizeTaskResultForDisplay(task) {
 
 function canAdminEndLunchBreak(task, mode) {
   return mode === "admin"
-    && state.profile?.role === "admin"
+    && hasPermission("reviewTasks")
     && isLunchBreakTask(task)
     && task.status === "lunch_break";
 }
 
 function canAdminExtendTaskTime(task, mode) {
-  return mode === "admin" && ["doing", "hotel", "redo", "overdue"].includes(task.status);
+  return mode === "admin"
+    && hasPermission("extendTaskTime")
+    && ["doing", "hotel", "redo", "overdue"].includes(task.status);
 }
 
 function canEmployeeUploadTaskPhotos(task, mode, displayStatus = null) {
@@ -5841,11 +6256,12 @@ function getPhotoShareCacheKey(task, photos, scope = "all") {
 function updatePhotoSelectionToolbar(task, photos = getSortedTaskPhotos(task)) {
   if (!els.photoSelectionToolbar) return;
 
-  const isAdmin = state.profile?.role === "admin";
-  const selectedPhotos = isAdmin ? getSelectedPhotoReportPhotos(task) : [];
+  const isManager = isManagementProfile();
+  const selectedPhotos = isManager ? getSelectedPhotoReportPhotos(task) : [];
   const selectedCount = selectedPhotos.length;
   const totalCount = photos.length;
-  const canManage = isAdmin && totalCount > 0;
+  const canManage = isManager && totalCount > 0;
+  const canDeletePhotos = hasPermission("deleteReportPhotos");
 
   els.photoSelectionToolbar.classList.toggle("hidden", !canManage);
 
@@ -5872,7 +6288,8 @@ function updatePhotoSelectionToolbar(task, photos = getSortedTaskPhotos(task)) {
   }
 
   if (els.deleteSelectedPhotosBtn) {
-    els.deleteSelectedPhotosBtn.disabled = selectedCount === 0;
+    els.deleteSelectedPhotosBtn.classList.toggle("hidden", !canDeletePhotos);
+    els.deleteSelectedPhotosBtn.disabled = !canDeletePhotos || selectedCount === 0;
   }
 }
 
@@ -6314,7 +6731,7 @@ els.photoReportGrid?.addEventListener("change", (event) => {
     ? event.target.closest("[data-photo-select-key]")
     : null;
 
-  if (!checkbox || state.profile?.role !== "admin") return;
+  if (!checkbox || !isManagementProfile()) return;
 
   const key = String(checkbox.dataset.photoSelectKey || "");
   if (!key) return;
@@ -6805,8 +7222,8 @@ async function createPhotoReportZipBlob(task, photos, onProgress = null) {
 }
 
 async function downloadCurrentPhotoReportZip() {
-  if (state.profile?.role !== "admin") {
-    toast("Chỉ Admin mới được tải toàn bộ ảnh báo cáo.", "error");
+  if (!isManagementProfile()) {
+    toast("Tài khoản này không được tải toàn bộ ảnh báo cáo.", "error");
     return;
   }
 
@@ -6848,8 +7265,8 @@ function getSinglePhotoDownloadName(photo, index = 0) {
 }
 
 async function downloadSelectedPhotoReportPhotos() {
-  if (state.profile?.role !== "admin") {
-    toast("Chỉ Admin mới được tải các ảnh đã chọn.", "error");
+  if (!isManagementProfile()) {
+    toast("Tài khoản này không được tải các ảnh đã chọn.", "error");
     return;
   }
 
@@ -6899,10 +7316,7 @@ function getLatestUploadedAtFromPhotos(photos = []) {
 }
 
 async function deleteSelectedPhotoReportPhotos() {
-  if (state.profile?.role !== "admin") {
-    toast("Chỉ Admin mới được xóa ảnh báo cáo.", "error");
-    return;
-  }
+  if (!requirePermission("deleteReportPhotos", "Tài khoản của bạn chưa được cấp quyền xóa ảnh báo cáo.")) return;
 
   const task = state.tasks.find((item) => item.id === state.photoReportTaskId);
   const selectedPhotos = getSelectedPhotoReportPhotos(task);
@@ -7203,8 +7617,8 @@ async function shareCurrentPhotoReport() {
 }
 
 async function shareSelectedPhotoReportPhotos() {
-  if (state.profile?.role !== "admin") {
-    toast("Chỉ Admin mới được chia sẻ các ảnh đã chọn.", "error");
+  if (!isManagementProfile()) {
+    toast("Tài khoản này không được chia sẻ các ảnh đã chọn.", "error");
     return;
   }
 
@@ -7249,13 +7663,13 @@ function renderPhotoReportPageContent(task) {
   }
 
   if (els.photoReportGrid) {
-    const isAdmin = state.profile?.role === "admin";
+    const isManager = isManagementProfile();
 
     els.photoReportGrid.classList.toggle("empty-box", photos.length === 0);
     els.photoReportGrid.innerHTML = photos.length
       ? photos.map((photo, index) => {
         const photoKey = getPhotoStableKey(photo, index);
-        const selected = isAdmin && state.photoReportSelectedKeys.has(photoKey);
+        const selected = isManager && state.photoReportSelectedKeys.has(photoKey);
         const displayName = photo.name || `Ảnh ${index + 1}`;
 
         return `
@@ -7276,7 +7690,7 @@ function renderPhotoReportPageContent(task) {
               </div>
             </button>
 
-            ${isAdmin ? `
+            ${isManager ? `
               <label
                 class="photo-report-select ${selected ? "is-checked" : ""}"
                 title="${selected ? "Bỏ chọn ảnh" : "Chọn ảnh"}"
@@ -7299,7 +7713,7 @@ function renderPhotoReportPageContent(task) {
   updatePhotoSelectionToolbar(task, photos);
 
   if (els.downloadPhotoZipBtn) {
-    const canDownload = state.profile?.role === "admin" && photos.length > 0;
+    const canDownload = isManagementProfile() && photos.length > 0;
     els.downloadPhotoZipBtn.classList.toggle("hidden", !canDownload);
     els.downloadPhotoZipBtn.disabled = !canDownload;
   }
@@ -7332,7 +7746,7 @@ function openPhotoReportPage(taskId) {
   state.photoReportTaskId = taskId;
   state.photoReportSelectedKeys = new Set();
   resetPreparedPhotoShare();
-  state.photoReportReturnView = state.profile?.role === "employee" ? "employee" : "admin";
+  state.photoReportReturnView = isManagementProfile() ? "admin" : "employee";
   state.photoReportReturnTaskId = taskId;
   state.photoReportReturnScrollY = window.scrollY
     || document.documentElement.scrollTop
@@ -7508,7 +7922,7 @@ function renderReassignEmployeeOptions(taskId) {
 }
 
 function openReassignEmployeeModal(taskId) {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("reassignTasks", "Tài khoản của bạn chưa được cấp quyền đổi nhân viên phụ trách.")) return;
 
   const task = state.tasks.find((item) => item.id === taskId);
 
@@ -7548,7 +7962,7 @@ $$('[data-close-reassign-modal]').forEach((button) => {
 els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("reassignTasks", "Tài khoản của bạn chưa được cấp quyền đổi nhân viên phụ trách.")) return;
 
   const taskId = state.reassignTaskId;
   const task = state.tasks.find((item) => item.id === taskId);
@@ -7774,7 +8188,7 @@ function renderCustomExtendReasonList() {
 }
 
 function openExtendTimeModal(taskId) {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("extendTaskTime", "Tài khoản của bạn chưa được cấp quyền thêm giờ công việc.")) return;
 
   const task = state.tasks.find((item) => item.id === taskId);
 
@@ -7806,7 +8220,7 @@ $$("[data-close-extend-modal]").forEach((button) => {
 });
 
 els.addExtendReasonBtn?.addEventListener("click", async () => {
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("extendTaskTime", "Tài khoản của bạn chưa được cấp quyền quản lý mục đích thêm giờ.")) return;
 
   const name = els.newExtendReason.value.trim();
 
@@ -7852,7 +8266,7 @@ els.addExtendReasonBtn?.addEventListener("click", async () => {
 els.extendReasonList?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-delete-extend-reason-id]");
 
-  if (!button || state.profile?.role !== "admin") return;
+  if (!button || !hasPermission("extendTaskTime")) return;
 
   const reasonId = button.dataset.deleteExtendReasonId;
   const reasonName = button.dataset.deleteExtendReasonName || "mục đích này";
@@ -7884,7 +8298,7 @@ els.extendReasonList?.addEventListener("click", async (event) => {
 async function ensureCustomTimeExtensionReason(name) {
   const cleanName = String(name || "").trim();
 
-  if (!cleanName || state.profile?.role !== "admin") return;
+  if (!cleanName || !hasPermission("extendTaskTime")) return;
 
   const existed = (state.timeExtensionReasons || []).some((reason) =>
     String(reason.name || "").trim().toLowerCase() === cleanName.toLowerCase()
@@ -7907,7 +8321,7 @@ async function ensureCustomTimeExtensionReason(name) {
 els.extendTimeForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  if (state.profile?.role !== "admin") return;
+  if (!requirePermission("extendTaskTime", "Tài khoản của bạn chưa được cấp quyền thêm giờ công việc.")) return;
 
   const taskId = state.extendTimeTaskId;
   const minutes = Number(els.extendMinutes.value || 0);
@@ -8055,6 +8469,7 @@ async function submitTask(taskId, button) {
 }
 
 async function approveTask(taskId, button) {
+  if (!requirePermission("reviewTasks", "Tài khoản của bạn chưa được cấp quyền duyệt kết quả công việc.")) return;
   setButtonLoading(button, true, "Đang xác nhận...");
 
   try {
@@ -8121,6 +8536,7 @@ async function approveTask(taskId, button) {
 }
 
 async function endLunchBreakTask(taskId, button) {
+  if (!requirePermission("reviewTasks", "Tài khoản của bạn chưa được cấp quyền kết thúc Phiếu nghỉ trưa.")) return;
   setButtonLoading(button, true, "Đang kết thúc...");
 
   try {
@@ -8221,6 +8637,7 @@ function taskResultShortText(result) {
 }
 
 async function requestRedo(taskId, button) {
+  if (!requirePermission("reviewTasks", "Tài khoản của bạn chưa được cấp quyền yêu cầu làm lại.")) return;
   setButtonLoading(button, true, "Đang cập nhật...");
 
   try {

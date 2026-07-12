@@ -19,20 +19,52 @@ service firebase.storage {
         && userDoc(request.auth.uid).data.role == "admin";
     }
 
+    function isSupervisor() {
+      return signedIn()
+        && userDoc(request.auth.uid).data.role == "supervisor";
+    }
+
+    function isManagement() {
+      return isAdmin() || isSupervisor();
+    }
+
+    function hasPermission(permissionKey) {
+      return isAdmin()
+        || (
+          isSupervisor()
+          && userDoc(request.auth.uid).data.keys().hasAny(["permissions"])
+          && userDoc(request.auth.uid).data.permissions is map
+          && userDoc(request.auth.uid).data.permissions.get(permissionKey, false) == true
+        );
+    }
+
     function isTaskAssignee(taskId) {
       return signedIn()
         && taskDoc(taskId).data.assignedToUid == request.auth.uid;
     }
 
+    function canDeleteTaskPhoto(taskId) {
+      return isAdmin()
+        || hasPermission("deleteReportPhotos")
+        || hasPermission("deleteWorkOrder")
+        || hasPermission("deleteAllWorkOrders")
+        || hasPermission("manageEmployeeAccounts")
+        || (
+          hasPermission("editWorkOrder")
+          && taskDoc(taskId).data.status == "draft"
+        );
+    }
+
     match /task-photos/{taskId}/{fileName} {
-      allow read: if isAdmin() || isTaskAssignee(taskId);
+      // Admin/Giám sát được xem toàn bộ ảnh báo cáo; nhân viên chỉ xem ảnh task của mình.
+      allow read: if isManagement() || isTaskAssignee(taskId);
 
       allow create: if isTaskAssignee(taskId)
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
 
       allow update: if false;
-      allow delete: if isAdmin();
+      allow delete: if canDeleteTaskPhoto(taskId);
     }
   }
 }

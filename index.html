@@ -2480,6 +2480,102 @@
       }
     }
 
+
+    /* Tài khoản Giám sát và phân quyền */
+    .supervisor-permission-banner {
+      margin: 0 0 18px;
+      padding: 14px 16px;
+      border: 1px solid #bfdbfe;
+      border-radius: 16px;
+      background: #eff6ff;
+      color: #1e3a8a;
+      line-height: 1.55;
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.08);
+    }
+
+    .supervisor-permission-banner strong { display: block; margin-bottom: 4px; }
+
+    .supervisor-permission-editor {
+      display: grid;
+      gap: 14px;
+      padding: 16px;
+      border: 1px dashed #b9cff7;
+      border-radius: 16px;
+      background: #f8fbff;
+    }
+
+    .supervisor-permission-editor-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .supervisor-permission-editor-head > div:first-child { display: grid; gap: 4px; }
+    .supervisor-permission-editor-head span { color: var(--muted); font-size: 0.9rem; line-height: 1.45; }
+    .supervisor-permission-quick-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+
+    .supervisor-permission-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .supervisor-permission-option {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: flex-start;
+      gap: 10px;
+      min-height: 68px;
+      padding: 12px;
+      border: 1px solid #d8e4f8;
+      border-radius: 14px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .supervisor-permission-option.is-primary {
+      border-color: #93c5fd;
+      background: #eff6ff;
+    }
+
+    .supervisor-permission-option input { width: 19px; height: 19px; margin-top: 2px; accent-color: #2563eb; }
+    .supervisor-permission-copy { display: grid; gap: 3px; }
+    .supervisor-permission-copy strong { color: #13233f; font-size: 0.94rem; }
+    .supervisor-permission-copy span { color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
+    .supervisor-permission-primary-tag { color: #1d4ed8; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    .supervisor-permission-modal-card { width: min(920px, calc(100vw - 28px)); max-height: min(88vh, 860px); overflow: auto; }
+
+    .employee-item { gap: 12px; }
+    .employee-item-info { min-width: 0; flex: 1; }
+    .employee-item-info span { overflow-wrap: anywhere; }
+    .staff-account-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 5px; }
+    .staff-role-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: #e0e7ff;
+      color: #3730a3;
+      font-size: 0.74rem;
+      font-weight: 800;
+    }
+    .staff-role-badge.is-supervisor { background: #dcfce7; color: #166534; }
+    .staff-permission-count { color: var(--muted); font-size: 0.76rem; }
+    .staff-account-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+    .staff-permission-btn { white-space: nowrap; }
+    .read-only-panel-note { padding: 13px 15px; border-radius: 13px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-weight: 700; }
+
+    @media (max-width: 760px) {
+      .supervisor-permission-list { grid-template-columns: 1fr; }
+      .supervisor-permission-editor-head { flex-direction: column; }
+      .supervisor-permission-quick-actions { justify-content: flex-start; }
+      .staff-account-actions { flex-direction: column; align-items: stretch; }
+      .staff-permission-btn, .employee-delete-btn { min-width: 44px; }
+    }
+
   </style>
 </head>
 <body>
@@ -2543,7 +2639,7 @@
     <main id="adminView" class="page hidden">
       <section class="hero-panel">
         <div>
-          <p class="eyebrow">Admin Dashboard</p>
+          <p id="managementDashboardEyebrow" class="eyebrow">Admin Dashboard</p>
           <h2>Giao việc và duyệt kết quả nhân viên</h2>
           <p class="muted">Theo dõi realtime: đang làm, gần hết giờ, quá hạn, chờ xác nhận và đã hoàn thành.</p>
         </div>
@@ -2558,6 +2654,8 @@
           </div>
         </div>
       </section>
+
+      <section id="supervisorPermissionBanner" class="supervisor-permission-banner hidden" aria-live="polite"></section>
 
       <section class="stats-grid">
         <div class="stat-card warning"><span>Chưa giao việc</span><strong id="statDraft">0</strong></div>
@@ -2645,7 +2743,7 @@
     <main id="workTemplateView" class="page hidden">
       <section class="hero-panel">
         <div>
-          <p class="eyebrow">Admin Dashboard</p>
+          <p class="eyebrow management-section-eyebrow">Admin Dashboard</p>
           <h2>Danh sách công việc</h2>
           <p class="muted">Tạo sẵn các công việc mẫu kèm thời gian phải hoàn thành để tìm kiếm và dùng nhanh khi giao việc.</p>
         </div>
@@ -2676,9 +2774,9 @@
     <main id="employeeManagerView" class="page hidden">
       <section class="hero-panel">
         <div>
-          <p class="eyebrow">Admin Dashboard</p>
-          <h2>Danh sách nhân viên</h2>
-          <p class="muted">Tạo tài khoản nhân viên mới và xem danh sách nhân viên đang dùng trong hệ thống giao việc.</p>
+          <p class="eyebrow management-section-eyebrow">Admin Dashboard</p>
+          <h2>Danh sách nhân viên và giám sát</h2>
+          <p class="muted">Tạo tài khoản nhân viên hoặc giám sát, đồng thời quản lý quyền làm việc của từng giám sát.</p>
         </div>
         <div class="hero-actions">
           <button id="backToAdminFromEmployeesBtn" class="btn ghost large" type="button">← Quay lại</button>
@@ -2686,17 +2784,17 @@
       </section>
 
       <div class="employee-manager-grid">
-        <section class="panel">
+        <section id="createStaffAccountPanel" class="panel">
           <div class="panel-header">
             <div>
-              <h3>Tạo tài khoản nhân viên</h3>
-              <p class="muted">Admin tạo email/mật khẩu cho nhân viên đăng nhập.</p>
+              <h3>Tạo tài khoản</h3>
+              <p class="muted">Admin tạo tài khoản Nhân viên hoặc Giám sát. Giám sát chỉ được dùng các chức năng đã được cấp quyền.</p>
             </div>
           </div>
 
           <form id="createEmployeeForm" class="form-stack compact">
             <label>
-              Tên nhân viên
+              Tên tài khoản
               <input id="employeeName" type="text" placeholder="Ví dụ: Phúc" required />
             </label>
             <label>
@@ -2707,15 +2805,37 @@
               Mật khẩu
               <input id="employeePassword" type="password" placeholder="Tối thiểu 6 ký tự" minlength="6" required />
             </label>
-            <button id="createEmployeeBtn" class="btn secondary" type="submit">Tạo nhân viên</button>
+            <label>
+              Loại tài khoản
+              <select id="staffAccountRole" aria-label="Chọn loại tài khoản">
+                <option value="employee">Nhân viên</option>
+                <option value="supervisor">Giám sát</option>
+              </select>
+            </label>
+
+            <section id="createSupervisorPermissions" class="supervisor-permission-editor hidden" aria-label="Phân quyền cho giám sát">
+              <div class="supervisor-permission-editor-head">
+                <div>
+                  <strong>Phân quyền cho Giám sát</strong>
+                  <span>Quyền chưa được đánh dấu sẽ không xuất hiện hoặc không thể sử dụng trong tài khoản Giám sát.</span>
+                </div>
+                <div class="supervisor-permission-quick-actions">
+                  <button id="selectAllCreateSupervisorPermissions" class="link-btn" type="button">Chọn tất cả</button>
+                  <button id="clearCreateSupervisorPermissions" class="link-btn" type="button">Bỏ chọn</button>
+                </div>
+              </div>
+              <div id="createSupervisorPermissionList" class="supervisor-permission-list"></div>
+            </section>
+
+            <button id="createEmployeeBtn" class="btn secondary" type="submit">Tạo tài khoản</button>
           </form>
         </section>
 
         <section class="panel">
           <div class="panel-header">
             <div>
-              <h3>Danh sách nhân viên</h3>
-              <p class="muted">Nhân viên sẽ xuất hiện trong form giao việc.</p>
+              <h3>Danh sách tài khoản</h3>
+              <p class="muted">Nhân viên xuất hiện trong form giao việc. Giám sát được xem toàn bộ Phiếu công việc và chỉ thao tác theo quyền Admin cấp.</p>
             </div>
           </div>
           <div id="employeeList" class="employee-list empty-box">Chưa có nhân viên.</div>
@@ -2948,6 +3068,40 @@
         <div id="photoReportGrid" class="photo-report-grid empty-box">Chưa có hình báo cáo.</div>
       </section>
     </main>
+
+  <!-- SUPERVISOR PERMISSION MODAL -->
+  <div id="supervisorPermissionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="supervisorPermissionModalTitle">
+    <div class="modal-backdrop" data-close-supervisor-permission-modal></div>
+    <div class="modal-card supervisor-permission-modal-card">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Phân quyền Giám sát</p>
+          <h3 id="supervisorPermissionModalTitle">Chỉnh quyền tài khoản</h3>
+          <p id="supervisorPermissionModalAccount" class="muted">Tài khoản giám sát</p>
+        </div>
+        <button class="icon-btn" type="button" data-close-supervisor-permission-modal aria-label="Đóng">×</button>
+      </div>
+
+      <div class="supervisor-permission-editor">
+        <div class="supervisor-permission-editor-head">
+          <div>
+            <strong>Quyền được phép sử dụng</strong>
+            <span>Bốn quyền chính được đặt ở đầu danh sách. Thay đổi có hiệu lực theo Firestore Rules và giao diện tài khoản.</span>
+          </div>
+          <div class="supervisor-permission-quick-actions">
+            <button id="selectAllEditSupervisorPermissions" class="link-btn" type="button">Chọn tất cả</button>
+            <button id="clearEditSupervisorPermissions" class="link-btn" type="button">Bỏ chọn</button>
+          </div>
+        </div>
+        <div id="editSupervisorPermissionList" class="supervisor-permission-list"></div>
+      </div>
+
+      <div class="modal-footer-actions">
+        <button class="btn ghost" type="button" data-close-supervisor-permission-modal>Hủy</button>
+        <button id="saveSupervisorPermissionsBtn" class="btn primary" type="button">Lưu phân quyền</button>
+      </div>
+    </div>
+  </div>
 
   <!-- PHOTO VIEWER / LIGHTBOX -->
   <div id="photoViewer" class="photo-viewer hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="photoViewerName">
