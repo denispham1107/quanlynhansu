@@ -6075,6 +6075,115 @@
       }
     }
 
+
+
+    /* =========================================================
+       TẠO PHIẾU: TIÊU ĐỀ CUỘN THEO FORM + TỰ THU GỌN CÔNG VIỆC
+       - Không thay đổi input, ID, validation hoặc logic lưu dữ liệu.
+       - Chỉ ẩn phần nội dung của các công việc không được chỉnh sửa.
+       ========================================================= */
+    #taskModal .task-create-modal-header {
+      position: static !important;
+      inset: auto !important;
+      top: auto !important;
+      z-index: auto !important;
+    }
+
+    #taskModal .task-row-toggle {
+      display: flex;
+      flex: 1 1 auto;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    #taskModal .task-row-toggle:focus-visible {
+      border-radius: 10px;
+      outline: 3px solid rgba(37, 99, 235, 0.20);
+      outline-offset: 3px;
+    }
+
+    #taskModal .task-row-summary-title {
+      display: none;
+      min-width: 0;
+      overflow: hidden;
+      color: #172554;
+      font-size: 14px;
+      font-weight: 900;
+      line-height: 1.3;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #taskModal .task-row-toggle-icon {
+      flex: 0 0 auto;
+      margin-left: auto;
+      color: #2563eb;
+      font-size: 19px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    #taskModal .task-row.is-collapsed {
+      gap: 0 !important;
+      min-height: 54px;
+      padding: 10px 12px 10px 16px !important;
+      cursor: pointer;
+    }
+
+    #taskModal .task-row.is-collapsed > :not(.task-row-head) {
+      display: none !important;
+    }
+
+    #taskModal .task-row.is-collapsed .task-row-head {
+      width: 100%;
+      padding: 0 !important;
+    }
+
+    #taskModal .task-row.is-collapsed .task-row-toggle {
+      width: 100%;
+    }
+
+    #taskModal .task-row.is-collapsed .task-row-toggle strong,
+    #taskModal .task-row.is-collapsed .task-row-head-actions {
+      display: none !important;
+    }
+
+    #taskModal .task-row.is-collapsed .task-row-summary-title {
+      display: block;
+    }
+
+    #taskModal .task-row.is-collapsed:hover {
+      border-color: #93c5fd !important;
+      background: linear-gradient(135deg, #ffffff, #f8fbff) !important;
+      box-shadow: 0 8px 20px rgba(37, 99, 235, 0.10) !important;
+    }
+
+    @media (max-width: 768px) {
+      #taskModal .task-row.is-collapsed {
+        min-height: 50px;
+        padding: 9px 10px 9px 13px !important;
+      }
+
+      #taskModal .task-row-summary-title {
+        font-size: 13px;
+      }
+
+      #taskModal .task-row-toggle-icon {
+        font-size: 18px;
+      }
+    }
+
 </style>
 </head>
 <body>

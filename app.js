@@ -3404,7 +3404,11 @@ function createTaskRowElement(prefill = null) {
 
   wrapper.innerHTML = `
     <div class="task-row-head">
-      <strong>Công việc</strong>
+      <button type="button" class="task-row-toggle" data-action="toggle-task-row" aria-expanded="true" aria-label="Thu gọn công việc này">
+        <strong>Công việc</strong>
+        <span class="task-row-summary-title">Chưa đặt tên công việc</span>
+        <span class="task-row-toggle-icon" aria-hidden="true">⌃</span>
+      </button>
       <div class="task-row-head-actions">
         <span class="task-row-visual-badge" aria-hidden="true">Nội dung</span>
         <button type="button" class="icon-btn small task-row-remove-btn" data-action="remove-task-row" data-row-id="${rowId}" aria-label="Xóa công việc này" title="Xóa công việc này">×</button>
@@ -3497,13 +3501,68 @@ function createTaskRowElement(prefill = null) {
   }
 
   syncLunchBreakRowControls(wrapper);
+  syncTaskRowSummary(wrapper);
   return wrapper;
 }
 
-function addTaskRow() {
-  els.taskRowsContainer.appendChild(createTaskRowElement());
+function getTaskRowFallbackTitle(row) {
+  const rowNumber = row?.querySelector(".task-row-head strong")?.textContent?.trim() || "Công việc";
+  return `${rowNumber} (chưa đặt tên)`;
+}
+
+function syncTaskRowSummary(row) {
+  if (!row) return;
+
+  const title = row.querySelector(".row-title")?.value?.trim();
+  const summary = row.querySelector(".task-row-summary-title");
+  if (summary) summary.textContent = title || getTaskRowFallbackTitle(row);
+}
+
+function setTaskRowCollapsed(row, collapsed) {
+  if (!row) return;
+
+  const isCollapsed = Boolean(collapsed);
+  row.classList.toggle("is-collapsed", isCollapsed);
+
+  const toggle = row.querySelector('[data-action="toggle-task-row"]');
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", String(!isCollapsed));
+    toggle.setAttribute("aria-label", isCollapsed ? "Mở công việc này để chỉnh sửa" : "Thu gọn công việc này");
+  }
+
+  const icon = row.querySelector(".task-row-toggle-icon");
+  if (icon) icon.textContent = isCollapsed ? "⌄" : "⌃";
+
+  syncTaskRowSummary(row);
+}
+
+function activateTaskRow(row, { focusTitle = false, scrollIntoView = false } = {}) {
+  if (!row) return;
+
+  $$("#taskRowsContainer .task-row").forEach((taskRow) => {
+    setTaskRowCollapsed(taskRow, taskRow !== row);
+  });
+
+  if (scrollIntoView) {
+    requestAnimationFrame(() => {
+      row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
+
+  if (focusTitle) {
+    requestAnimationFrame(() => {
+      row.querySelector(".row-title")?.focus({ preventScroll: true });
+    });
+  }
+}
+
+function addTaskRow({ focusTitle = false, scrollIntoView = false } = {}) {
+  const row = createTaskRowElement();
+  els.taskRowsContainer.appendChild(row);
   updateTaskRowHeadings();
+  activateTaskRow(row, { focusTitle, scrollIntoView });
   syncPhotoRequirementDefaultFromTaskTypes();
+  return row;
 }
 
 function removeTaskRow(rowId) {
@@ -3514,8 +3573,10 @@ function removeTaskRow(rowId) {
   }
 
   const row = els.taskRowsContainer.querySelector(`[data-row-id="${rowId}"]`);
+  const rowToActivate = row?.nextElementSibling || row?.previousElementSibling || null;
   row?.remove();
   updateTaskRowHeadings();
+  if (rowToActivate?.classList?.contains("task-row")) activateTaskRow(rowToActivate);
   syncPhotoRequirementDefaultFromTaskTypes();
 }
 
@@ -3524,6 +3585,7 @@ function updateTaskRowHeadings() {
 
   rows.forEach((row, index) => {
     row.querySelector(".task-row-head strong").textContent = `Công việc #${index + 1}`;
+    syncTaskRowSummary(row);
   });
 
   // Chỉ cho xóa khi có nhiều hơn 1 dòng.
@@ -3728,12 +3790,44 @@ els.photoRequiredCheckbox?.addEventListener("change", () => {
   setPhotoRequirementChecked(Boolean(els.photoRequiredCheckbox.checked));
 });
 
-els.addTaskRowBtn.addEventListener("click", addTaskRow);
+els.addTaskRowBtn.addEventListener("click", () => {
+  addTaskRow({ focusTitle: true, scrollIntoView: true });
+});
 
 els.taskRowsContainer.addEventListener("click", (event) => {
-  const button = event.target.closest('[data-action="remove-task-row"]');
-  if (!button) return;
-  removeTaskRow(button.dataset.rowId);
+  const removeButton = event.target.closest('[data-action="remove-task-row"]');
+  if (removeButton) {
+    removeTaskRow(removeButton.dataset.rowId);
+    return;
+  }
+
+  const toggleButton = event.target.closest('[data-action="toggle-task-row"]');
+  if (toggleButton) {
+    const row = toggleButton.closest(".task-row");
+    if (!row) return;
+
+    if (row.classList.contains("is-collapsed")) {
+      activateTaskRow(row, { scrollIntoView: true });
+    } else {
+      setTaskRowCollapsed(row, true);
+    }
+    return;
+  }
+
+  const collapsedRow = event.target.closest(".task-row.is-collapsed");
+  if (collapsedRow) activateTaskRow(collapsedRow, { scrollIntoView: true });
+});
+
+els.taskRowsContainer.addEventListener("focusin", (event) => {
+  const row = event.target.closest(".task-row");
+  if (row) activateTaskRow(row);
+});
+
+els.taskRowsContainer.addEventListener("input", (event) => {
+  const row = event.target.closest(".task-row");
+  if (!row) return;
+
+  if (event.target.matches(".row-title")) syncTaskRowSummary(row);
 });
 
 els.taskRowsContainer.addEventListener("change", (event) => {
@@ -3742,6 +3836,7 @@ els.taskRowsContainer.addEventListener("change", (event) => {
 
   if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning, .row-hours, .row-minutes")) {
     syncLunchBreakRowControls(row, event.target);
+    syncTaskRowSummary(row);
 
     if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning")) {
       syncPhotoRequirementDefaultFromTaskTypes();
@@ -3756,6 +3851,7 @@ els.taskRowsContainer.addEventListener("change", (event) => {
 
   applyWorkTemplateToRow(titleInput.closest(".task-row"), template);
   syncLunchBreakRowControls(titleInput.closest(".task-row"));
+  syncTaskRowSummary(titleInput.closest(".task-row"));
   toast(`Đã áp dụng thời gian ${formatMinutes(Number(template.deadlineMinutes || 0))} cho công việc “${template.name}”.`, "success");
 });
 
@@ -3813,6 +3909,8 @@ function openEditWorkOrderModal(workOrderId) {
   }
 
   updateTaskRowHeadings();
+  const firstTaskRow = els.taskRowsContainer.querySelector(".task-row");
+  if (firstTaskRow) activateTaskRow(firstTaskRow);
   setPhotoRequirementControlsFromTask(tasksInGroup[0] || null);
 
   $("#taskModalTitle").textContent = "Sửa phiếu công việc (đang Chưa giao việc)";
