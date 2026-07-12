@@ -4873,6 +4873,92 @@
       }
     }
 
+
+    /* =========================================================
+       Mobile: mở rộng lưới 4 ô trạng thái nhân viên sát hai mép
+       và bảo đảm nhãn "Chưa có việc" luôn hiển thị đầy đủ.
+       ========================================================= */
+    @media (max-width: 768px) {
+      #adminView .employee-status-summary {
+        width: calc(100% + 24px) !important;
+        margin-left: -12px !important;
+        margin-right: -12px !important;
+        gap: 6px !important;
+      }
+
+      #adminView .employee-status-card {
+        grid-template-columns: 25px minmax(0, 1fr) !important;
+        gap: 2px 4px !important;
+        padding: 8px 7px !important;
+      }
+
+      #adminView .employee-status-card .employee-status-card-icon {
+        width: 25px !important;
+        height: 25px !important;
+        border-radius: 9px !important;
+        font-size: 16px !important;
+      }
+
+      #adminView .employee-status-card strong {
+        position: relative;
+        display: block !important;
+        min-width: 0;
+        padding-right: 23px;
+        overflow: visible;
+        font-size: clamp(11.5px, 3.1vw, 12.5px) !important;
+        line-height: 1.15 !important;
+        letter-spacing: -0.15px;
+      }
+
+      #adminView .employee-status-card .employee-status-short-label {
+        display: block !important;
+        min-width: 0;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        white-space: nowrap !important;
+      }
+
+      #adminView .employee-status-card .employee-status-count {
+        position: absolute;
+        top: 50%;
+        right: 0;
+        margin: 0 !important;
+        transform: translateY(-50%);
+        font-size: 21px !important;
+      }
+    }
+
+    @media (max-width: 390px) {
+      #adminView .employee-status-summary {
+        width: calc(100% + 24px) !important;
+        margin-left: -12px !important;
+        margin-right: -12px !important;
+        gap: 6px !important;
+      }
+
+      #adminView .employee-status-card {
+        grid-template-columns: 23px minmax(0, 1fr) !important;
+        gap: 2px 4px !important;
+        padding: 7px 6px !important;
+      }
+
+      #adminView .employee-status-card .employee-status-card-icon {
+        width: 23px !important;
+        height: 23px !important;
+        font-size: 14px !important;
+      }
+
+      #adminView .employee-status-card strong {
+        padding-right: 21px;
+        font-size: 11.5px !important;
+        letter-spacing: -0.25px;
+      }
+
+      #adminView .employee-status-card .employee-status-count {
+        font-size: 20px !important;
+      }
+    }
+
 </style>
 </head>
 <body>
