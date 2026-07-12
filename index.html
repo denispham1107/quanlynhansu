@@ -4360,11 +4360,25 @@
       }
 
       .mobile-filter-toolbar .admin-work-order-search-input {
+        display: block !important;
+        width: 100% !important;
+        height: 46px !important;
         min-height: 46px !important;
-        padding: 9px 42px 9px 40px !important;
+        max-height: 46px !important;
+        padding: 0 42px 0 40px !important;
         border-radius: 14px !important;
-        /* iOS Safari tự phóng to khi ô nhập có cỡ chữ nhỏ hơn 16px. */
+        /* iOS Safari tự phóng to nếu cỡ chữ nhỏ hơn 16px. */
         font-size: 16px !important;
+        /* Cố định line box để con trỏ nhập và chữ luôn nằm giữa ô trên iOS. */
+        line-height: 22px !important;
+        vertical-align: middle !important;
+        caret-color: #2563eb;
+        -webkit-appearance: none !important;
+        appearance: none !important;
+      }
+
+      .mobile-filter-toolbar .admin-work-order-search-input::placeholder {
+        line-height: 22px !important;
       }
 
       .mobile-filter-toolbar .admin-work-order-search-icon {
@@ -4979,7 +4993,10 @@
               <input
                 id="adminWorkOrderSearch"
                 class="admin-work-order-search-input"
-                type="search"
+                type="text"
+                inputmode="search"
+                enterkeyhint="search"
+                role="searchbox"
                 placeholder="Tìm Phiếu công việc..."
                 autocomplete="off"
                 aria-label="Tìm kiếm tên Phiếu công việc"
