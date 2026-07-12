@@ -3394,58 +3394,76 @@ function createTaskRowElement(prefill = null) {
   wrapper.innerHTML = `
     <div class="task-row-head">
       <strong>Công việc</strong>
-      <button type="button" class="icon-btn small" data-action="remove-task-row" data-row-id="${rowId}" aria-label="Xóa công việc này">×</button>
+      <button type="button" class="task-row-remove" data-action="remove-task-row" data-row-id="${rowId}" aria-label="Xóa công việc này">Xóa</button>
     </div>
-    <label>
-      Tên công việc
-      <input type="text" class="row-title" list="workTemplateOptions" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
+
+    <label class="compact-main-field task-title-field">
+      <span>Tên công việc</span>
+      <input type="text" class="row-title" list="workTemplateOptions" placeholder="Nhập tên công việc" required />
     </label>
-    <label>
-      Mô tả công việc <span class="optional-label">(không bắt buộc)</span>
-      <textarea class="row-description" rows="3" placeholder="Có thể bỏ trống hoặc ghi rõ yêu cầu, tiêu chuẩn hoàn thành..."></textarea>
-    </label>
-    <div class="two-col">
-      <label>
-        Ngày giao việc
+
+    <details class="compact-description">
+      <summary>+ Thêm mô tả hoặc yêu cầu <span>(không bắt buộc)</span></summary>
+      <textarea class="row-description" rows="3" placeholder="Nhập yêu cầu, tiêu chuẩn hoàn thành..."></textarea>
+    </details>
+
+    <div class="compact-setting-list">
+      <label class="compact-setting-row">
+        <span class="compact-setting-label">Ngày giao</span>
         <input type="date" class="row-date" required />
       </label>
-      <label>
-        Người được giao <span class="optional-label">(có thể chọn sau)</span>
+      <label class="compact-setting-row">
+        <span class="compact-setting-label">Người nhận <small>có thể chọn sau</small></span>
         <select class="row-assignee">
           <option value="">Chờ chọn người</option>
           ${employeeOptionsHtml()}
         </select>
       </label>
     </div>
-    <div class="task-type-options">
-      <label class="checkbox-line lunch-break-line">
-        <input type="checkbox" class="row-lunch-break" />
-        Nghỉ trưa
-      </label>
-      <label class="checkbox-line hotel-line">
-        <input type="checkbox" class="row-hotel" />
-        Hotel
-      </label>
-      <label class="checkbox-line ship-line">
-        <input type="checkbox" class="row-ship" />
-        Ship
-      </label>
-      <label class="checkbox-line cleaning-line">
-        <input type="checkbox" class="row-cleaning" />
-        Dọn dẹp vệ sinh
-      </label>
+
+    <div class="task-type-section">
+      <span class="task-type-label">Loại công việc</span>
+      <div class="task-type-options">
+        <label class="task-type-chip lunch-break-line">
+          <input type="checkbox" class="row-lunch-break" />
+          <span>Nghỉ trưa</span>
+        </label>
+        <label class="task-type-chip hotel-line">
+          <input type="checkbox" class="row-hotel" />
+          <span>Hotel</span>
+        </label>
+        <label class="task-type-chip ship-line">
+          <input type="checkbox" class="row-ship" />
+          <span>Ship</span>
+        </label>
+        <label class="task-type-chip cleaning-line">
+          <input type="checkbox" class="row-cleaning" />
+          <span>Dọn vệ sinh</span>
+        </label>
+      </div>
     </div>
-    <p class="small-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
-    <p class="small-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>10 bé</strong> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <strong>30 phút</strong>. Cứ <strong>mỗi 1 bé vào</strong> ở thêm thì sẽ cộng thêm thời gian cho <strong>2 phút</strong>.</p>
-    <div class="two-col">
-      <label>
-        Số giờ
-        <input type="number" class="row-hours" min="0" max="168" value="0" required />
-      </label>
-      <label>
-        Số phút
-        <input type="number" class="row-minutes" min="0" max="59" value="30" required />
-      </label>
+
+    <details class="small-note special-task-note lunch-break-note hidden">
+      <summary>Quy định phiếu Nghỉ trưa</summary>
+      <p>Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
+    </details>
+    <details class="small-note special-task-note hotel-note hidden">
+      <summary>Quy tắc thời gian Hotel</summary>
+      <p>Phiếu Hotel áp dụng cài đặt đăng hình ở bên dưới. <strong>10 bé</strong> có tổng thời gian cho ăn và dọn dẹp là <strong>30 phút</strong>; mỗi bé tăng thêm được cộng <strong>2 phút</strong>.</p>
+    </details>
+
+    <div class="duration-row">
+      <span class="duration-label">Thời lượng</span>
+      <div class="duration-inputs">
+        <label>
+          <input type="number" inputmode="numeric" class="row-hours" min="0" max="168" value="0" required />
+          <span>giờ</span>
+        </label>
+        <label>
+          <input type="number" inputmode="numeric" class="row-minutes" min="0" max="59" value="30" required />
+          <span>phút</span>
+        </label>
+      </div>
     </div>
   `;
 
@@ -3457,6 +3475,10 @@ function createTaskRowElement(prefill = null) {
   if (prefill) {
     wrapper.querySelector(".row-title").value = prefill.title || "";
     wrapper.querySelector(".row-description").value = prefill.description || "";
+    const descriptionDetails = wrapper.querySelector(".compact-description");
+    if (descriptionDetails && String(prefill.description || "").trim()) {
+      descriptionDetails.open = true;
+    }
     wrapper.querySelector(".row-hours").value = Number.isFinite(prefill.hours) ? prefill.hours : 0;
     wrapper.querySelector(".row-minutes").value = Number.isFinite(prefill.minutes) ? prefill.minutes : 30;
 
@@ -3638,10 +3660,14 @@ function resetTaskRows() {
 function setPhotoRequirementChecked(checked) {
   if (!els.photoRequiredCheckbox || !els.requiredPhotoCount) return;
 
-  els.photoRequiredCheckbox.checked = Boolean(checked);
-  els.requiredPhotoCount.disabled = !Boolean(checked);
+  const isChecked = Boolean(checked);
+  const countSetting = els.requiredPhotoCount.closest(".photo-count-setting");
 
-  if (checked && Number(els.requiredPhotoCount.value || 0) <= 0) {
+  els.photoRequiredCheckbox.checked = isChecked;
+  els.requiredPhotoCount.disabled = !isChecked;
+  countSetting?.classList.toggle("hidden", !isChecked);
+
+  if (isChecked && Number(els.requiredPhotoCount.value || 0) <= 0) {
     els.requiredPhotoCount.value = 10;
   }
 }
@@ -3740,7 +3766,7 @@ function openCreateWorkOrderModal() {
   if (!requirePermission("createWorkOrder", "Tài khoản của bạn chưa được cấp quyền tạo Phiếu công việc.")) return;
 
   state.editingWorkOrderId = null;
-  $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
+  $("#taskModalTitle").textContent = "Tạo phiếu mới";
   els.workOrderName.value = "";
   resetTaskRows();
   resetPhotoRequirementControls();
@@ -3792,7 +3818,7 @@ function openEditWorkOrderModal(workOrderId) {
   updateTaskRowHeadings();
   setPhotoRequirementControlsFromTask(tasksInGroup[0] || null);
 
-  $("#taskModalTitle").textContent = "Sửa phiếu công việc (đang Chưa giao việc)";
+  $("#taskModalTitle").textContent = "Sửa phiếu chưa giao";
   els.taskModal.classList.remove("hidden");
 }
 
@@ -4161,7 +4187,7 @@ async function persistWorkOrder(dispatch, button) {
     els.workOrderName.value = "";
     resetTaskRows();
     resetPhotoRequirementControls();
-    $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
+    $("#taskModalTitle").textContent = "Tạo phiếu mới";
 
     els.taskModal.classList.add("hidden");
 

@@ -4741,6 +4741,737 @@
       }
     }
 
+
+
+    /* =========================================================
+       FORM TẠO PHIẾU COMPACT - tối ưu iPhone/iOS/Android
+       Giữ đầy đủ trường nhập trên cùng một form, không chia bước.
+       ========================================================= */
+    .task-modal-cancel {
+      display: none;
+      border: 0;
+      background: transparent;
+      color: #2563eb;
+      font: inherit;
+      font-weight: 850;
+      cursor: pointer;
+    }
+
+    #taskModal .task-modal-heading {
+      min-width: 0;
+    }
+
+    #taskModal .compact-main-field,
+    #taskModal .compact-description,
+    #taskModal .compact-setting-row,
+    #taskModal .duration-row,
+    #taskModal .photo-count-setting {
+      box-sizing: border-box;
+    }
+
+    #taskModal .compact-main-field {
+      display: grid;
+      gap: 7px;
+    }
+
+    #taskModal .compact-main-field > span,
+    #taskModal .task-type-label,
+    #taskModal .duration-label {
+      color: #1e293b;
+      font-weight: 850;
+    }
+
+    #taskModal .compact-description {
+      border: 1px solid #dbe7f7;
+      border-radius: 14px;
+      background: #f8fbff;
+      overflow: hidden;
+    }
+
+    #taskModal .compact-description summary,
+    #taskModal .special-task-note summary,
+    #taskModal .photo-requirement-help summary {
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #taskModal .compact-description summary::-webkit-details-marker,
+    #taskModal .special-task-note summary::-webkit-details-marker,
+    #taskModal .photo-requirement-help summary::-webkit-details-marker {
+      display: none;
+    }
+
+    #taskModal .compact-description summary {
+      padding: 12px 14px;
+      color: #2563eb;
+      font-size: 14px;
+      font-weight: 850;
+    }
+
+    #taskModal .compact-description summary span {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    #taskModal .compact-description textarea {
+      width: calc(100% - 24px);
+      min-height: 92px;
+      margin: 0 12px 12px;
+      resize: vertical;
+    }
+
+    #taskModal .compact-setting-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    #taskModal .compact-setting-row {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    #taskModal .compact-setting-label {
+      min-width: 0;
+      color: #1e293b;
+      font-weight: 850;
+    }
+
+    #taskModal .compact-setting-label small {
+      display: block;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    #taskModal .task-type-section {
+      display: grid;
+      gap: 8px;
+    }
+
+    #taskModal .task-type-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    #taskModal .task-type-chip {
+      position: relative;
+      width: auto;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #taskModal .task-type-chip input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #taskModal .task-type-chip span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 8px 12px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      background: #ffffff;
+      font-size: 13px;
+      font-weight: 850;
+      line-height: 1.1;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+
+    #taskModal .task-type-chip input:focus-visible + span {
+      outline: 3px solid rgba(37, 99, 235, 0.22);
+      outline-offset: 2px;
+    }
+
+    #taskModal .task-type-chip input:checked + span {
+      color: #ffffff;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+      transform: translateY(-1px);
+    }
+
+    #taskModal .lunch-break-line input:checked + span { background: #0f766e; }
+    #taskModal .hotel-line input:checked + span { background: #2563eb; }
+    #taskModal .ship-line input:checked + span { background: #be185d; }
+    #taskModal .cleaning-line input:checked + span { background: #15803d; }
+
+    #taskModal .special-task-note {
+      margin: 0;
+      padding: 10px 12px;
+      border: 1px dashed #bfdbfe;
+      border-radius: 12px;
+      background: #f8fbff;
+    }
+
+    #taskModal .special-task-note summary {
+      color: #2563eb;
+      font-weight: 850;
+    }
+
+    #taskModal .special-task-note p {
+      margin: 8px 0 0;
+    }
+
+    #taskModal .duration-row {
+      display: grid;
+      grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid #dbe7f7;
+      border-radius: 14px;
+      background: #f8fbff;
+    }
+
+    #taskModal .duration-inputs {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    #taskModal .duration-inputs label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    #taskModal .duration-inputs input {
+      width: 76px;
+      min-width: 0;
+      text-align: center;
+    }
+
+    #taskModal .task-row-remove {
+      min-width: 44px;
+      min-height: 36px;
+      padding: 6px 10px;
+      border: 0;
+      border-radius: 10px;
+      background: #fff1f2;
+      color: #be123c;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 850;
+      cursor: pointer;
+    }
+
+    #taskModal .compact-photo-requirement {
+      gap: 0;
+      padding: 0;
+      overflow: hidden;
+      border-style: solid;
+    }
+
+    #taskModal .photo-toggle-row,
+    #taskModal .photo-count-setting {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 52px;
+      padding: 10px 12px;
+    }
+
+    #taskModal .photo-toggle-row > div {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    #taskModal .photo-toggle-row strong,
+    #taskModal .photo-count-setting > span {
+      color: #172554;
+      font-weight: 850;
+    }
+
+    #taskModal .photo-toggle-row > div > span {
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    #taskModal .photo-count-setting {
+      border-top: 1px solid #dbeafe;
+    }
+
+    #taskModal .photo-count-setting input {
+      width: 86px;
+      text-align: center;
+    }
+
+    #taskModal .compact-switch {
+      position: relative;
+      flex: 0 0 auto;
+      width: 48px;
+      height: 28px;
+      cursor: pointer;
+    }
+
+    #taskModal .compact-switch input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
+
+    #taskModal .compact-switch span {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #cbd5e1;
+      transition: background 0.18s ease;
+    }
+
+    #taskModal .compact-switch span::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.25);
+      transition: transform 0.18s ease;
+    }
+
+    #taskModal .compact-switch input:checked + span {
+      background: #2563eb;
+    }
+
+    #taskModal .compact-switch input:checked + span::after {
+      transform: translateX(20px);
+    }
+
+    #taskModal .compact-switch input:focus-visible + span {
+      outline: 3px solid rgba(37, 99, 235, 0.28);
+      outline-offset: 2px;
+    }
+
+    #taskModal .photo-count-setting.hidden,
+    #taskModal .special-task-note.hidden,
+    #taskModal .task-row-remove.hidden {
+      display: none !important;
+    }
+
+    #taskModal .photo-requirement-help {
+      border-top: 1px solid #dbeafe;
+    }
+
+    #taskModal .photo-requirement-help summary {
+      padding: 10px 12px;
+      color: #2563eb;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    #taskModal .photo-requirement-help p {
+      margin: 0;
+      padding: 0 12px 12px;
+    }
+
+    @media (max-width: 768px) {
+      html:has(#taskModal:not(.hidden)),
+      body:has(#taskModal:not(.hidden)) {
+        overflow: hidden !important;
+        overscroll-behavior: none;
+      }
+
+      #taskModal:not(.hidden) {
+        display: block !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+      }
+
+      #taskModal .modal-card {
+        position: fixed !important;
+        inset: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        width: 100% !important;
+        max-width: none !important;
+        height: 100dvh !important;
+        min-height: 100svh !important;
+        max-height: 100dvh !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+        overflow: hidden !important;
+        background: #ffffff !important;
+        clip-path: none !important;
+      }
+
+      #taskModal .modal-header.task-modal-header {
+        position: relative !important;
+        z-index: 5 !important;
+        display: grid !important;
+        grid-template-columns: minmax(52px, auto) minmax(0, 1fr) minmax(52px, auto) !important;
+        align-items: center !important;
+        gap: 8px !important;
+        min-height: 56px !important;
+        margin: 0 !important;
+        padding: max(8px, env(safe-area-inset-top, 0px)) 12px 8px !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        border-radius: 0 !important;
+        background: rgba(255, 255, 255, 0.96) !important;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+      }
+
+      #taskModal .task-modal-cancel {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        min-height: 44px;
+        padding: 0 4px;
+      }
+
+      #taskModal .task-modal-heading {
+        text-align: center;
+      }
+
+      #taskModal .task-modal-heading .eyebrow {
+        display: none !important;
+      }
+
+      #taskModal .modal-header h3 {
+        margin: 0 !important;
+        font-size: 18px !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+      }
+
+      #taskModal .task-modal-close {
+        visibility: hidden !important;
+        width: 52px !important;
+        height: 44px !important;
+        flex-basis: 52px !important;
+      }
+
+      #taskModal #createTaskForm {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 0;
+        display: grid;
+        align-content: start;
+        gap: 12px !important;
+        margin: 0 !important;
+        padding: 12px 12px calc(82px + env(safe-area-inset-bottom, 0px)) !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      #taskModal #createTaskForm input,
+      #taskModal #createTaskForm select,
+      #taskModal #createTaskForm textarea {
+        box-sizing: border-box !important;
+        max-width: 100% !important;
+        border-radius: 12px !important;
+        font-size: 16px !important;
+      }
+
+      #taskModal #createTaskForm input:not([type="checkbox"]),
+      #taskModal #createTaskForm select {
+        min-height: 44px !important;
+        height: 44px !important;
+        padding: 8px 11px !important;
+      }
+
+      #taskModal .compact-main-field {
+        gap: 5px !important;
+        font-size: 13px !important;
+      }
+
+      #taskModal .task-rows-block {
+        display: grid !important;
+        gap: 8px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+      }
+
+      #taskModal .task-rows-header {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 10px !important;
+        margin: 0 !important;
+        padding: 0 2px !important;
+      }
+
+      #taskModal .task-rows-header h4 {
+        margin: 0 !important;
+        font-size: 13px !important;
+        line-height: 1.2 !important;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      #taskModal #addTaskRowBtn {
+        min-height: 36px !important;
+        width: auto !important;
+        padding: 7px 11px !important;
+        border-radius: 10px !important;
+        font-size: 13px !important;
+        white-space: nowrap !important;
+      }
+
+      #taskModal .task-rows-container {
+        display: grid !important;
+        gap: 10px !important;
+      }
+
+      #taskModal .task-row {
+        display: grid !important;
+        gap: 10px !important;
+        margin: 0 !important;
+        padding: 11px !important;
+        border: 1px solid #dbe7f7 !important;
+        border-radius: 16px !important;
+        background: #ffffff !important;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05) !important;
+      }
+
+      #taskModal .task-row-head {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 10px !important;
+        min-height: 36px !important;
+        margin: -2px 0 0 !important;
+      }
+
+      #taskModal .task-row-head strong {
+        font-size: 15px !important;
+      }
+
+      #taskModal .task-row-remove {
+        min-height: 34px;
+      }
+
+      #taskModal .compact-description summary {
+        padding: 10px 11px !important;
+        font-size: 13px !important;
+      }
+
+      #taskModal .compact-description textarea {
+        width: calc(100% - 20px) !important;
+        min-height: 84px !important;
+        margin: 0 10px 10px !important;
+        padding: 10px 11px !important;
+      }
+
+      #taskModal .compact-setting-list {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: 0 !important;
+        overflow: hidden;
+        border: 1px solid #dbe7f7;
+        border-radius: 14px;
+        background: #f8fbff;
+      }
+
+      #taskModal .compact-setting-row {
+        display: grid !important;
+        grid-template-columns: minmax(92px, 0.8fr) minmax(0, 1.4fr) !important;
+        align-items: center !important;
+        gap: 10px !important;
+        min-height: 48px !important;
+        padding: 4px 8px 4px 11px !important;
+      }
+
+      #taskModal .compact-setting-row + .compact-setting-row {
+        border-top: 1px solid #dbe7f7;
+      }
+
+      #taskModal .compact-setting-label {
+        font-size: 13px !important;
+        line-height: 1.2 !important;
+      }
+
+      #taskModal .compact-setting-row input,
+      #taskModal .compact-setting-row select {
+        width: 100% !important;
+        min-width: 0 !important;
+        border: 0 !important;
+        background: #ffffff !important;
+        box-shadow: none !important;
+      }
+
+      #taskModal .task-type-section {
+        gap: 6px !important;
+      }
+
+      #taskModal .task-type-label,
+      #taskModal .duration-label {
+        font-size: 13px !important;
+      }
+
+      #taskModal .task-type-options {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 7px !important;
+      }
+
+      #taskModal .task-type-chip,
+      #taskModal .task-type-chip span {
+        width: 100% !important;
+      }
+
+      #taskModal .task-type-chip span {
+        min-height: 36px !important;
+        padding: 7px 8px !important;
+        font-size: 12.5px !important;
+        white-space: nowrap;
+      }
+
+      #taskModal .special-task-note {
+        padding: 8px 10px !important;
+        font-size: 12px !important;
+      }
+
+      #taskModal .duration-row {
+        grid-template-columns: minmax(78px, auto) minmax(0, 1fr) !important;
+        gap: 8px !important;
+        padding: 7px 8px 7px 11px !important;
+      }
+
+      #taskModal .duration-inputs {
+        gap: 6px !important;
+      }
+
+      #taskModal .duration-inputs label {
+        gap: 4px !important;
+        font-size: 12px !important;
+      }
+
+      #taskModal .duration-inputs input {
+        width: 58px !important;
+        min-height: 40px !important;
+        height: 40px !important;
+        padding: 6px !important;
+      }
+
+      #taskModal .compact-photo-requirement {
+        margin: 0 !important;
+        border-radius: 14px !important;
+      }
+
+      #taskModal .photo-toggle-row,
+      #taskModal .photo-count-setting {
+        min-height: 48px !important;
+        padding: 8px 10px !important;
+      }
+
+      #taskModal .photo-toggle-row strong,
+      #taskModal .photo-count-setting > span {
+        font-size: 13px !important;
+      }
+
+      #taskModal .photo-toggle-row > div > span {
+        font-size: 11px !important;
+      }
+
+      #taskModal .photo-count-setting input {
+        width: 72px !important;
+        min-height: 40px !important;
+        height: 40px !important;
+      }
+
+      #taskModal .photo-requirement-help summary {
+        padding: 8px 10px !important;
+      }
+
+      #taskModal .photo-requirement-help p {
+        padding: 0 10px 10px !important;
+        font-size: 12px !important;
+        line-height: 1.45 !important;
+      }
+
+      #taskModal .task-modal-actions {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        z-index: 10 !important;
+        display: grid !important;
+        grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr) !important;
+        align-items: center !important;
+        gap: 8px !important;
+        margin: 0 !important;
+        padding: 9px 12px max(9px, env(safe-area-inset-bottom, 0px)) !important;
+        border-top: 1px solid rgba(203, 213, 225, 0.88) !important;
+        background: rgba(255, 255, 255, 0.96) !important;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+      }
+
+      #taskModal .task-modal-actions .btn {
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 46px !important;
+        padding: 9px 10px !important;
+        border-radius: 13px !important;
+        font-size: 14px !important;
+        line-height: 1.15 !important;
+        white-space: nowrap !important;
+      }
+    }
+
+    @media (max-width: 380px) {
+      #taskModal #createTaskForm {
+        padding-left: 9px !important;
+        padding-right: 9px !important;
+      }
+
+      #taskModal .task-row {
+        padding: 9px !important;
+      }
+
+      #taskModal .compact-setting-row {
+        grid-template-columns: minmax(82px, 0.75fr) minmax(0, 1.25fr) !important;
+      }
+
+      #taskModal .duration-inputs input {
+        width: 52px !important;
+      }
+
+      #taskModal .task-modal-actions {
+        padding-left: 9px !important;
+        padding-right: 9px !important;
+      }
+
+      #taskModal .task-modal-actions .btn {
+        font-size: 13px !important;
+      }
+    }
+
 </style>
 </head>
 <body>
@@ -5226,46 +5957,57 @@
   <div id="taskModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
     <div class="modal-backdrop" data-close-modal></div>
     <div class="modal-card">
-      <div class="modal-header">
-        <div>
+      <div class="modal-header task-modal-header">
+        <button class="task-modal-cancel" type="button" data-close-modal>Hủy</button>
+        <div class="task-modal-heading">
           <p class="eyebrow">Giao việc mới</p>
-          <h3 id="taskModalTitle">+ Tạo phiếu công việc</h3>
+          <h3 id="taskModalTitle">Tạo phiếu mới</h3>
         </div>
-        <button class="icon-btn" data-close-modal aria-label="Đóng">×</button>
+        <button class="icon-btn task-modal-close" type="button" data-close-modal aria-label="Đóng">×</button>
       </div>
 
-      <form id="createTaskForm" class="form-stack">
-        <label>
-          Tên phiếu công việc
-          <input id="workOrderName" type="text" placeholder="Ví dụ: Dọn dẹp cửa hàng cuối tuần" required />
+      <form id="createTaskForm" class="form-stack" autocomplete="off">
+        <label class="work-order-name-field compact-main-field">
+          <span>Tên phiếu công việc</span>
+          <input id="workOrderName" type="text" placeholder="Nhập tên phiếu" required />
         </label>
 
         <div class="task-rows-block">
           <div class="task-rows-header">
-            <h4>Danh sách công việc trong phiếu</h4>
-            <button id="addTaskRowBtn" class="btn ghost small" type="button">+ Thêm công việc</button>
+            <h4>Công việc trong phiếu</h4>
+            <button id="addTaskRowBtn" class="btn ghost small" type="button">+ Thêm</button>
           </div>
           <div id="taskRowsContainer" class="task-rows-container"></div>
         </div>
 
-        <div class="modal-footer-actions">
-          <button id="saveDraftBtn" class="btn ghost" type="button">💾 Lưu (chưa giao việc)</button>
-          <button id="createTaskBtn" class="btn primary" type="submit">Tạo phiếu &amp; giao việc</button>
+        <div class="photo-requirement-box compact-photo-requirement">
+          <div class="photo-toggle-row">
+            <div>
+              <strong>Bắt buộc đăng hình</strong>
+              <span>Áp dụng cho các công việc trong phiếu</span>
+            </div>
+            <label class="compact-switch" aria-label="Bắt buộc đăng hình">
+              <input id="photoRequiredCheckbox" type="checkbox" />
+              <span aria-hidden="true"></span>
+            </label>
+          </div>
+
+          <label class="photo-count-setting hidden">
+            <span>Số ảnh yêu cầu</span>
+            <input id="requiredPhotoCount" type="number" inputmode="numeric" min="1" max="100" step="1" value="10" disabled />
+          </label>
+
+          <details class="photo-requirement-help">
+            <summary>Thông tin về yêu cầu đăng hình</summary>
+            <p class="small-note">
+              Khi bật, nhân viên phải đăng đủ số ảnh thành công trước khi bấm “Hoàn thành”. Khi tắt, nhân viên có thể hoàn thành mà không cần đăng hình.
+            </p>
+          </details>
         </div>
 
-        <div class="photo-requirement-box">
-          <label class="checkbox-line">
-            <input id="photoRequiredCheckbox" type="checkbox" />
-            Bắt buộc đăng hình
-          </label>
-          <label>
-            Số lượng hình gửi
-            <input id="requiredPhotoCount" type="number" min="1" max="100" step="1" value="10" disabled />
-          </label>
-          <p class="small-note">
-            Nếu bật “Bắt buộc đăng hình”, nhân viên phải đăng đủ số lượng hình thành công trước khi bấm “Hoàn thành”.
-            Nếu tắt, nhân viên có thể hoàn thành công việc mà không cần đăng hình.
-          </p>
+        <div class="modal-footer-actions task-modal-actions">
+          <button id="saveDraftBtn" class="btn ghost" type="button">Lưu nháp</button>
+          <button id="createTaskBtn" class="btn primary" type="submit">Tạo &amp; giao việc</button>
         </div>
       </form>
     </div>
