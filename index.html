@@ -4362,16 +4362,20 @@
       .mobile-filter-toolbar .admin-work-order-search-input {
         display: block !important;
         width: 100% !important;
-        height: 46px !important;
+        /* Để chiều cao được tạo tự nhiên từ line-height + padding.
+           Cách này tránh lỗi iOS đặt line box/con trỏ sát mép trên khi input có height cố định và padding dọc bằng 0. */
+        height: auto !important;
         min-height: 46px !important;
-        max-height: 46px !important;
-        padding: 0 42px 0 40px !important;
+        max-height: none !important;
+        box-sizing: border-box !important;
+        padding: 11px 42px 11px 40px !important;
         border-radius: 14px !important;
         /* iOS Safari tự phóng to nếu cỡ chữ nhỏ hơn 16px. */
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
         font-size: 16px !important;
-        /* Cố định line box để con trỏ nhập và chữ luôn nằm giữa ô trên iOS. */
+        font-weight: 700 !important;
         line-height: 22px !important;
-        vertical-align: middle !important;
+        text-align: left !important;
         caret-color: #2563eb;
         -webkit-appearance: none !important;
         appearance: none !important;
