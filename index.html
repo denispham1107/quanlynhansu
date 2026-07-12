@@ -5985,6 +5985,86 @@
       }
     }
 
+
+    /* =========================================================
+       FIX iPHONE/iOS + ANDROID: ô ngày trong Popup Bộ lọc
+       không tràn khỏi lề phải khi chọn “Chọn 1 ngày”/“Khoảng ngày”.
+       Chỉ thay đổi cách hiển thị control date native; giữ nguyên
+       type, id, value, event listener và toàn bộ logic bộ lọc.
+       ========================================================= */
+    @media (max-width: 768px) {
+      #adminMobileFilterModalRoot,
+      #adminMobileFilterSheet {
+        min-inline-size: 0 !important;
+        max-inline-size: 100% !important;
+      }
+
+      #adminMobileFilterSheet > input.date-filter-control[type="date"] {
+        position: relative !important;
+        display: block !important;
+        align-self: stretch !important;
+        flex: 0 1 auto !important;
+        inline-size: 100% !important;
+        width: 100% !important;
+        min-inline-size: 0 !important;
+        min-width: 0 !important;
+        max-inline-size: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 10px 42px 10px 12px !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
+        contain: inline-size;
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        border-radius: 13px !important;
+        background-color: #ffffff !important;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%230f172a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M16 3v4M8 3v4M3 11h18'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 12px center !important;
+        background-size: 18px 18px !important;
+        color: #0f172a !important;
+        font-size: 16px !important;
+        line-height: 22px !important;
+        text-align: left !important;
+        direction: ltr !important;
+      }
+
+      #adminMobileFilterSheet > input.date-filter-control[type="date"]::-webkit-date-and-time-value {
+        display: block !important;
+        inline-size: 100% !important;
+        min-inline-size: 0 !important;
+        max-inline-size: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        text-align: left !important;
+      }
+
+      #adminMobileFilterSheet > input.date-filter-control[type="date"]::-webkit-datetime-edit,
+      #adminMobileFilterSheet > input.date-filter-control[type="date"]::-webkit-datetime-edit-fields-wrapper {
+        inline-size: 100% !important;
+        min-inline-size: 0 !important;
+        max-inline-size: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+      }
+
+      #adminMobileFilterSheet > input.date-filter-control[type="date"]::-webkit-calendar-picker-indicator {
+        position: absolute !important;
+        inset: 0 !important;
+        inline-size: 100% !important;
+        width: 100% !important;
+        block-size: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        opacity: 0 !important;
+        cursor: pointer;
+      }
+    }
+
 </style>
 </head>
 <body>
