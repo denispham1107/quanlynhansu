@@ -3395,57 +3395,69 @@ function createTaskRowElement(prefill = null) {
   wrapper.innerHTML = `
     <div class="task-row-head">
       <strong>Công việc</strong>
-      <button type="button" class="icon-btn small" data-action="remove-task-row" data-row-id="${rowId}" aria-label="Xóa công việc này">×</button>
+      <div class="task-row-head-actions">
+        <span class="task-row-visual-badge" aria-hidden="true">Nội dung</span>
+        <button type="button" class="icon-btn small task-row-remove-btn" data-action="remove-task-row" data-row-id="${rowId}" aria-label="Xóa công việc này" title="Xóa công việc này">×</button>
+      </div>
     </div>
-    <label>
-      Tên công việc
+    <label class="task-row-field task-row-title-field">
+      <span class="task-field-label">Tên công việc</span>
       <input type="text" class="row-title" list="workTemplateOptions" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
     </label>
-    <label>
-      Mô tả công việc <span class="optional-label">(không bắt buộc)</span>
+    <label class="task-row-field task-row-description-field">
+      <span class="task-field-label">Mô tả công việc <span class="optional-label">(không bắt buộc)</span></span>
       <textarea class="row-description" rows="3" placeholder="Có thể bỏ trống hoặc ghi rõ yêu cầu, tiêu chuẩn hoàn thành..."></textarea>
     </label>
-    <div class="two-col">
-      <label>
-        Ngày giao việc
+    <div class="two-col task-row-schedule-grid">
+      <label class="task-row-field">
+        <span class="task-field-label">Ngày giao việc</span>
         <input type="date" class="row-date" required />
       </label>
-      <label>
-        Người được giao <span class="optional-label">(có thể chọn sau)</span>
+      <label class="task-row-field">
+        <span class="task-field-label">Người được giao <span class="optional-label">(có thể chọn sau)</span></span>
         <select class="row-assignee">
           <option value="">Chờ chọn người</option>
           ${employeeOptionsHtml()}
         </select>
       </label>
     </div>
-    <div class="task-type-options">
-      <label class="checkbox-line lunch-break-line">
-        <input type="checkbox" class="row-lunch-break" />
-        Nghỉ trưa
-      </label>
-      <label class="checkbox-line hotel-line">
-        <input type="checkbox" class="row-hotel" />
-        Hotel
-      </label>
-      <label class="checkbox-line ship-line">
-        <input type="checkbox" class="row-ship" />
-        Ship
-      </label>
-      <label class="checkbox-line cleaning-line">
-        <input type="checkbox" class="row-cleaning" />
-        Dọn dẹp vệ sinh
-      </label>
+    <div class="task-type-section">
+      <span class="task-field-label">Loại công việc</span>
+      <div class="task-type-options" role="group" aria-label="Loại công việc">
+        <label class="checkbox-line lunch-break-line">
+          <input type="checkbox" class="row-lunch-break" />
+          <span>Nghỉ trưa</span>
+        </label>
+        <label class="checkbox-line hotel-line">
+          <input type="checkbox" class="row-hotel" />
+          <span>Hotel</span>
+        </label>
+        <label class="checkbox-line ship-line">
+          <input type="checkbox" class="row-ship" />
+          <span>Ship</span>
+        </label>
+        <label class="checkbox-line cleaning-line">
+          <input type="checkbox" class="row-cleaning" />
+          <span>Dọn dẹp vệ sinh</span>
+        </label>
+      </div>
     </div>
-    <p class="small-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
-    <p class="small-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>10 bé</strong> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <strong>30 phút</strong>. Cứ <strong>mỗi 1 bé vào</strong> ở thêm thì sẽ cộng thêm thời gian cho <strong>2 phút</strong>.</p>
-    <div class="two-col">
-      <label>
-        Số giờ
-        <input type="number" class="row-hours" min="0" max="168" value="0" required />
+    <p class="small-note task-type-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
+    <p class="small-note task-type-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>10 bé</strong> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <strong>30 phút</strong>. Cứ <strong>mỗi 1 bé vào</strong> ở thêm thì sẽ cộng thêm thời gian cho <strong>2 phút</strong>.</p>
+    <div class="two-col task-row-duration-grid">
+      <label class="task-row-field">
+        <span class="task-field-label">Số giờ</span>
+        <div class="duration-input-shell">
+          <input type="number" class="row-hours" min="0" max="168" value="0" required />
+          <span aria-hidden="true">giờ</span>
+        </div>
       </label>
-      <label>
-        Số phút
-        <input type="number" class="row-minutes" min="0" max="59" value="30" required />
+      <label class="task-row-field">
+        <span class="task-field-label">Số phút</span>
+        <div class="duration-input-shell">
+          <input type="number" class="row-minutes" min="0" max="59" value="30" required />
+          <span aria-hidden="true">phút</span>
+        </div>
       </label>
     </div>
   `;
