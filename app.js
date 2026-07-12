@@ -201,6 +201,10 @@ const els = {
   currentUserText: $("#currentUserText"),
   loginForm: $("#loginForm"),
   logoutBtn: $("#logoutBtn"),
+  mobileTopbarMenuBtn: $("#mobileTopbarMenuBtn"),
+  mobileTopbarMenu: $("#mobileTopbarMenu"),
+  mobileNotificationPermissionBtn: $("#mobileNotificationPermissionBtn"),
+  mobileLogoutBtn: $("#mobileLogoutBtn"),
   createEmployeeForm: $("#createEmployeeForm"),
   employeeList: $("#employeeList"),
   createStaffAccountPanel: $("#createStaffAccountPanel"),
@@ -222,6 +226,9 @@ const els = {
   exportDataBtn: $("#exportDataBtn"),
   importDataBtn: $("#importDataBtn"),
   importDataInput: $("#importDataInput"),
+  mobileDataActionsGroup: $("#mobileDataActionsGroup"),
+  mobileDataMenuBtn: $("#mobileDataMenuBtn"),
+  mobileDataMenu: $("#mobileDataMenu"),
   managementDashboardEyebrow: $("#managementDashboardEyebrow"),
   supervisorPermissionBanner: $("#supervisorPermissionBanner"),
   employeeManagerView: $("#employeeManagerView"),
@@ -886,33 +893,37 @@ function notificationSupported() {
 }
 
 function updateNotificationPermissionButton() {
-  const button = els.enableNotificationsBtn;
-  if (!button) return;
+  const desktopButton = els.enableNotificationsBtn;
+  const mobileButton = els.mobileNotificationPermissionBtn;
+  if (!desktopButton && !mobileButton) return;
 
-  button.classList.remove("is-enabled", "is-blocked");
+  let desktopText = "Bật thông báo";
+  let mobileText = "🔔 Bật thông báo";
+  let disabled = false;
+  let statusClass = "";
 
   if (!notificationSupported()) {
-    button.textContent = "Trình duyệt không hỗ trợ thông báo";
-    button.disabled = true;
-    return;
+    desktopText = "Trình duyệt không hỗ trợ thông báo";
+    mobileText = "🔕 Không hỗ trợ thông báo";
+    disabled = true;
+  } else if (Notification.permission === "granted") {
+    desktopText = "Đã bật thông báo";
+    mobileText = "🔔 Đã bật thông báo";
+    statusClass = "is-enabled";
+  } else if (Notification.permission === "denied") {
+    desktopText = "Thông báo đang bị chặn";
+    mobileText = "🔕 Thông báo đang bị chặn";
+    statusClass = "is-blocked";
   }
 
-  if (Notification.permission === "granted") {
-    button.textContent = "Đã bật thông báo";
-    button.classList.add("is-enabled");
-    button.disabled = false;
-    return;
-  }
+  [desktopButton, mobileButton].filter(Boolean).forEach((button) => {
+    button.classList.remove("is-enabled", "is-blocked");
+    if (statusClass) button.classList.add(statusClass);
+    button.disabled = disabled;
+  });
 
-  if (Notification.permission === "denied") {
-    button.textContent = "Thông báo đang bị chặn";
-    button.classList.add("is-blocked");
-    button.disabled = false;
-    return;
-  }
-
-  button.textContent = "Bật thông báo";
-  button.disabled = false;
+  if (desktopButton) desktopButton.textContent = desktopText;
+  if (mobileButton) mobileButton.textContent = mobileText;
 }
 
 async function requestNotificationPermission() {
@@ -972,7 +983,53 @@ async function showSystemNotification(notification) {
 
 els.enableNotificationsBtn?.addEventListener("click", requestNotificationPermission);
 
+function setMobileTopbarMenuOpen(open) {
+  const shouldOpen = Boolean(open);
+  els.mobileTopbarMenu?.classList.toggle("is-open", shouldOpen);
+  els.mobileTopbarMenu?.setAttribute("aria-hidden", String(!shouldOpen));
+  els.mobileTopbarMenuBtn?.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function setMobileDataMenuOpen(open) {
+  const isMobileLayout = window.matchMedia("(max-width: 768px)").matches;
+  const shouldOpen = isMobileLayout && Boolean(open);
+  els.mobileDataMenu?.classList.toggle("is-open", shouldOpen);
+  els.mobileDataMenu?.setAttribute("aria-hidden", String(isMobileLayout ? !shouldOpen : false));
+  els.mobileDataMenuBtn?.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+els.mobileTopbarMenuBtn?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const shouldOpen = !els.mobileTopbarMenu?.classList.contains("is-open");
+  setMobileDataMenuOpen(false);
+  els.notificationPanel?.classList.add("hidden");
+  setMobileTopbarMenuOpen(shouldOpen);
+});
+
+els.mobileNotificationPermissionBtn?.addEventListener("click", async () => {
+  setMobileTopbarMenuOpen(false);
+  await requestNotificationPermission();
+});
+
+els.mobileLogoutBtn?.addEventListener("click", () => {
+  setMobileTopbarMenuOpen(false);
+  els.logoutBtn?.click();
+});
+
+els.mobileDataMenuBtn?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const shouldOpen = !els.mobileDataMenu?.classList.contains("is-open");
+  setMobileTopbarMenuOpen(false);
+  setMobileDataMenuOpen(shouldOpen);
+});
+
+[els.exportDataBtn, els.importDataBtn].filter(Boolean).forEach((button) => {
+  button.addEventListener("click", () => setMobileDataMenuOpen(false));
+});
+
 els.notificationBellBtn?.addEventListener("click", () => {
+  setMobileTopbarMenuOpen(false);
+  setMobileDataMenuOpen(false);
   els.notificationPanel.classList.toggle("hidden");
 });
 
@@ -980,6 +1037,24 @@ document.addEventListener("click", (event) => {
   if (!els.notificationPanel || els.notificationPanel.classList.contains("hidden")) return;
   const clickedInside = event.target.closest(".notification-wrap");
   if (!clickedInside) els.notificationPanel.classList.add("hidden");
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".mobile-topbar-menu-wrap")) setMobileTopbarMenuOpen(false);
+  if (!event.target.closest(".dashboard-data-actions")) setMobileDataMenuOpen(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  setMobileTopbarMenuOpen(false);
+  setMobileDataMenuOpen(false);
+});
+
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 768) {
+    setMobileTopbarMenuOpen(false);
+    setMobileDataMenuOpen(false);
+  }
 });
 
 els.markAllNotificationsReadBtn?.addEventListener("click", markAllNotificationsRead);
@@ -1679,6 +1754,23 @@ function applyManagementPermissionUI() {
 
   const backupActions = els.exportDataBtn?.closest(".backup-actions");
   backupActions?.classList.toggle("hidden", !canExport && !canImport);
+
+  if (els.mobileDataMenuBtn) {
+    els.mobileDataMenuBtn.textContent = canExport && canImport
+      ? "Xuất / Nhập dữ liệu"
+      : canExport
+        ? "Xuất dữ liệu"
+        : "Nhập dữ liệu";
+  }
+  els.mobileDataMenu?.classList.toggle("has-single-action", canExport !== canImport);
+
+  const visibleSecondaryActions = [canAccessTemplates, canAccessEmployees].filter(Boolean).length;
+  document.querySelector(".management-dashboard-actions")?.classList.toggle(
+    "has-single-secondary-action",
+    visibleSecondaryActions === 1
+  );
+
+  if (!canExport && !canImport) setMobileDataMenuOpen(false);
 
   const canManageEmployeeAccounts = isAdmin || hasPermission("manageEmployeeAccounts");
   els.createStaffAccountPanel?.classList.toggle("hidden", !canManageEmployeeAccounts);
@@ -4370,6 +4462,42 @@ els.adminStatusFilter.addEventListener("change", (event) => {
   renderAdminTasks();
   renderAdminWorkOrderSuggestions();
 });
+
+document.querySelectorAll("[data-dashboard-stat-filter]").forEach((card) => {
+  card.addEventListener("click", () => {
+    const statusFilter = card.dataset.dashboardStatFilter || "all";
+    if (!els.adminStatusFilter) return;
+
+    state.adminCompletedTypeFilter = "all";
+    if (els.adminCompletedTypeFilter) els.adminCompletedTypeFilter.value = "all";
+    els.adminStatusFilter.value = statusFilter;
+    els.adminStatusFilter.dispatchEvent(new Event("change", { bubbles: true }));
+
+    requestAnimationFrame(() => {
+      document.querySelector("#adminView .task-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    });
+  });
+});
+
+function setupFloatingCreateTaskVisibility() {
+  const primaryButton = els.openTaskModalBtn;
+  const floatingButton = els.floatingCreateTaskBtn;
+  if (!primaryButton || !floatingButton || !("IntersectionObserver" in window)) return;
+
+  const observer = new IntersectionObserver((entries) => {
+    const primaryVisible = entries.some((entry) => entry.isIntersecting);
+    floatingButton.classList.toggle("is-near-primary-action", primaryVisible);
+  }, {
+    threshold: 0.25
+  });
+
+  observer.observe(primaryButton);
+}
+
+setupFloatingCreateTaskVisibility();
 
 els.adminCompletedTypeFilter?.addEventListener("change", (event) => {
   state.adminCompletedTypeFilter = event.target.value;

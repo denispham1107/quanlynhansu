@@ -3027,7 +3027,366 @@
       }
     }
 
-  </style>
+  
+
+    /* =========================================================
+       Dashboard mobile compact: tối ưu không gian iPhone/Android
+       ========================================================= */
+    .mobile-dashboard-title,
+    .mobile-topbar-menu-wrap,
+    .mobile-data-menu-trigger {
+      display: none;
+    }
+
+    .dashboard-stat-card {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 100%;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .dashboard-stat-card:hover,
+    .dashboard-stat-card:focus-visible {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 34px rgba(37, 99, 235, 0.14);
+      outline: 3px solid rgba(37, 99, 235, 0.2);
+      outline-offset: 2px;
+    }
+
+    .mobile-topbar-menu-wrap {
+      position: relative;
+    }
+
+    .mobile-topbar-menu-btn {
+      width: 44px;
+      height: 44px;
+      border: 1px solid #dbeafe;
+      border-radius: 14px;
+      background: #f8fafc;
+      color: #0f172a;
+      font-size: 22px;
+      font-weight: 900;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .mobile-topbar-menu {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      z-index: 10020;
+      display: none;
+      width: min(250px, calc(100vw - 24px));
+      padding: 8px;
+      border: 1px solid #dbeafe;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 22px 54px rgba(15, 23, 42, 0.22);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    .mobile-topbar-menu.is-open {
+      display: grid;
+      gap: 6px;
+    }
+
+    .mobile-topbar-menu button {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 12px;
+      border: 0;
+      border-radius: 12px;
+      background: #f1f5f9;
+      color: #0f172a;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 800;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .mobile-topbar-menu button.is-danger {
+      background: #fff1f2;
+      color: #be123c;
+    }
+
+    .mobile-topbar-menu button:disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
+    }
+
+    .mobile-data-menu {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .dashboard-data-actions .mobile-data-menu {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
+
+    .mobile-data-menu.has-single-action {
+      grid-template-columns: 1fr;
+    }
+
+    @media (max-width: 768px) {
+      .desktop-dashboard-title {
+        display: none;
+      }
+
+      .mobile-dashboard-title {
+        display: inline;
+      }
+
+      .mobile-topbar-menu-wrap {
+        display: block;
+      }
+
+      .mobile-data-menu-trigger {
+        display: inline-flex;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 950;
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center !important;
+        gap: 10px !important;
+        min-height: 0 !important;
+        padding: max(10px, env(safe-area-inset-top, 0px)) 14px 10px !important;
+        background: rgba(255, 255, 255, 0.96) !important;
+        box-shadow: 0 1px 0 rgba(148, 163, 184, 0.22);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+      }
+
+      .topbar > div:first-child {
+        min-width: 0;
+      }
+
+      .app-title {
+        font-size: clamp(19px, 5.4vw, 23px) !important;
+        line-height: 1.05 !important;
+        white-space: nowrap;
+      }
+
+      .current-user {
+        margin-top: 3px !important;
+        max-width: 100%;
+        font-size: 12px !important;
+        line-height: 1.2 !important;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .topbar-actions {
+        display: flex !important;
+        align-items: center !important;
+        gap: 7px !important;
+      }
+
+      #enableNotificationsBtn,
+      #logoutBtn {
+        display: none !important;
+      }
+
+      .notification-btn,
+      .mobile-topbar-menu-btn {
+        width: 42px !important;
+        height: 42px !important;
+        min-width: 42px !important;
+        min-height: 42px !important;
+        padding: 0 !important;
+        border-radius: 13px !important;
+      }
+
+      .notification-badge {
+        top: -7px !important;
+        right: -7px !important;
+      }
+
+      #adminView.page {
+        padding-top: 14px !important;
+      }
+
+      .management-dashboard-hero {
+        display: block !important;
+        padding: 16px !important;
+        border-radius: 22px !important;
+      }
+
+      .management-dashboard-copy {
+        margin-bottom: 14px;
+      }
+
+      .management-dashboard-hero .eyebrow {
+        width: fit-content;
+        margin: 0 0 7px !important;
+        padding: 5px 9px !important;
+        font-size: 10px !important;
+        line-height: 1.1 !important;
+        letter-spacing: 0.08em !important;
+      }
+
+      .management-dashboard-hero h2 {
+        margin: 0 !important;
+        font-size: clamp(24px, 7vw, 30px) !important;
+        line-height: 1.08 !important;
+        letter-spacing: -0.025em;
+      }
+
+      .management-dashboard-hero .dashboard-description {
+        display: none !important;
+      }
+
+      .management-dashboard-actions {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: stretch !important;
+        gap: 9px !important;
+      }
+
+      .management-dashboard-actions > .btn,
+      .management-dashboard-actions .mobile-data-menu-trigger {
+        width: 100% !important;
+        min-height: 48px !important;
+        margin: 0 !important;
+        padding: 9px 10px !important;
+        border-radius: 15px !important;
+        font-size: 14px !important;
+        line-height: 1.2 !important;
+        white-space: normal !important;
+      }
+
+      #openTaskModalBtn,
+      .dashboard-data-actions {
+        grid-column: 1 / -1;
+      }
+
+      .management-dashboard-actions.has-single-secondary-action > #openWorkTemplatePageBtn:not(.hidden),
+      .management-dashboard-actions.has-single-secondary-action > #openEmployeeManagerPageBtn:not(.hidden) {
+        grid-column: 1 / -1;
+      }
+
+      .dashboard-data-actions {
+        position: relative;
+        display: block !important;
+        width: 100%;
+      }
+
+      .mobile-data-menu-trigger {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .mobile-data-menu {
+        display: none;
+        position: absolute;
+        top: calc(100% + 8px);
+        left: 0;
+        right: 0;
+        z-index: 500;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 8px;
+        border: 1px solid #dbeafe;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+      }
+
+      .mobile-data-menu.is-open {
+        display: grid;
+      }
+
+      .mobile-data-menu .btn {
+        min-height: 44px !important;
+        padding: 8px !important;
+        border-radius: 12px !important;
+        font-size: 13px !important;
+      }
+
+      .management-stats-grid {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 9px !important;
+        margin: 12px 0 !important;
+      }
+
+      .management-stats-grid .dashboard-stat-card {
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        gap: 3px !important;
+        min-width: 0 !important;
+        min-height: 86px !important;
+        padding: 12px 13px !important;
+        border-radius: 18px !important;
+      }
+
+      .management-stats-grid .dashboard-stat-card span {
+        font-size: 13px !important;
+        line-height: 1.2 !important;
+        font-weight: 800 !important;
+        overflow-wrap: anywhere;
+      }
+
+      .management-stats-grid .dashboard-stat-card strong {
+        font-size: clamp(28px, 9vw, 38px) !important;
+        line-height: 1 !important;
+      }
+
+      .floating-create-task-btn {
+        transition: opacity 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease !important;
+      }
+
+      .floating-create-task-btn.is-near-primary-action {
+        opacity: 0 !important;
+        pointer-events: none !important;
+        transform: translateY(12px) scale(0.86) !important;
+      }
+    }
+
+    @media (max-width: 390px) {
+      .topbar {
+        padding-left: 10px !important;
+        padding-right: 10px !important;
+      }
+
+      .management-dashboard-hero {
+        padding: 14px !important;
+      }
+
+      .management-dashboard-actions {
+        gap: 7px !important;
+      }
+
+      .management-dashboard-actions > .btn,
+      .management-dashboard-actions .mobile-data-menu-trigger {
+        min-height: 46px !important;
+        padding: 8px !important;
+        font-size: 13px !important;
+      }
+
+      .management-stats-grid .dashboard-stat-card {
+        min-height: 80px !important;
+        padding: 10px 11px !important;
+      }
+
+      .management-stats-grid .dashboard-stat-card span {
+        font-size: 12px !important;
+      }
+    }
+</style>
 </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
@@ -3083,24 +3442,50 @@
           </div>
         </div>
         <button id="logoutBtn" class="btn ghost">Đăng xuất</button>
+        <div class="mobile-topbar-menu-wrap">
+          <button
+            id="mobileTopbarMenuBtn"
+            class="mobile-topbar-menu-btn"
+            type="button"
+            aria-label="Mở menu tài khoản"
+            aria-expanded="false"
+            aria-controls="mobileTopbarMenu"
+          >☰</button>
+          <div id="mobileTopbarMenu" class="mobile-topbar-menu" aria-hidden="true">
+            <button id="mobileNotificationPermissionBtn" type="button">🔔 Bật thông báo</button>
+            <button id="mobileLogoutBtn" class="is-danger" type="button">Đăng xuất</button>
+          </div>
+        </div>
       </div>
     </header>
 
     <!-- ADMIN DASHBOARD -->
     <main id="adminView" class="page hidden">
-      <section class="hero-panel">
-        <div>
+      <section class="hero-panel management-dashboard-hero">
+        <div class="management-dashboard-copy">
           <p id="managementDashboardEyebrow" class="eyebrow">Admin Dashboard</p>
-          <h2>Giao việc và duyệt kết quả nhân viên</h2>
-          <p class="muted">Theo dõi realtime: đang làm, gần hết giờ, quá hạn, chờ xác nhận và đã hoàn thành.</p>
+          <h2>
+            <span class="desktop-dashboard-title">Giao việc và duyệt kết quả nhân viên</span>
+            <span class="mobile-dashboard-title">Giao việc và duyệt kết quả</span>
+          </h2>
+          <p class="muted dashboard-description">Theo dõi realtime: đang làm, gần hết giờ, quá hạn, chờ xác nhận và đã hoàn thành.</p>
         </div>
-        <div class="hero-actions">
+        <div class="hero-actions management-dashboard-actions">
           <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
           <button id="openWorkTemplatePageBtn" class="btn ghost large" type="button">Danh sách công việc</button>
           <button id="openEmployeeManagerPageBtn" class="btn ghost large" type="button">Danh sách nhân viên</button>
-          <div class="backup-actions">
-            <button id="exportDataBtn" class="btn ghost large" type="button">Xuất</button>
-            <button id="importDataBtn" class="btn ghost large" type="button">Nhập</button>
+          <div id="mobileDataActionsGroup" class="backup-actions dashboard-data-actions">
+            <button
+              id="mobileDataMenuBtn"
+              class="btn ghost large mobile-data-menu-trigger"
+              type="button"
+              aria-expanded="false"
+              aria-controls="mobileDataMenu"
+            >Xuất / Nhập dữ liệu</button>
+            <div id="mobileDataMenu" class="mobile-data-menu" aria-hidden="false">
+              <button id="exportDataBtn" class="btn ghost large" type="button">Xuất dữ liệu</button>
+              <button id="importDataBtn" class="btn ghost large" type="button">Nhập dữ liệu</button>
+            </div>
             <input id="importDataInput" class="hidden" type="file" accept="application/json,.json" />
           </div>
         </div>
@@ -3108,11 +3493,19 @@
 
       <section id="supervisorPermissionBanner" class="supervisor-permission-banner hidden" aria-live="polite"></section>
 
-      <section class="stats-grid">
-        <div class="stat-card warning"><span>Chưa giao việc</span><strong id="statDraft">0</strong></div>
-        <div class="stat-card"><span>Đang làm</span><strong id="statDoing">0</strong></div>
-        <div class="stat-card"><span>Hotel</span><strong id="statHotel">0</strong></div>
-        <div class="stat-card success"><span>Đã hoàn thành</span><strong id="statCompleted">0</strong></div>
+      <section class="stats-grid management-stats-grid" aria-label="Thống kê công việc">
+        <button class="stat-card warning dashboard-stat-card" type="button" data-dashboard-stat-filter="draft" aria-label="Xem công việc chưa giao">
+          <span>Chưa giao việc</span><strong id="statDraft">0</strong>
+        </button>
+        <button class="stat-card dashboard-stat-card" type="button" data-dashboard-stat-filter="doing" aria-label="Xem công việc đang làm">
+          <span>Đang làm</span><strong id="statDoing">0</strong>
+        </button>
+        <button class="stat-card dashboard-stat-card" type="button" data-dashboard-stat-filter="hotel" aria-label="Xem công việc Hotel">
+          <span>Hotel</span><strong id="statHotel">0</strong>
+        </button>
+        <button class="stat-card success dashboard-stat-card" type="button" data-dashboard-stat-filter="completed" aria-label="Xem công việc đã hoàn thành">
+          <span>Đã hoàn thành</span><strong id="statCompleted">0</strong>
+        </button>
       </section>
 
 
