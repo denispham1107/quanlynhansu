@@ -6063,6 +6063,16 @@
         opacity: 0 !important;
         cursor: pointer;
       }
+
+      /*
+       * Luôn ưu tiên trạng thái ẩn của các ô ngày trong Popup Bộ lọc.
+       * Selector có ID và !important để không bị rule định dạng input date
+       * ở phía trên vô tình ép display:block trên Safari iOS/Android.
+       */
+      #adminMobileFilterSheet > input.date-filter-control.hidden,
+      #adminMobileFilterSheet > input.date-filter-control.mobile-auto-date-control {
+        display: none !important;
+      }
     }
 
 </style>

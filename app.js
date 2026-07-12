@@ -1485,19 +1485,29 @@ function refreshDateFilterVisibility(scope) {
   const clearEl = els[`${prefix}ClearDateFilter`];
   const summaryEl = els[`${prefix}DateSummary`];
 
-  singleEl?.classList.toggle("hidden", !["single", "today"].includes(filter.mode));
-  fromEl?.classList.toggle("hidden", filter.mode !== "range");
-  toEl?.classList.toggle("hidden", filter.mode !== "range");
-  clearEl?.classList.toggle("hidden", filter.mode === "all");
-
   if (scope === "admin") {
-    // Trên mobile chỉ hiện ô ngày khi Admin thực sự chọn “Chọn 1 ngày”.
-    // Ngày tự động của Hôm nay/Hôm qua vẫn được giữ trong state để lọc chính xác.
-    singleEl?.classList.toggle("mobile-auto-date-control", filter.mode !== "single");
-    document.querySelector(".mobile-single-date-label")?.classList.toggle("hidden", filter.mode !== "single");
-    document.querySelector(".mobile-date-from-label")?.classList.toggle("hidden", filter.mode !== "range");
-    document.querySelector(".mobile-date-to-label")?.classList.toggle("hidden", filter.mode !== "range");
+    // Popup Bộ lọc của Admin chỉ hiển thị đúng các ô ngày cần nhập:
+    // - “Chọn 1 ngày”: 1 ô lịch.
+    // - “Khoảng ngày”: 2 ô lịch (Từ ngày/Đến ngày).
+    // - Các chế độ còn lại: không hiển thị ô lịch phụ.
+    const showSingleDate = filter.mode === "single";
+    const showDateRange = filter.mode === "range";
+
+    singleEl?.classList.toggle("hidden", !showSingleDate);
+    singleEl?.classList.remove("mobile-auto-date-control");
+    fromEl?.classList.toggle("hidden", !showDateRange);
+    toEl?.classList.toggle("hidden", !showDateRange);
+
+    document.querySelector(".mobile-single-date-label")?.classList.toggle("hidden", !showSingleDate);
+    document.querySelector(".mobile-date-from-label")?.classList.toggle("hidden", !showDateRange);
+    document.querySelector(".mobile-date-to-label")?.classList.toggle("hidden", !showDateRange);
+  } else {
+    singleEl?.classList.toggle("hidden", !["single", "today"].includes(filter.mode));
+    fromEl?.classList.toggle("hidden", filter.mode !== "range");
+    toEl?.classList.toggle("hidden", filter.mode !== "range");
   }
+
+  clearEl?.classList.toggle("hidden", filter.mode === "all");
 
   if (summaryEl) summaryEl.textContent = getDateFilterSummary(filter);
 }
