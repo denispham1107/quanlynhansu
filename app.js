@@ -119,7 +119,8 @@ const state = {
   photoViewerIndex: -1,
   photoReportSelectedKeys: new Set(),
   deletingEmployeeUid: null,
-  editingSupervisorUid: null
+  editingSupervisorUid: null,
+  mobileTaskDetailOverrides: new Map()
 };
 
 
@@ -5556,6 +5557,48 @@ function getAvailableReplacementEmployees(task) {
   ));
 }
 
+
+function shouldExpandTaskOnMobileByDefault(task, displayStatus = null) {
+  const visibleStatus = displayStatus || getDisplayStatus(task);
+
+  // Các phiếu cần Admin/Nhân viên xử lý ngay vẫn mở sẵn trên mobile.
+  // Phiếu đang làm hoặc đã hoàn thành được thu gọn để tiết kiệm không gian,
+  // nhưng người dùng luôn có thể bấm “Xem chi tiết” để xem đầy đủ dữ liệu.
+  return (
+    task?.status === "draft"
+    || task?.status === "submitted"
+    || ["waiting_assignee", "overdue", "redo"].includes(visibleStatus)
+  );
+}
+
+function isTaskExpandedOnMobile(task, displayStatus = null) {
+  const override = state.mobileTaskDetailOverrides.get(task?.id);
+
+  if (typeof override === "boolean") return override;
+
+  return shouldExpandTaskOnMobileByDefault(task, displayStatus);
+}
+
+function toggleTaskMobileDetails(button) {
+  const card = button?.closest?.("[data-task-card]");
+  if (!card) return;
+
+  const taskId = button.dataset.taskId || card.dataset.taskId;
+  const nextExpanded = !card.classList.contains("is-mobile-expanded");
+  const label = button.querySelector("[data-mobile-toggle-label]");
+
+  card.classList.toggle("is-mobile-expanded", nextExpanded);
+  button.setAttribute("aria-expanded", String(nextExpanded));
+
+  if (label) {
+    label.textContent = nextExpanded ? "Thu gọn" : "Xem chi tiết";
+  }
+
+  if (taskId) {
+    state.mobileTaskDetailOverrides.set(taskId, nextExpanded);
+  }
+}
+
 function renderTaskCard(task, mode) {
   const displayStatus = task.displayStatus || getDisplayStatus(task);
   const deadlineDate = timestampToDate(task.deadlineAt);
@@ -5583,65 +5626,104 @@ function renderTaskCard(task, mode) {
     ? "is-awaiting-admin-confirmation"
     : "";
 
+  const mobileExpanded = isTaskExpandedOnMobile(task, displayStatus);
+  const mobileExpandedClass = mobileExpanded ? "is-mobile-expanded" : "";
+  const mobileToggleText = mobileExpanded ? "Thu gọn" : "Xem chi tiết";
+  const mobileDetailsId = `task-mobile-details-${String(task.id || "task").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+  const initialCountdownText = getInitialCountdownText(task);
+
+  const taskActions = renderTaskActions(task, {
+    canEmployeeSubmit,
+    canAdminReview,
+    canAdminEndLunchBreak: canAdminEndLunchBreak(task, mode),
+    canAdminExtendTime: canAdminExtendTaskTime(task, mode),
+    canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
+    submitPhotoReady: hasEnoughRequiredPhotos(task)
+  });
+
   return `
-    <article class="task-card ${taskCardClass(displayStatus)} ${attentionClass}" data-task-card data-task-id="${escapeHtml(task.id)}" data-work-order-id="${escapeHtml(task.workOrderId || "legacy")}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
+    <article class="task-card ${taskCardClass(displayStatus)} ${attentionClass} ${mobileExpandedClass}" data-task-card data-task-id="${escapeHtml(task.id)}" data-work-order-id="${escapeHtml(task.workOrderId || "legacy")}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
       <div class="task-top">
-        <div>
+        <div class="task-heading-copy">
           <h4 class="task-title">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
           <p class="task-desc">${escapeHtml(task.description)}</p>
         </div>
         <span class="status-pill status-${displayStatus}">${statusLabel(displayStatus)}</span>
       </div>
 
-      <div class="task-meta">
-        ${renderAssignedEmployeeMetaBox(task, mode, displayStatus)}
-        <div class="meta-box">
-          <span>Ngày giao</span>
-          <strong>${escapeHtml(formatDateOnly(getTaskDateValue(task)))}</strong>
+      <div class="task-mobile-summary" aria-label="Tóm tắt công việc">
+        <div class="task-mobile-summary-item">
+          <span>Nhân viên</span>
+          <strong>${escapeHtml(employeeName)}</strong>
         </div>
-        <div class="meta-box">
-          <span>Thời gian quy định</span>
-          <strong>${formatMinutes(task.deadlineMinutes)}</strong>
-        </div>
-        <div class="meta-box">
+        <div class="task-mobile-summary-item is-countdown">
           <span>Đếm ngược</span>
-          <strong class="countdown-text" data-countdown>${getInitialCountdownText(task)}</strong>
+          <strong data-countdown>${initialCountdownText}</strong>
         </div>
-      </div>
-
-      <div class="task-meta">
-        <div class="meta-box">
-          <span>Giao lúc</span>
-          <strong>${dispatchedText}</strong>
-        </div>
-        <div class="meta-box">
+        <div class="task-mobile-summary-item">
           <span>Hạn lúc</span>
           <strong>${formatDateTime(task.deadlineAt)}</strong>
         </div>
-        <div class="meta-box">
-          <span>Báo hoàn thành</span>
-          <strong>${formatDateTime(task.submittedAt)}</strong>
-        </div>
-        <div class="meta-box">
-          <span>Admin duyệt</span>
-          <strong>${formatDateTime(task.approvedAt)}</strong>
-        </div>
       </div>
 
-      ${renderPhotoReportBox(task, mode)}
-      ${renderHotelInfoBox(task)}
-      ${renderTimeExtensionBox(task)}
-      ${renderAssigneeHistoryBox(task)}
-      ${renderLunchBreakHistoryBox(task)}
-      ${renderResultBox(task)}
-      ${renderTaskActions(task, {
-        canEmployeeSubmit,
-        canAdminReview,
-        canAdminEndLunchBreak: canAdminEndLunchBreak(task, mode),
-        canAdminExtendTime: canAdminExtendTaskTime(task, mode),
-        canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
-        submitPhotoReady: hasEnoughRequiredPhotos(task)
-      })}
+      <button
+        class="task-mobile-details-toggle"
+        type="button"
+        data-action="toggle-task-mobile-details"
+        data-task-id="${escapeHtml(task.id)}"
+        aria-expanded="${mobileExpanded ? "true" : "false"}"
+        aria-controls="${escapeHtml(mobileDetailsId)}"
+      >
+        <span data-mobile-toggle-label>${mobileToggleText}</span>
+        <span class="task-mobile-toggle-icon" aria-hidden="true">⌄</span>
+      </button>
+
+      <div class="task-mobile-details" id="${escapeHtml(mobileDetailsId)}">
+        <div class="task-meta task-meta-primary">
+          ${renderAssignedEmployeeMetaBox(task, mode, displayStatus)}
+          <div class="meta-box">
+            <span>Ngày giao</span>
+            <strong>${escapeHtml(formatDateOnly(getTaskDateValue(task)))}</strong>
+          </div>
+          <div class="meta-box">
+            <span>Thời gian quy định</span>
+            <strong>${formatMinutes(task.deadlineMinutes)}</strong>
+          </div>
+          <div class="meta-box">
+            <span>Đếm ngược</span>
+            <strong class="countdown-text" data-countdown>${initialCountdownText}</strong>
+          </div>
+        </div>
+
+        <div class="task-meta task-meta-secondary">
+          <div class="meta-box">
+            <span>Giao lúc</span>
+            <strong>${dispatchedText}</strong>
+          </div>
+          <div class="meta-box">
+            <span>Hạn lúc</span>
+            <strong>${formatDateTime(task.deadlineAt)}</strong>
+          </div>
+          <div class="meta-box">
+            <span>Báo hoàn thành</span>
+            <strong>${formatDateTime(task.submittedAt)}</strong>
+          </div>
+          <div class="meta-box">
+            <span>Admin duyệt</span>
+            <strong>${formatDateTime(task.approvedAt)}</strong>
+          </div>
+        </div>
+
+        ${renderPhotoReportBox(task, mode)}
+        ${renderHotelInfoBox(task)}
+        ${renderTimeExtensionBox(task)}
+        ${renderAssigneeHistoryBox(task)}
+        ${renderLunchBreakHistoryBox(task)}
+        ${renderResultBox(task)}
+      </div>
+
+      ${taskActions}
     </article>
   `;
 }
@@ -6120,6 +6202,11 @@ document.addEventListener("click", async (event) => {
 
   const action = button.dataset.action;
   const taskId = button.dataset.taskId;
+
+  if (action === "toggle-task-mobile-details") {
+    toggleTaskMobileDetails(button);
+    return;
+  }
 
   if (action === "open-extend-time") {
     openExtendTimeModal(taskId);
@@ -8725,35 +8812,41 @@ function calculateResultAt(task, completedAt) {
 setInterval(updateCountdowns, 1000);
 
 function updateCountdowns() {
-  $$("[data-task-card]").forEach((card) => {
+  $$('[data-task-card]').forEach((card) => {
     const rawStatus = card.dataset.rawStatus;
-    const countdown = card.querySelector("[data-countdown]");
+    const countdowns = Array.from(card.querySelectorAll('[data-countdown]'));
 
-    if (!countdown) return;
+    if (!countdowns.length) return;
+
+    const setCountdownText = (text) => {
+      countdowns.forEach((countdown) => {
+        countdown.textContent = text;
+      });
+    };
 
     if (rawStatus === "draft") {
-      countdown.textContent = "Chưa giao việc";
+      setCountdownText("Chưa giao việc");
       return;
     }
 
     if (rawStatus === "waiting_assignee") {
       const remainingPauseMs = Number(card.dataset.remainingPauseMs || 0);
-      countdown.textContent = remainingPauseMs > 0
+      setCountdownText(remainingPauseMs > 0
         ? `Tạm dừng - còn ${formatCountdown(remainingPauseMs)}`
-        : "Chờ chọn người - chưa bắt đầu";
+        : "Chờ chọn người - chưa bắt đầu");
       card.classList.remove("is-overdue", "is-near-due", "is-queued");
       return;
     }
 
     if (rawStatus === "completed") {
-      countdown.textContent = "Đã hoàn thành";
+      setCountdownText("Đã hoàn thành");
       return;
     }
 
     const queueStartMs = Number(card.dataset.queueStartMs || 0);
 
     if (queueStartMs && Date.now() < queueStartMs) {
-      countdown.textContent = `Chờ đến lượt (bắt đầu ${formatDateTime(new Date(queueStartMs))})`;
+      setCountdownText(`Chờ đến lượt (bắt đầu ${formatDateTime(new Date(queueStartMs))})`);
       card.classList.add("is-queued");
       card.classList.remove("is-overdue", "is-near-due");
       return;
@@ -8764,15 +8857,15 @@ function updateCountdowns() {
     const deadlineMs = Number(card.dataset.deadlineMs || 0);
 
     if (!deadlineMs) {
-      countdown.textContent = "--";
+      setCountdownText("--");
       return;
     }
 
     const remainingMs = deadlineMs - Date.now();
 
-    countdown.textContent = remainingMs >= 0
+    setCountdownText(remainingMs >= 0
       ? `Còn ${formatCountdown(remainingMs)}`
-      : `Quá hạn ${formatCountdown(remainingMs)}`;
+      : `Quá hạn ${formatCountdown(remainingMs)}`);
 
     card.classList.toggle("is-overdue", remainingMs <= 0 && rawStatus !== "completed");
 

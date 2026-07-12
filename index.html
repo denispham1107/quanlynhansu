@@ -2576,6 +2576,457 @@
       .staff-permission-btn, .employee-delete-btn { min-width: 44px; }
     }
 
+
+    /* =========================================================
+       Giao diện Phiếu công việc dạng compact cho mobile
+       Áp dụng đồng nhất cho Nhân viên, Giám sát và Admin.
+       Desktop giữ nguyên giao diện đầy đủ như trước.
+       ========================================================= */
+    .task-mobile-summary,
+    .task-mobile-details-toggle {
+      display: none;
+    }
+
+    @media (max-width: 768px) {
+      .ticket-group {
+        box-sizing: border-box;
+        margin-bottom: 14px !important;
+        padding: 11px !important;
+        border-radius: 18px !important;
+      }
+
+      .ticket-group-header {
+        margin-bottom: 7px !important;
+      }
+
+      .ticket-group-header > div {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .ticket-group-header h4 {
+        margin: 7px 0 0 !important;
+        font-size: 17px !important;
+        line-height: 1.28 !important;
+        overflow-wrap: anywhere;
+      }
+
+      .ticket-badge,
+      .admin-confirm-attention-badge {
+        padding: 4px 8px !important;
+        font-size: 10.5px !important;
+        line-height: 1.2 !important;
+      }
+
+      .admin-confirm-attention-badge {
+        margin-top: 6px !important;
+      }
+
+      .ticket-actions {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px !important;
+        margin: 8px 0 9px !important;
+      }
+
+      .ticket-actions .btn {
+        width: 100%;
+        min-width: 0;
+        min-height: 40px !important;
+        padding: 8px 9px !important;
+        border-radius: 13px !important;
+        font-size: 12.5px !important;
+        line-height: 1.2 !important;
+        white-space: normal;
+      }
+
+      .ticket-actions .btn:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+      }
+
+      .ticket-tasks {
+        gap: 10px !important;
+      }
+
+      .task-card {
+        box-sizing: border-box;
+        padding: 12px !important;
+        border-left-width: 5px !important;
+        border-radius: 17px !important;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.07) !important;
+      }
+
+      .task-card.is-draft {
+        border-left-width: 5px !important;
+      }
+
+      .task-card.is-draft::after {
+        display: none !important;
+      }
+
+      .task-top {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start !important;
+        gap: 8px !important;
+        margin-bottom: 8px !important;
+      }
+
+      .task-heading-copy {
+        min-width: 0;
+      }
+
+      .task-title {
+        margin: 0 !important;
+        color: #243b64;
+        font-size: 18px !important;
+        line-height: 1.22 !important;
+        overflow-wrap: anywhere;
+      }
+
+      .task-desc {
+        display: -webkit-box;
+        margin: 4px 0 0 !important;
+        overflow: hidden;
+        color: #475569;
+        font-size: 12.5px !important;
+        line-height: 1.35 !important;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .task-desc:empty {
+        display: none;
+      }
+
+      .status-pill {
+        align-self: start;
+        max-width: 118px;
+        padding: 5px 8px !important;
+        border-radius: 999px !important;
+        font-size: 10.5px !important;
+        line-height: 1.2 !important;
+        text-align: center;
+        white-space: normal !important;
+      }
+
+      .task-mobile-summary {
+        display: grid;
+        grid-template-columns: 0.9fr 1.45fr 1fr;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .task-mobile-summary-item {
+        min-width: 0;
+        padding: 8px 8px 7px;
+        border: 1px solid #dbe7f7;
+        border-radius: 12px;
+        background: rgba(248, 251, 255, 0.96);
+      }
+
+      .task-mobile-summary-item span,
+      .task-mobile-summary-item strong {
+        display: block;
+        min-width: 0;
+      }
+
+      .task-mobile-summary-item span {
+        margin-bottom: 3px;
+        color: #64748b;
+        font-size: 9.5px;
+        font-weight: 800;
+        line-height: 1.15;
+      }
+
+      .task-mobile-summary-item strong {
+        color: #334e78;
+        font-size: 11.5px;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+
+      .task-mobile-summary-item:not(.is-countdown) strong {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .task-mobile-summary-item.is-countdown strong {
+        color: #1d4ed8;
+      }
+
+      .task-card.is-overdue .task-mobile-summary-item.is-countdown strong,
+      .task-card.is-near-due .task-mobile-summary-item.is-countdown strong {
+        color: #b45309;
+      }
+
+      .task-mobile-details-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        width: 100%;
+        min-height: 34px;
+        margin-top: 7px;
+        padding: 6px 10px;
+        border: 1px dashed #bfdbfe;
+        border-radius: 12px;
+        background: #f8fbff;
+        color: #1d4ed8;
+        font: inherit;
+        font-size: 11.5px;
+        font-weight: 900;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .task-mobile-toggle-icon {
+        font-size: 17px;
+        line-height: 1;
+        transition: transform 0.18s ease;
+      }
+
+      .task-card.is-mobile-expanded .task-mobile-toggle-icon {
+        transform: rotate(180deg);
+      }
+
+      .task-mobile-details {
+        display: none;
+      }
+
+      .task-card.is-mobile-expanded .task-mobile-summary {
+        display: none;
+      }
+
+      .task-card.is-mobile-expanded .task-mobile-details {
+        display: block;
+      }
+
+      .task-card.is-mobile-expanded .task-desc {
+        display: block;
+        overflow: visible;
+        -webkit-line-clamp: unset;
+      }
+
+      .task-card.is-mobile-expanded .photo-report-box span {
+        display: block !important;
+        overflow: visible;
+        -webkit-line-clamp: unset;
+      }
+
+      .task-meta {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 7px !important;
+        margin-top: 8px !important;
+      }
+
+      .meta-box {
+        box-sizing: border-box;
+        min-width: 0;
+        min-height: 0 !important;
+        padding: 9px 10px !important;
+        border-radius: 13px !important;
+      }
+
+      .meta-box span,
+      .meta-box strong {
+        display: block;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .meta-box span {
+        margin-bottom: 3px !important;
+        font-size: 10px !important;
+        line-height: 1.15 !important;
+      }
+
+      .meta-box strong {
+        font-size: 12.5px !important;
+        line-height: 1.3 !important;
+      }
+
+      .assignee-change-box {
+        min-height: 0 !important;
+      }
+
+      .photo-report-box {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 8px !important;
+        margin-top: 8px !important;
+        padding: 9px 10px !important;
+        border-radius: 13px !important;
+      }
+
+      .photo-report-box > div:first-child {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .photo-report-box strong {
+        font-size: 12.5px !important;
+        line-height: 1.2 !important;
+      }
+
+      .photo-report-box span {
+        display: -webkit-box !important;
+        margin-top: 3px !important;
+        overflow: hidden;
+        font-size: 10.5px !important;
+        line-height: 1.3 !important;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .photo-report-hint {
+        display: none !important;
+      }
+
+      .photo-report-actions {
+        display: grid !important;
+        flex: 0 0 auto;
+        gap: 5px !important;
+        max-width: 118px;
+      }
+
+      .photo-report-actions .btn {
+        width: 100%;
+        min-width: 0;
+        min-height: 34px !important;
+        padding: 6px 8px !important;
+        border-radius: 11px !important;
+        font-size: 10.5px !important;
+        line-height: 1.2 !important;
+        white-space: normal;
+      }
+
+      .hotel-info-box,
+      .extension-box,
+      .result-box {
+        margin-top: 8px !important;
+        padding: 10px 11px !important;
+        border-radius: 13px !important;
+        font-size: 11.5px !important;
+        line-height: 1.4 !important;
+      }
+
+      .extension-box-head {
+        gap: 7px !important;
+        flex-wrap: wrap;
+      }
+
+      .extension-list {
+        margin-top: 7px !important;
+        padding-left: 18px !important;
+      }
+
+      .extension-list li {
+        margin-top: 6px !important;
+      }
+
+      .result-box strong,
+      .result-box span,
+      .hotel-info-box strong,
+      .hotel-info-box span,
+      .extension-box strong,
+      .extension-box span {
+        font-size: inherit !important;
+      }
+
+      .task-actions {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px !important;
+        margin-top: 9px !important;
+      }
+
+      .task-actions .btn {
+        width: 100%;
+        min-width: 0;
+        min-height: 40px !important;
+        padding: 8px 9px !important;
+        border-radius: 12px !important;
+        font-size: 12px !important;
+        line-height: 1.2 !important;
+        white-space: normal;
+      }
+
+      .task-actions .btn:only-child,
+      .task-actions .btn:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+      }
+
+      .floating-create-task-btn {
+        width: 54px !important;
+        height: 54px !important;
+        right: max(14px, env(safe-area-inset-right, 0px)) !important;
+        bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 10px)) !important;
+        font-size: 30px !important;
+      }
+    }
+
+    @media (max-width: 390px) {
+      .ticket-group {
+        padding: 9px !important;
+      }
+
+      .task-card {
+        padding: 10px !important;
+      }
+
+      .task-title {
+        font-size: 17px !important;
+      }
+
+      .status-pill {
+        max-width: 102px;
+        font-size: 10px !important;
+      }
+
+      .task-mobile-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .task-mobile-summary-item.is-countdown {
+        grid-column: 1 / -1;
+        grid-row: 2;
+      }
+
+      .task-meta {
+        gap: 6px !important;
+      }
+
+      .meta-box {
+        padding: 8px 9px !important;
+      }
+
+      .photo-report-box {
+        align-items: stretch !important;
+        flex-direction: column !important;
+      }
+
+      .photo-report-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-width: none;
+      }
+
+      .photo-report-actions .btn:only-child {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .task-mobile-toggle-icon {
+        transition: none !important;
+      }
+    }
+
   </style>
 </head>
 <body>
