@@ -1211,9 +1211,13 @@
     }
 
     .photo-selection-toolbar {
-      position: sticky;
-      top: 82px;
-      z-index: 20;
+      /* Giữ thanh thao tác ở đúng đầu danh sách ảnh.
+         Không dùng sticky vì khi cuộn nó sẽ nổi chen giữa các hàng ảnh. */
+      position: relative;
+      top: auto;
+      z-index: 3;
+      grid-column: 1 / -1;
+      align-self: start;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -1356,7 +1360,8 @@
       }
 
       .photo-selection-toolbar {
-        position: static;
+        position: relative;
+        top: auto;
         align-items: stretch;
         flex-direction: column;
         padding: 12px;
