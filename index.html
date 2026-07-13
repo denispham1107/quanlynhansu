@@ -6184,6 +6184,44 @@
       }
     }
 
+
+
+    /* =========================================================
+       TẠO PHIẾU: đặt hai nút hành động ở đúng cuối nội dung form.
+       Không dùng sticky để nút không nổi cao hơn đáy modal khi cuộn.
+       Giữ nguyên ID, thứ tự DOM và toàn bộ event/logic hiện có.
+       ========================================================= */
+    #taskModal .task-create-actions,
+    #taskModal .modal-footer-actions.task-create-actions {
+      position: static !important;
+      inset: auto !important;
+      top: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      left: auto !important;
+      transform: none !important;
+      z-index: auto !important;
+    }
+
+    @media (min-width: 769px) {
+      #taskModal .task-create-actions,
+      #taskModal .modal-footer-actions.task-create-actions {
+        margin-top: 0 !important;
+        margin-right: -4px !important;
+        margin-bottom: -6px !important;
+        margin-left: -4px !important;
+      }
+    }
+
+    @media (max-width: 768px) {
+      #taskModal .task-create-actions,
+      #taskModal .modal-footer-actions.task-create-actions {
+        margin-top: 0 !important;
+        margin-right: -2px !important;
+        margin-bottom: -4px !important;
+        margin-left: -2px !important;
+      }
+    }
 </style>
 </head>
 <body>
