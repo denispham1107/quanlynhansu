@@ -6396,10 +6396,210 @@
         margin-left: -2px !important;
       }
     }
+
+
+    /* =========================================================
+       POPUP XÁC NHẬN XÓA PHIẾU
+       Dùng chung cho Xóa Phiếu và Xóa toàn bộ Phiếu.
+       ========================================================= */
+    body.destructive-confirm-open {
+      overflow: hidden;
+    }
+
+    .destructive-confirm-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 12000;
+      display: grid;
+      place-items: center;
+      padding:
+        max(18px, env(safe-area-inset-top))
+        max(16px, env(safe-area-inset-right))
+        max(18px, env(safe-area-inset-bottom))
+        max(16px, env(safe-area-inset-left));
+    }
+
+    .destructive-confirm-backdrop {
+      position: absolute;
+      inset: 0;
+      border: 0;
+      background: rgba(15, 23, 42, 0.68);
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      cursor: default;
+    }
+
+    .destructive-confirm-card {
+      position: relative;
+      z-index: 1;
+      width: min(100%, 480px);
+      max-height: min(86dvh, 700px);
+      overflow: auto;
+      padding: 24px;
+      border: 1px solid rgba(248, 113, 113, 0.34);
+      border-radius: 24px;
+      background: #ffffff;
+      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.30);
+      animation: destructive-confirm-enter 160ms ease-out both;
+    }
+
+    @keyframes destructive-confirm-enter {
+      from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .destructive-confirm-heading {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .destructive-confirm-icon {
+      display: grid;
+      flex: 0 0 52px;
+      width: 52px;
+      height: 52px;
+      place-items: center;
+      border-radius: 16px;
+      background: #fee2e2;
+      color: #dc2626;
+      font-size: 25px;
+    }
+
+    .destructive-confirm-kicker {
+      margin: 0 0 3px;
+      color: #dc2626;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .destructive-confirm-card h3 {
+      margin: 0;
+      color: #0f172a;
+      font-size: clamp(21px, 4vw, 27px);
+      line-height: 1.2;
+    }
+
+    .destructive-confirm-message {
+      margin: 0;
+      color: #334155;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.55;
+    }
+
+    .destructive-confirm-details {
+      margin: 14px 0 0;
+      padding: 13px 14px;
+      border: 1px solid #fecaca;
+      border-radius: 14px;
+      background: #fff7f7;
+      color: #991b1b;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .destructive-confirm-actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .destructive-confirm-actions .btn {
+      min-height: 48px;
+      margin: 0;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .destructive-confirm-actions .btn.danger {
+      box-shadow: 0 12px 26px rgba(220, 38, 38, 0.22);
+    }
+
+    @media (max-width: 480px) {
+      .destructive-confirm-card {
+        padding: 20px 16px 16px;
+        border-radius: 22px;
+      }
+
+      .destructive-confirm-icon {
+        flex-basis: 46px;
+        width: 46px;
+        height: 46px;
+        border-radius: 14px;
+        font-size: 22px;
+      }
+
+      .destructive-confirm-message {
+        font-size: 15px;
+      }
+
+      .destructive-confirm-actions {
+        gap: 9px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .destructive-confirm-card {
+        animation: none;
+      }
+    }
+
 </style>
 </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
+
+  <!-- POPUP XÁC NHẬN XÓA PHIẾU -->
+  <div
+    id="destructiveConfirmModal"
+    class="destructive-confirm-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-hidden="true"
+    aria-labelledby="destructiveConfirmTitle"
+    aria-describedby="destructiveConfirmMessage destructiveConfirmDetails"
+  >
+    <button
+      id="destructiveConfirmBackdrop"
+      class="destructive-confirm-backdrop"
+      type="button"
+      tabindex="-1"
+      aria-label="Hủy và đóng popup xác nhận"
+    ></button>
+
+    <section class="destructive-confirm-card">
+      <div class="destructive-confirm-heading">
+        <span class="destructive-confirm-icon" aria-hidden="true">🗑</span>
+        <div>
+          <p class="destructive-confirm-kicker">Thao tác nguy hiểm</p>
+          <h3 id="destructiveConfirmTitle">Xác nhận xóa</h3>
+        </div>
+      </div>
+
+      <p id="destructiveConfirmMessage" class="destructive-confirm-message">
+        Bạn có chắc chắn muốn thực hiện thao tác này không?
+      </p>
+      <p id="destructiveConfirmDetails" class="destructive-confirm-details">
+        Hành động này không thể hoàn tác.
+      </p>
+
+      <div class="destructive-confirm-actions">
+        <button id="destructiveConfirmCancelBtn" class="btn ghost" type="button">Hủy</button>
+        <button id="destructiveConfirmAcceptBtn" class="btn danger" type="button">Xóa</button>
+      </div>
+    </section>
+  </div>
 
   <!-- LOGIN -->
   <section id="loginView" class="login-view">

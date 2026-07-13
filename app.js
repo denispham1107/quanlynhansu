@@ -260,6 +260,13 @@ const els = {
   taskRowsContainer: $("#taskRowsContainer"),
   saveDraftBtn: $("#saveDraftBtn"),
   deleteAllWorkOrdersBtn: $("#deleteAllWorkOrdersBtn"),
+  destructiveConfirmModal: $("#destructiveConfirmModal"),
+  destructiveConfirmBackdrop: $("#destructiveConfirmBackdrop"),
+  destructiveConfirmTitle: $("#destructiveConfirmTitle"),
+  destructiveConfirmMessage: $("#destructiveConfirmMessage"),
+  destructiveConfirmDetails: $("#destructiveConfirmDetails"),
+  destructiveConfirmCancelBtn: $("#destructiveConfirmCancelBtn"),
+  destructiveConfirmAcceptBtn: $("#destructiveConfirmAcceptBtn"),
   mobileTaskPanelMenuBtn: $("#mobileTaskPanelMenuBtn"),
   mobileTaskPanelMenu: $("#mobileTaskPanelMenu"),
   adminMobileEmployeeStatusToggle: $("#adminMobileEmployeeStatusToggle"),
@@ -362,6 +369,98 @@ const els = {
   photoViewerCloseBtn: $("#photoViewerCloseBtn"),
   photoViewerOpenOriginal: $("#photoViewerOpenOriginal")
 };
+
+// =========================
+// Popup xác nhận thao tác xóa nguy hiểm
+// =========================
+let destructiveConfirmResolver = null;
+let destructiveConfirmPreviousFocus = null;
+
+function isDestructiveConfirmOpen() {
+  return Boolean(
+    els.destructiveConfirmModal
+    && !els.destructiveConfirmModal.classList.contains("hidden")
+  );
+}
+
+function closeDestructiveConfirmModal(confirmed = false) {
+  if (!isDestructiveConfirmOpen()) return;
+
+  els.destructiveConfirmModal.classList.add("hidden");
+  els.destructiveConfirmModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("destructive-confirm-open");
+
+  const resolver = destructiveConfirmResolver;
+  destructiveConfirmResolver = null;
+
+  const previousFocus = destructiveConfirmPreviousFocus;
+  destructiveConfirmPreviousFocus = null;
+
+  if (previousFocus instanceof HTMLElement && document.contains(previousFocus)) {
+    requestAnimationFrame(() => previousFocus.focus({ preventScroll: true }));
+  }
+
+  resolver?.(Boolean(confirmed));
+}
+
+function requestDestructiveConfirmation({
+  title = "Xác nhận xóa",
+  message = "Bạn có chắc chắn muốn thực hiện thao tác này không?",
+  details = "Hành động này không thể hoàn tác.",
+  confirmLabel = "Xóa",
+  cancelLabel = "Hủy"
+} = {}) {
+  // Fallback an toàn nếu HTML của popup chưa được tải đúng phiên bản.
+  if (!els.destructiveConfirmModal || !els.destructiveConfirmAcceptBtn) {
+    return Promise.resolve(window.confirm(`${message}\n\n${details}`));
+  }
+
+  if (isDestructiveConfirmOpen()) {
+    closeDestructiveConfirmModal(false);
+  }
+
+  destructiveConfirmPreviousFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  if (els.destructiveConfirmTitle) els.destructiveConfirmTitle.textContent = title;
+  if (els.destructiveConfirmMessage) els.destructiveConfirmMessage.textContent = message;
+  if (els.destructiveConfirmDetails) {
+    els.destructiveConfirmDetails.textContent = details;
+    els.destructiveConfirmDetails.classList.toggle("hidden", !String(details || "").trim());
+  }
+  if (els.destructiveConfirmAcceptBtn) els.destructiveConfirmAcceptBtn.textContent = confirmLabel;
+  if (els.destructiveConfirmCancelBtn) els.destructiveConfirmCancelBtn.textContent = cancelLabel;
+
+  els.destructiveConfirmModal.classList.remove("hidden");
+  els.destructiveConfirmModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("destructive-confirm-open");
+
+  return new Promise((resolve) => {
+    destructiveConfirmResolver = resolve;
+    requestAnimationFrame(() => {
+      els.destructiveConfirmCancelBtn?.focus({ preventScroll: true });
+    });
+  });
+}
+
+els.destructiveConfirmCancelBtn?.addEventListener("click", () => {
+  closeDestructiveConfirmModal(false);
+});
+
+els.destructiveConfirmAcceptBtn?.addEventListener("click", () => {
+  closeDestructiveConfirmModal(true);
+});
+
+els.destructiveConfirmBackdrop?.addEventListener("click", () => {
+  closeDestructiveConfirmModal(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !isDestructiveConfirmOpen()) return;
+  event.preventDefault();
+  closeDestructiveConfirmModal(false);
+});
 
 function escapeHtml(value = "") {
   return String(value)
@@ -4511,9 +4610,16 @@ async function deleteWorkOrder(workOrderId, button) {
 
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
-  if (!window.confirm(`Xoá phiếu này cùng ${tasksInGroup.length} công việc bên trong? Hình ảnh báo cáo trong phiếu cũng sẽ bị xoá. Không thể hoàn tác.`)) {
-    return;
-  }
+  const workOrder = state.workOrders.find((item) => item.id === workOrderId);
+  const workOrderName = String(workOrder?.name || tasksInGroup[0]?.workOrderName || "Phiếu công việc này").trim();
+  const confirmed = await requestDestructiveConfirmation({
+    title: "Xóa Phiếu công việc?",
+    message: `Bạn có thực sự muốn xóa “${workOrderName}” cùng ${tasksInGroup.length} công việc bên trong không?`,
+    details: "Toàn bộ ảnh báo cáo thuộc Phiếu cũng sẽ bị xóa khỏi Firebase Storage. Hành động này không thể hoàn tác.",
+    confirmLabel: "Xóa Phiếu"
+  });
+
+  if (!confirmed) return;
 
   setButtonLoading(button, true, "Đang xoá...");
 
@@ -4568,9 +4674,14 @@ async function deleteAllWorkOrders(button) {
   ]).size;
   const photoCount = getTaskPhotoStoragePaths(state.tasks).length;
 
-  if (!window.confirm(`Xoá TOÀN BỘ ${ticketCount} phiếu công việc (mọi trạng thái) cùng ${state.tasks.length} công việc bên trong? Hệ thống cũng sẽ xoá toàn bộ báo cáo Hotel hằng ngày, thiết lập/thống kê liên quan, thông báo cũ và ${photoCount} hình ảnh báo cáo. Hành động này không thể hoàn tác.`)) {
-    return;
-  }
+  const confirmed = await requestDestructiveConfirmation({
+    title: "Xóa toàn bộ Phiếu công việc?",
+    message: `Bạn có thực sự muốn xóa TOÀN BỘ ${ticketCount} Phiếu công việc cùng ${state.tasks.length} công việc bên trong không?`,
+    details: `Hệ thống cũng sẽ xóa toàn bộ báo cáo Hotel, thống kê liên quan, thông báo cũ và ${photoCount} ảnh báo cáo trên Firebase Storage. Hành động này không thể hoàn tác.`,
+    confirmLabel: "Xóa toàn bộ"
+  });
+
+  if (!confirmed) return;
 
   setButtonLoading(button, true, "Đang xoá toàn bộ...");
 
