@@ -4347,6 +4347,14 @@ async function persistWorkOrder(dispatch, button) {
     const now = new Date();
     const batch = writeBatch(db);
 
+    // Safari/Chrome không liên quan tới lỗi này. Với tài khoản Giám sát, tạo và giao
+    // trong cùng một batch có thể bị Firestore từ chối khi Rules phải đồng thời kiểm tra
+    // quyền tạo + quyền giao trên document mới. Vì vậy Giám sát dùng quy trình an toàn:
+    // (1) tạo Phiếu/task ở trạng thái draft, sau đó (2) chuyển sang trạng thái đã giao.
+    // Kết quả cuối cùng vẫn giống hệt Admin tạo & giao ngay, nhưng tương thích Rules ổn định hơn.
+    const supervisorTwoPhaseDispatch = dispatch && isSupervisorProfile();
+    const createAsDispatched = dispatch && !supervisorTwoPhaseDispatch;
+
     // Nếu đang sửa 1 phiếu nháp có sẵn: xoá phiếu + công việc cũ, sau đó tạo lại từ đầu.
     const previousWorkOrderId = state.editingWorkOrderId;
 
@@ -4367,15 +4375,15 @@ async function persistWorkOrder(dispatch, button) {
       createdByName: state.profile.name,
       createdAt: serverTimestamp(),
       taskCount: rows.length,
-      status: dispatch ? "dispatched" : "draft"
+      status: createAsDispatched ? "dispatched" : "draft"
     });
 
     const notificationItems = [];
     const createdTaskRefs = [];
 
-    // Chuẩn bị hàng đợi thời gian cho từng nhân viên xuất hiện trong phiếu này,
-    // dựa trên các công việc HỌ đã được giao trước đó (ở bất kỳ phiếu nào khác).
-    const employeeQueueEnd = dispatch
+    // Admin vẫn tạo & giao trực tiếp trong một batch như trước. Giám sát sẽ tính hàng đợi
+    // ở batch thứ hai, sau khi các document draft đã được tạo thành công.
+    const employeeQueueEnd = createAsDispatched
       ? getEmployeeQueueEndMap(rows.map((row) => row.assignedToUid))
       : {};
 
@@ -4398,7 +4406,6 @@ async function persistWorkOrder(dispatch, button) {
         assignedByName: state.profile.name,
         workOrderId: workOrderRef.id,
         workOrderName,
-        // Lưu tổng số công việc của phiếu vào từng task để các màn hình có thể hiển thị thống nhất.
         workOrderTaskCount: rows.length,
         rowIndex: row.index,
         createdAt: serverTimestamp(),
@@ -4420,8 +4427,6 @@ async function persistWorkOrder(dispatch, button) {
         resultType: null,
         differenceMinutes: null,
         differencePercent: null,
-        // Phiếu Nghỉ trưa là thời gian nghỉ nên không bắt buộc đăng hình.
-        // Phiếu Hotel vẫn áp dụng đúng cài đặt bắt buộc đăng hình của Admin.
         photoRequired: row.isLunchBreak ? false : photoOptions.photoRequired,
         requiredPhotoCount: row.isLunchBreak ? 0 : photoOptions.requiredPhotoCount,
         photos: [],
@@ -4429,7 +4434,7 @@ async function persistWorkOrder(dispatch, button) {
         lastPhotoUploadedAt: null
       };
 
-      if (dispatch) {
+      if (createAsDispatched) {
         if (assignedToUid) {
           const { queueStartDate, deadlineDate } = reserveQueueSlot(employeeQueueEnd, assignedToUid, deadlineMinutes, now);
 
@@ -4462,7 +4467,84 @@ async function persistWorkOrder(dispatch, button) {
 
     await batch.commit();
 
-    const adminWorkOrderNotification = {
+    // Giám sát: sau khi tạo draft thành công, chuyển Phiếu và các task sang trạng thái đã giao
+    // bằng đúng quyền dispatchWorkOrder. Cách này tránh lỗi Missing or insufficient permissions
+    // ở thao tác tạo trực tiếp document đã giao.
+    if (supervisorTwoPhaseDispatch) {
+      const dispatchBatch = writeBatch(db);
+      const supervisorQueueEnd = getEmployeeQueueEndMap(rows.map((row) => row.assignedToUid));
+
+      rows.forEach((row, index) => {
+        const taskRef = createdTaskRefs[index];
+        const assignedToUid = row.assignedToUid || "";
+        const deadlineMinutes = Number(row.deadlineMinutes) || 0;
+
+        if (!assignedToUid) {
+          dispatchBatch.update(taskRef, {
+            status: "waiting_assignee",
+            pauseStartedAt: serverTimestamp(),
+            remainingMsAtPause: null,
+            accumulatedWorkedMs: 0,
+            dispatchedAt: null,
+            queueStartAt: null,
+            deadlineAt: null
+          });
+          return;
+        }
+
+        const { queueStartDate, deadlineDate } = reserveQueueSlot(
+          supervisorQueueEnd,
+          assignedToUid,
+          deadlineMinutes,
+          now
+        );
+
+        dispatchBatch.update(taskRef, {
+          status: getActiveTaskStatusFromFlags(row),
+          dispatchedAt: serverTimestamp(),
+          queueStartAt: Timestamp.fromDate(queueStartDate),
+          deadlineAt: Timestamp.fromDate(deadlineDate),
+          pauseStartedAt: null,
+          remainingMsAtPause: null,
+          accumulatedWorkedMs: 0
+        });
+
+        const isQueued = queueStartDate.getTime() > now.getTime();
+        const startNote = isQueued
+          ? ` Do bạn còn công việc khác chưa hết thời gian quy định, công việc này sẽ tự bắt đầu tính giờ lúc ${formatDateTime(Timestamp.fromDate(queueStartDate))}.`
+          : "";
+
+        notificationItems.push({
+          recipientUid: assignedToUid,
+          type: "task_assigned",
+          title: "Bạn có công việc mới",
+          message: `${state.profile.name || "Giám sát"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.${startNote}`,
+          taskId: taskRef.id,
+          taskTitle: row.title
+        });
+      });
+
+      dispatchBatch.update(workOrderRef, { status: "dispatched" });
+
+      try {
+        await dispatchBatch.commit();
+      } catch (dispatchError) {
+        console.error("SUPERVISOR DISPATCH ERROR:", dispatchError);
+        state.editingWorkOrderId = null;
+        els.workOrderName.value = "";
+        resetTaskRows();
+        resetPhotoRequirementControls();
+        $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
+        els.taskModal.classList.add("hidden");
+        toast(
+          `Phiếu “${workOrderName}” đã được lưu ở trạng thái Chưa giao việc nhưng chưa thể giao. Hãy mở Phiếu và bấm “Giao việc” lại.`,
+          "error"
+        );
+        return;
+      }
+    }
+
+    const managementWorkOrderNotification = {
       recipientUid: state.user.uid,
       type: dispatch ? "task_assigned_admin" : "work_order_draft_saved",
       title: dispatch ? "Đã tạo phiếu công việc" : "Đã lưu phiếu chưa giao việc",
@@ -4473,7 +4555,7 @@ async function persistWorkOrder(dispatch, button) {
       taskTitle: workOrderName
     };
 
-    notificationItems.push(adminWorkOrderNotification);
+    notificationItems.push(managementWorkOrderNotification);
     await createNotifications(notificationItems);
 
     state.editingWorkOrderId = null;
@@ -4491,8 +4573,16 @@ async function persistWorkOrder(dispatch, button) {
       "success"
     );
   } catch (error) {
-    console.error(error);
-    toast(error.message || "Không lưu được phiếu công việc.", "error");
+    console.error("PERSIST WORK ORDER ERROR:", error);
+    const isPermissionError = error?.code === "permission-denied"
+      || String(error?.message || "").toLowerCase().includes("insufficient permissions");
+
+    toast(
+      isPermissionError
+        ? "Không thể tạo Phiếu do quyền Firestore chưa đồng bộ. Hãy deploy firestore.rules mới nhất rồi đăng xuất/đăng nhập lại tài khoản Giám sát."
+        : (error.message || "Không lưu được phiếu công việc."),
+      "error"
+    );
   } finally {
     setButtonLoading(button, false);
   }
