@@ -6555,6 +6555,210 @@
       }
     }
 
+
+
+    /* =========================================================
+       FIX TABLET PORTRAIT (iPad/Android): giữ toàn bộ dashboard
+       và Phiếu compact nằm trong vùng nhìn, không tràn ngang.
+       Chỉ thay đổi bố cục responsive, không đụng logic/dữ liệu.
+       ========================================================= */
+    @media (min-width: 769px) and (max-width: 1180px) {
+      html,
+      body {
+        max-width: 100%;
+        overflow-x: hidden !important;
+      }
+
+      #adminView .page,
+      #supervisorView .page,
+      #employeeView .page {
+        width: calc(100% - 24px) !important;
+        max-width: calc(100% - 24px) !important;
+        min-width: 0 !important;
+        margin-inline: auto !important;
+      }
+
+      #adminView .task-panel,
+      #supervisorView .task-panel,
+      #employeeView .task-panel,
+      #adminView .ticket-group,
+      #supervisorView .ticket-group,
+      #employeeView .ticket-group {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+      }
+
+      /* 4 ô trạng thái nhân viên chuyển thành lưới 2x2 trên tablet dọc. */
+      #adminView .employee-status-summary,
+      #supervisorView .employee-status-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 10px !important;
+      }
+
+      #adminView .employee-status-card,
+      #supervisorView .employee-status-card {
+        min-width: 0 !important;
+        padding: 12px 14px !important;
+      }
+
+      #adminView .employee-status-card strong,
+      #supervisorView .employee-status-card strong {
+        font-size: 12px !important;
+        line-height: 1.3 !important;
+        overflow-wrap: anywhere;
+      }
+
+      .task-filter-row,
+      .ticket-group-toolbar,
+      .ticket-actions,
+      .task-panel-header-actions {
+        flex-wrap: wrap !important;
+      }
+
+      /* Phiếu dạng thu gọn xếp thành các hàng rõ ràng thay vì ép ngang. */
+      .task-card,
+      .task-card.is-desktop-expanded,
+      html.desktop-task-detail-mode .task-card {
+        grid-template-columns: minmax(0, 1fr) !important;
+        grid-template-areas:
+          "task-top"
+          "task-summary"
+          "task-actions"
+          "task-details" !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        gap: 8px !important;
+      }
+
+      .task-top,
+      .task-desktop-summary,
+      .task-compact-actions,
+      .task-mobile-details {
+        min-width: 0 !important;
+        max-width: 100% !important;
+      }
+
+      .task-desktop-summary {
+        width: 100% !important;
+        grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+        border-top: 1px solid #e2e8f0 !important;
+        border-left: 0 !important;
+      }
+
+      .task-desktop-summary-item {
+        padding: 6px 8px !important;
+      }
+
+      .task-compact-actions {
+        width: 100% !important;
+        min-width: 0 !important;
+        justify-content: flex-end !important;
+        flex-wrap: wrap !important;
+      }
+
+      .task-actions,
+      .task-desktop-quick-actions {
+        min-width: 0 !important;
+        flex-wrap: wrap !important;
+      }
+
+      .task-mobile-details .task-meta {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      }
+    }
+
+    /* =========================================================
+       FIX TABLET PORTRAIT: Ngày giao việc không được dùng kích
+       thước nội tại của input date native để lấn sang ô nhân viên.
+       Áp dụng iPadOS Safari và Android tablet khổ dọc.
+       ========================================================= */
+    @media (min-width: 641px) and (max-width: 1180px) {
+      #taskModal .task-create-modal-card {
+        width: min(920px, calc(100vw - 32px)) !important;
+        max-width: min(920px, calc(100vw - 32px)) !important;
+      }
+
+      #taskModal .task-row-schedule-grid {
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) !important;
+        gap: 10px !important;
+        width: 100% !important;
+        min-width: 0 !important;
+      }
+
+      #taskModal .task-row-schedule-grid > .task-row-field {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+      }
+
+      #taskModal .task-row-schedule-grid > .task-row-field:first-child {
+        contain: inline-size;
+      }
+
+      #taskModal .task-row-schedule-grid input,
+      #taskModal .task-row-schedule-grid select {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+
+      #taskModal input.row-date[type="date"] {
+        position: relative !important;
+        inline-size: 100% !important;
+        width: 100% !important;
+        min-inline-size: 0 !important;
+        min-width: 0 !important;
+        max-inline-size: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 10px 42px 10px 12px !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        text-align: left !important;
+        direction: ltr !important;
+        background-color: #ffffff !important;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%230f172a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M16 3v4M8 3v4M3 11h18'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 12px center !important;
+        background-size: 18px 18px !important;
+      }
+
+      #taskModal input.row-date[type="date"]::-webkit-date-and-time-value {
+        display: block !important;
+        inline-size: 100% !important;
+        min-inline-size: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        text-align: left !important;
+      }
+
+      #taskModal input.row-date[type="date"]::-webkit-datetime-edit,
+      #taskModal input.row-date[type="date"]::-webkit-datetime-edit-fields-wrapper {
+        min-inline-size: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+
+      #taskModal input.row-date[type="date"]::-webkit-calendar-picker-indicator {
+        position: absolute !important;
+        inset: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        opacity: 0 !important;
+        cursor: pointer;
+      }
+    }
+
 </style>
 </head>
 <body>
