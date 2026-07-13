@@ -2525,17 +2525,23 @@ function getAdminSearchStatusPriority(taskOrStatus) {
     : (taskOrStatus?.displayStatus || getDisplayStatus(taskOrStatus || {}));
 
   const priorities = {
-    // Phiếu chưa giao việc luôn đứng đầu. Ngay sau đó là Phiếu có công việc
-    // nhân viên vừa bấm Hoàn thành và đang chờ Admin xác nhận.
+    // Thứ tự ưu tiên chung khi xem "Tất cả trạng thái":
+    // Chưa giao việc → Chờ Admin xác nhận → Quá hạn → Chờ chọn người
+    // → Đang làm/đang chờ/Hotel/nghỉ trưa → Gần hết giờ
+    // → Yêu cầu làm lại → Hoàn thành.
+    //
+    // Quá hạn phải luôn nằm phía trên các Phiếu đang làm, nhưng vẫn nằm
+    // phía dưới Phiếu chưa giao việc. Hàm này được dùng chung cho Admin,
+    // Giám sát, tìm kiếm và danh sách của tài khoản Nhân viên.
     draft: 0,
     submitted: 1,
-    waiting_assignee: 2,
-    queued: 3,
-    doing: 3,
-    lunch_break: 3,
-    hotel: 3,
-    near_due: 4,
-    overdue: 5,
+    overdue: 2,
+    waiting_assignee: 3,
+    queued: 4,
+    doing: 4,
+    lunch_break: 4,
+    hotel: 4,
+    near_due: 5,
     redo: 6,
     completed: 7
   };
@@ -6199,8 +6205,8 @@ function sortTicketGroupsForDisplay(groups) {
     // Khi Admin xem "Tất cả trạng thái", sắp xếp Phiếu công việc theo đúng
     // thứ tự xử lý ưu tiên. Việc sắp xếp này được thực hiện sau khi đã áp dụng
     // bộ lọc ngày và nhân viên, nên vẫn giữ nguyên khi Admin chọn từng nhân viên:
-    // Chưa giao việc → Chờ Admin xác nhận → Đang làm → Gần hết giờ
-    // → Quá hạn → Yêu cầu làm lại → Hoàn thành.
+    // Chưa giao việc → Chờ Admin xác nhận → Quá hạn → Chờ chọn người
+    // → Đang làm → Gần hết giờ → Yêu cầu làm lại → Hoàn thành.
     //
     // Một Phiếu có nhiều công việc ở các trạng thái khác nhau sẽ nhận mức ưu tiên
     // cao nhất trong số các công việc còn hiển thị của Phiếu đó. Ví dụ Phiếu có
@@ -6316,7 +6322,12 @@ function renderEmployeeTasks() {
 
   els.employeeTaskList.classList.remove("empty");
 
-  els.employeeTaskList.innerHTML = groupTasksByWorkOrder(filtered)
+  // Tài khoản Nhân viên cũng dùng cùng thứ tự ưu tiên như Admin/Giám sát.
+  // Đặc biệt khi chọn "Tất cả trạng thái", Phiếu quá hạn luôn nằm trên
+  // Phiếu đang làm, nhưng vẫn ở dưới Phiếu chưa giao việc/chờ xác nhận.
+  els.employeeTaskList.innerHTML = sortTicketGroupsForDisplay(
+    groupTasksByWorkOrder(filtered)
+  )
     .map((group) => renderTicketGroup(group, "employee"))
     .join("");
 
