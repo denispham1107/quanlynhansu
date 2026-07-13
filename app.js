@@ -6347,17 +6347,11 @@ function updateTaskDetailToggleLabels() {
   });
 }
 
-function shouldExpandTaskOnMobileByDefault(task, displayStatus = null) {
-  const visibleStatus = displayStatus || getDisplayStatus(task);
-
-  // Các phiếu cần Admin/Nhân viên xử lý ngay vẫn mở sẵn trên mobile.
-  // Phiếu đang làm hoặc đã hoàn thành được thu gọn để tiết kiệm không gian,
-  // nhưng người dùng luôn có thể bấm “Xem chi tiết” để xem đầy đủ dữ liệu.
-  return (
-    task?.status === "draft"
-    || task?.status === "submitted"
-    || ["waiting_assignee", "overdue", "redo"].includes(visibleStatus)
-  );
+function shouldExpandTaskOnMobileByDefault() {
+  // Trên iPhone/iOS và Android, mọi Phiếu công việc luôn khởi tạo ở
+  // chế độ thu gọn để tiết kiệm không gian hiển thị. Người dùng vẫn có
+  // thể bấm “Chi tiết” để mở riêng Phiếu cần xem.
+  return false;
 }
 
 function isTaskExpandedOnMobile(task, displayStatus = null) {
