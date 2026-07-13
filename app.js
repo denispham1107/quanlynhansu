@@ -141,7 +141,7 @@ const SUPERVISOR_PERMISSION_DEFINITIONS = [
   { key: "editWorkOrder", label: "Sửa Phiếu chưa giao", description: "Sửa tên Phiếu, các dòng công việc, nhân viên, thời gian và yêu cầu ảnh trước khi giao." },
   { key: "reviewTasks", label: "Duyệt kết quả công việc", description: "Xác nhận hoàn thành, yêu cầu làm lại và kết thúc Phiếu nghỉ trưa." },
   { key: "reassignTasks", label: "Đổi nhân viên phụ trách", description: "Chuyển công việc sang nhân viên khác hoặc đưa về trạng thái Chờ chọn người." },
-  { key: "extendTaskTime", label: "Thêm giờ công việc", description: "Cộng thêm thời gian và quản lý danh sách mục đích thêm giờ." },
+  { key: "extendTaskTime", label: "Cho phép thêm giờ", description: "Cho phép Giám sát cộng thêm thời gian cho công việc. Admin chọn giới hạn tối đa 20, 30 hoặc 45 phút cho mỗi công việc." },
   { key: "managePhotoRequirements", label: "Chỉnh số ảnh bắt buộc", description: "Thay đổi số lượng ảnh báo cáo bắt buộc của công việc chưa hoàn thành." },
   { key: "deleteReportPhotos", label: "Xóa ảnh báo cáo", description: "Xóa ảnh đã chọn khỏi Phiếu và xóa file thật trên Firebase Storage." },
   { key: "manageHotelReports", label: "Lưu Tổng kết Hotel", description: "Nhập vệ sinh, số lượng bé và lưu báo cáo Hotel theo ngày." },
@@ -153,6 +153,40 @@ const SUPERVISOR_PERMISSION_DEFINITIONS = [
 ];
 
 const SUPERVISOR_PERMISSION_KEYS = SUPERVISOR_PERMISSION_DEFINITIONS.map((item) => item.key);
+const SUPERVISOR_EXTEND_TIME_LIMIT_OPTIONS = [20, 30, 45];
+const DEFAULT_SUPERVISOR_EXTEND_TIME_LIMIT = 20;
+
+function normalizeSupervisorPermissionSettings(value = {}) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const configuredLimit = Number(input.extendTaskTimeMaxMinutes);
+
+  return {
+    extendTaskTimeMaxMinutes: SUPERVISOR_EXTEND_TIME_LIMIT_OPTIONS.includes(configuredLimit)
+      ? configuredLimit
+      : DEFAULT_SUPERVISOR_EXTEND_TIME_LIMIT
+  };
+}
+
+function getSupervisorExtendTimeMaxMinutes(profile = state.profile) {
+  if (isAdminProfile(profile)) return 1440;
+  if (!isSupervisorProfile(profile) || !hasPermission("extendTaskTime", profile)) return 0;
+  return normalizeSupervisorPermissionSettings(profile?.permissionSettings).extendTaskTimeMaxMinutes;
+}
+
+function getSupervisorTaskExtendedMinutes(task, supervisorUid = state.user?.uid) {
+  if (!task || !supervisorUid) return 0;
+  const bySupervisor = task.timeExtensionMinutesBySupervisor;
+  if (!bySupervisor || typeof bySupervisor !== "object" || Array.isArray(bySupervisor)) return 0;
+  const used = Number(bySupervisor[supervisorUid] || 0);
+  return Number.isFinite(used) && used > 0 ? used : 0;
+}
+
+function getRemainingSupervisorExtendMinutes(task, profile = state.profile) {
+  if (isAdminProfile(profile)) return 1440;
+  const maximum = getSupervisorExtendTimeMaxMinutes(profile);
+  if (!maximum) return 0;
+  return Math.max(0, maximum - getSupervisorTaskExtendedMinutes(task, profile?.uid || state.user?.uid));
+}
 
 function isAdminProfile(profile = state.profile) {
   return profile?.role === "admin";
@@ -330,6 +364,7 @@ const els = {
   extendTimeForm: $("#extendTimeForm"),
   extendTimeTaskTitle: $("#extendTimeTaskTitle"),
   extendMinutes: $("#extendMinutes"),
+  extendTimePermissionHint: $("#extendTimePermissionHint"),
   extendReasonSelect: $("#extendReasonSelect"),
   newExtendReason: $("#newExtendReason"),
   addExtendReasonBtn: $("#addExtendReasonBtn"),
@@ -1795,24 +1830,57 @@ function cleanupSubscriptions() {
 // =========================
 // Giao diện phân quyền Giám sát
 // =========================
-function permissionChecklistHtml(permissions = {}) {
+function permissionChecklistHtml(permissions = {}, permissionSettings = {}) {
   const normalized = normalizeSupervisorPermissions(permissions);
+  const normalizedSettings = normalizeSupervisorPermissionSettings(permissionSettings);
 
-  return SUPERVISOR_PERMISSION_DEFINITIONS.map((permission) => `
-    <label class="supervisor-permission-option ${permission.primary ? "is-primary" : ""}">
-      <input type="checkbox" data-supervisor-permission-key="${escapeHtml(permission.key)}" ${normalized[permission.key] ? "checked" : ""} />
-      <span class="supervisor-permission-copy">
-        ${permission.primary ? '<span class="supervisor-permission-primary-tag">Quyền chính</span>' : ""}
-        <strong>${escapeHtml(permission.label)}</strong>
-        <span>${escapeHtml(permission.description)}</span>
-      </span>
-    </label>
-  `).join("");
+  return SUPERVISOR_PERMISSION_DEFINITIONS.map((permission) => {
+    const isExtendTimePermission = permission.key === "extendTaskTime";
+    const isChecked = normalized[permission.key] === true;
+
+    return `
+      <div class="supervisor-permission-option ${permission.primary ? "is-primary" : ""} ${isExtendTimePermission ? "has-limit-setting" : ""}" data-supervisor-permission-option="${escapeHtml(permission.key)}">
+        <label class="supervisor-permission-main">
+          <input type="checkbox" data-supervisor-permission-key="${escapeHtml(permission.key)}" ${isChecked ? "checked" : ""} />
+          <span class="supervisor-permission-copy">
+            ${permission.primary ? '<span class="supervisor-permission-primary-tag">Quyền chính</span>' : ""}
+            <strong>${escapeHtml(permission.label)}</strong>
+            <span>${escapeHtml(permission.description)}</span>
+          </span>
+        </label>
+        ${isExtendTimePermission ? `
+          <div class="supervisor-permission-limit ${isChecked ? "" : "is-disabled"}">
+            <label>
+              <span>Giới hạn tối đa cho mỗi công việc</span>
+              <select data-supervisor-setting="extendTaskTimeMaxMinutes" ${isChecked ? "" : "disabled"}>
+                ${SUPERVISOR_EXTEND_TIME_LIMIT_OPTIONS.map((minutes) => `
+                  <option value="${minutes}" ${normalizedSettings.extendTaskTimeMaxMinutes === minutes ? "selected" : ""}>${minutes} phút</option>
+                `).join("")}
+              </select>
+            </label>
+            <small>Tổng thời gian Giám sát này được cộng thêm cho một công việc không vượt quá mức Admin chọn.</small>
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }).join("");
 }
 
-function renderSupervisorPermissionChecklist(container, permissions = {}) {
+function syncSupervisorPermissionSettingState(container) {
   if (!container) return;
-  container.innerHTML = permissionChecklistHtml(permissions);
+  const checkbox = container.querySelector('[data-supervisor-permission-key="extendTaskTime"]');
+  const setting = container.querySelector('[data-supervisor-setting="extendTaskTimeMaxMinutes"]');
+  const settingBox = setting?.closest(".supervisor-permission-limit");
+  const enabled = checkbox?.checked === true;
+
+  if (setting) setting.disabled = !enabled;
+  settingBox?.classList.toggle("is-disabled", !enabled);
+}
+
+function renderSupervisorPermissionChecklist(container, permissions = {}, permissionSettings = {}) {
+  if (!container) return;
+  container.innerHTML = permissionChecklistHtml(permissions, permissionSettings);
+  syncSupervisorPermissionSettingState(container);
 }
 
 function readSupervisorPermissionChecklist(container) {
@@ -1827,10 +1895,18 @@ function readSupervisorPermissionChecklist(container) {
   return permissions;
 }
 
+function readSupervisorPermissionSettings(container) {
+  const setting = container?.querySelector('[data-supervisor-setting="extendTaskTimeMaxMinutes"]');
+  return normalizeSupervisorPermissionSettings({
+    extendTaskTimeMaxMinutes: Number(setting?.value || DEFAULT_SUPERVISOR_EXTEND_TIME_LIMIT)
+  });
+}
+
 function setSupervisorPermissionChecklist(container, checked) {
   container?.querySelectorAll("[data-supervisor-permission-key]").forEach((checkbox) => {
     checkbox.checked = Boolean(checked);
   });
+  syncSupervisorPermissionSettingState(container);
 }
 
 function updateCreateAccountRoleUI() {
@@ -1873,9 +1949,12 @@ function applyManagementPermissionUI() {
   if (els.supervisorPermissionBanner) {
     if (isSupervisorProfile()) {
       const permissions = normalizeSupervisorPermissions(state.profile?.permissions);
+      const permissionSettings = normalizeSupervisorPermissionSettings(state.profile?.permissionSettings);
       const grantedLabels = SUPERVISOR_PERMISSION_DEFINITIONS
         .filter((item) => permissions[item.key])
-        .map((item) => item.label);
+        .map((item) => item.key === "extendTaskTime"
+          ? `${item.label} (tối đa ${permissionSettings.extendTaskTimeMaxMinutes} phút/công việc)`
+          : item.label);
 
       els.supervisorPermissionBanner.innerHTML = `
         <strong>Tài khoản Giám sát • ${grantedLabels.length}/${SUPERVISOR_PERMISSION_KEYS.length} quyền đang bật</strong>
@@ -1969,13 +2048,21 @@ function openSupervisorPermissionModal(supervisorUid) {
   if (els.supervisorPermissionModalAccount) {
     els.supervisorPermissionModalAccount.textContent = `${supervisor.name || "Giám sát"} • ${supervisor.email || ""}`;
   }
-  renderSupervisorPermissionChecklist(els.editSupervisorPermissionList, supervisor.permissions);
+  renderSupervisorPermissionChecklist(els.editSupervisorPermissionList, supervisor.permissions, supervisor.permissionSettings);
   els.supervisorPermissionModal?.classList.remove("hidden");
 }
 
 function bindSupervisorPermissionUI() {
-  renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {});
+  renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {}, {});
   updateCreateAccountRoleUI();
+
+  [els.createSupervisorPermissionList, els.editSupervisorPermissionList].forEach((container) => {
+    container?.addEventListener("change", (event) => {
+      if (event.target.matches('[data-supervisor-permission-key="extendTaskTime"]')) {
+        syncSupervisorPermissionSettingState(container);
+      }
+    });
+  });
 
   els.staffAccountRole?.addEventListener("change", updateCreateAccountRoleUI);
   els.selectAllCreateSupervisorPermissions?.addEventListener("click", () => setSupervisorPermissionChecklist(els.createSupervisorPermissionList, true));
@@ -1997,11 +2084,13 @@ function bindSupervisorPermissionUI() {
     }
 
     const permissions = readSupervisorPermissionChecklist(els.editSupervisorPermissionList);
+    const permissionSettings = readSupervisorPermissionSettings(els.editSupervisorPermissionList);
     setButtonLoading(els.saveSupervisorPermissionsBtn, true, "Đang lưu...");
 
     try {
       await updateDoc(doc(db, "users", supervisor.uid), {
         permissions,
+        permissionSettings,
         permissionsUpdatedAt: serverTimestamp(),
         permissionsUpdatedByUid: state.user.uid,
         permissionsUpdatedByName: state.profile?.name || state.user?.email || "Admin"
@@ -3385,6 +3474,9 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
   const permissions = role === "supervisor"
     ? readSupervisorPermissionChecklist(els.createSupervisorPermissionList)
     : null;
+  const permissionSettings = role === "supervisor"
+    ? readSupervisorPermissionSettings(els.createSupervisorPermissionList)
+    : null;
 
   try {
     const sAuth = getSecondaryAuth();
@@ -3405,6 +3497,7 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
 
     if (role === "supervisor") {
       userData.permissions = normalizeSupervisorPermissions(permissions);
+      userData.permissionSettings = normalizeSupervisorPermissionSettings(permissionSettings);
       userData.permissionsUpdatedAt = serverTimestamp();
       userData.permissionsUpdatedByUid = state.user.uid;
       userData.permissionsUpdatedByName = state.profile?.name || state.user?.email || "Admin";
@@ -3414,7 +3507,7 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
     await signOut(sAuth);
 
     els.createEmployeeForm.reset();
-    renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {});
+    renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {}, {});
     updateCreateAccountRoleUI();
 
     toast(
@@ -9307,10 +9400,30 @@ function openExtendTimeModal(taskId) {
     return;
   }
 
+  const isSupervisor = isSupervisorProfile();
+  const maximum = getSupervisorExtendTimeMaxMinutes();
+  const used = isSupervisor ? getSupervisorTaskExtendedMinutes(task) : 0;
+  const remaining = isSupervisor ? Math.max(0, maximum - used) : 1440;
+
+  if (isSupervisor && remaining <= 0) {
+    toast(`Bạn đã dùng hết giới hạn ${maximum} phút thêm giờ cho công việc này.`, "error");
+    return;
+  }
+
   state.extendTimeTaskId = taskId;
   els.extendTimeTaskTitle.textContent = task.title || "Công việc";
-  els.extendMinutes.value = 15;
+  els.extendMinutes.min = "1";
+  els.extendMinutes.max = String(remaining);
+  els.extendMinutes.value = String(Math.min(15, remaining));
   els.newExtendReason.value = "";
+
+  if (els.extendTimePermissionHint) {
+    els.extendTimePermissionHint.textContent = isSupervisor
+      ? `Admin cho phép tối đa ${maximum} phút cho mỗi công việc. Bạn đã dùng ${used} phút, còn được thêm ${remaining} phút.`
+      : "Admin có thể nhập số phút cần thêm cho công việc.";
+    els.extendTimePermissionHint.classList.toggle("is-supervisor-limit", isSupervisor);
+  }
+
   renderExtendReasonOptions();
   els.extendTimeModal.classList.remove("hidden");
 }
@@ -9444,6 +9557,16 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     return;
   }
 
+  const currentTask = state.tasks.find((item) => item.id === taskId);
+  if (isSupervisorProfile()) {
+    const maximum = getSupervisorExtendTimeMaxMinutes();
+    const remaining = getRemainingSupervisorExtendMinutes(currentTask);
+    if (minutes > remaining) {
+      toast(`Bạn chỉ còn được thêm tối đa ${remaining} phút cho công việc này (giới hạn Admin cấp: ${maximum} phút).`, "error");
+      return;
+    }
+  }
+
   if (!reason) {
     toast("Vui lòng chọn hoặc nhập mục đích thêm giờ. Nếu chưa có mục đích, Admin có thể tự tạo trong ô bên trên.", "error");
     return;
@@ -9487,7 +9610,7 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
         ? "doing"
         : task.status;
 
-      transaction.update(taskRef, {
+      const updateData = {
         deadlineMinutes: newDeadlineMinutes,
         deadlineAt: Timestamp.fromDate(newDeadlineDate),
         status: newStatus,
@@ -9497,7 +9620,27 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
         lastTimeExtendedAt: Timestamp.fromDate(now),
         lastTimeExtendedByUid: state.user.uid,
         lastTimeExtendedByName: state.profile.name || state.user.email || "Admin"
-      });
+      };
+
+      if (isSupervisorProfile()) {
+        const maximum = getSupervisorExtendTimeMaxMinutes();
+        const currentBySupervisor = task.timeExtensionMinutesBySupervisor
+          && typeof task.timeExtensionMinutesBySupervisor === "object"
+          && !Array.isArray(task.timeExtensionMinutesBySupervisor)
+          ? { ...task.timeExtensionMinutesBySupervisor }
+          : {};
+        const alreadyUsed = Number(currentBySupervisor[state.user.uid] || 0);
+        const nextUsed = alreadyUsed + minutes;
+
+        if (nextUsed > maximum) {
+          throw new Error(`Giới hạn thêm giờ của bạn cho công việc này là ${maximum} phút.`);
+        }
+
+        currentBySupervisor[state.user.uid] = nextUsed;
+        updateData.timeExtensionMinutesBySupervisor = currentBySupervisor;
+      }
+
+      transaction.update(taskRef, updateData);
 
       updatedTask = {
         ...task,
@@ -9508,12 +9651,14 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     });
 
     if (updatedTask?.assignedToUid) {
+      const actorName = state.profile?.name || state.user?.email || "Người quản lý";
+      const actorLabel = isAdminProfile() ? "Admin" : `Giám sát ${actorName}`;
       await createNotifications([
         {
           recipientUid: updatedTask.assignedToUid,
           type: "task_time_extended",
           title: "Công việc được thêm giờ",
-          message: `Admin đã thêm ${minutes} phút cho “${updatedTask.title}”. Mục đích: ${reason}.`,
+          message: `${actorLabel} đã thêm ${minutes} phút cho “${updatedTask.title}”. Mục đích: ${reason}.`,
           taskId,
           taskTitle: updatedTask.title
         },

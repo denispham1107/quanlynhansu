@@ -2528,14 +2528,19 @@
 
     .supervisor-permission-option {
       display: grid;
-      grid-template-columns: auto 1fr;
-      align-items: flex-start;
       gap: 10px;
       min-height: 68px;
       padding: 12px;
       border: 1px solid #d8e4f8;
       border-radius: 14px;
       background: #fff;
+    }
+
+    .supervisor-permission-main {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: flex-start;
+      gap: 10px;
       cursor: pointer;
     }
 
@@ -2549,6 +2554,32 @@
     .supervisor-permission-copy strong { color: #13233f; font-size: 0.94rem; }
     .supervisor-permission-copy span { color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
     .supervisor-permission-primary-tag { color: #1d4ed8; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    .supervisor-permission-limit {
+      margin-left: 29px;
+      padding: 10px 12px;
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+      background: #f8fbff;
+      transition: opacity 0.2s ease, filter 0.2s ease;
+    }
+
+    .supervisor-permission-limit.is-disabled { opacity: 0.55; filter: grayscale(0.25); }
+    .supervisor-permission-limit label { display: grid; grid-template-columns: minmax(0, 1fr) 130px; align-items: center; gap: 10px; font-weight: 800; color: #1e3a8a; }
+    .supervisor-permission-limit select { min-width: 0; width: 100%; min-height: 40px; padding: 7px 10px; border-radius: 10px; background: #fff; }
+    .supervisor-permission-limit small { display: block; margin-top: 7px; color: var(--muted); line-height: 1.4; }
+
+    .extend-time-permission-hint {
+      margin: -4px 0 2px;
+      padding: 9px 11px;
+      border-radius: 11px;
+      background: #eff6ff;
+      color: #1e40af;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      font-weight: 700;
+    }
+    .extend-time-permission-hint.is-supervisor-limit { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
 
     .supervisor-permission-modal-card { width: min(920px, calc(100vw - 28px)); max-height: min(88vh, 860px); overflow: auto; }
 
@@ -2579,6 +2610,8 @@
       .supervisor-permission-quick-actions { justify-content: flex-start; }
       .staff-account-actions { flex-direction: column; align-items: stretch; }
       .staff-permission-btn, .employee-delete-btn { min-width: 44px; }
+      .supervisor-permission-limit { margin-left: 0; }
+      .supervisor-permission-limit label { grid-template-columns: 1fr; }
     }
 
 
@@ -7512,6 +7545,7 @@
           Số phút cần thêm
           <input id="extendMinutes" type="number" min="1" max="1440" step="1" value="15" required />
         </label>
+        <p id="extendTimePermissionHint" class="extend-time-permission-hint">Admin có thể nhập số phút cần thêm cho công việc.</p>
 
         <label>
           Mục đích thêm giờ
