@@ -113,6 +113,7 @@ const state = {
     to: ""
   },
   extendTimeTaskId: null,
+  extendReasonListExpanded: false,
   reassignTaskId: null,
   photoReportTaskId: null,
   photoReportReturnView: null,
@@ -369,6 +370,9 @@ const els = {
   newExtendReason: $("#newExtendReason"),
   addExtendReasonBtn: $("#addExtendReasonBtn"),
   extendReasonList: $("#extendReasonList"),
+  extendReasonListCount: $("#extendReasonListCount"),
+  extendReasonListToggle: $("#extendReasonListToggle"),
+  extendReasonListToggleLabel: $("#extendReasonListToggleLabel"),
   confirmExtendTimeBtn: $("#confirmExtendTimeBtn"),
   reassignEmployeeModal: $("#reassignEmployeeModal"),
   reassignEmployeeForm: $("#reassignEmployeeForm"),
@@ -9453,26 +9457,109 @@ function renderExtendReasonOptions(selectedValue = "") {
   renderCustomExtendReasonList();
 }
 
+function getExtendReasonCollapsedHeight() {
+  if (!els.extendReasonList) return 0;
+
+  const firstItem = els.extendReasonList.querySelector(".reason-item, .reason-empty-state");
+  if (!firstItem) return 0;
+
+  return Math.ceil(firstItem.getBoundingClientRect().height || firstItem.scrollHeight || 0);
+}
+
+function syncExtendReasonListDisclosure({ animate = true } = {}) {
+  if (!els.extendReasonList) return;
+
+  const reasonItems = Array.from(els.extendReasonList.querySelectorAll(".reason-item"));
+  const reasonCount = reasonItems.length;
+  const canExpand = reasonCount > 1;
+
+  if (!canExpand) {
+    state.extendReasonListExpanded = false;
+  }
+
+  const expanded = canExpand && state.extendReasonListExpanded;
+
+  reasonItems.forEach((item, index) => {
+    const hiddenByCollapse = !expanded && index > 0;
+    item.setAttribute("aria-hidden", String(hiddenByCollapse));
+
+    const deleteButton = item.querySelector("[data-delete-extend-reason-id]");
+    if (deleteButton instanceof HTMLElement) {
+      deleteButton.tabIndex = hiddenByCollapse ? -1 : 0;
+    }
+  });
+
+  if (els.extendReasonListCount) {
+    els.extendReasonListCount.textContent = reasonCount
+      ? `${reasonCount} mục đích`
+      : "Chưa có mục đích";
+  }
+
+  if (els.extendReasonListToggle) {
+    els.extendReasonListToggle.classList.toggle("hidden", !canExpand);
+    els.extendReasonListToggle.setAttribute("aria-expanded", String(expanded));
+    els.extendReasonListToggle.disabled = !canExpand;
+  }
+
+  if (els.extendReasonListToggleLabel) {
+    els.extendReasonListToggleLabel.textContent = expanded ? "Thu gọn" : "Chi tiết";
+  }
+
+  els.extendReasonList.classList.toggle("is-expanded", expanded);
+  els.extendReasonList.classList.toggle("is-collapsed", !expanded);
+
+  if (!animate) {
+    els.extendReasonList.classList.add("no-transition");
+  }
+
+  const currentHeight = Math.ceil(els.extendReasonList.getBoundingClientRect().height || 0);
+  const collapsedHeight = getExtendReasonCollapsedHeight();
+  const expandedHeight = Math.ceil(els.extendReasonList.scrollHeight || collapsedHeight);
+  const targetHeight = expanded ? expandedHeight : collapsedHeight;
+
+  if (animate && currentHeight > 0) {
+    els.extendReasonList.style.maxHeight = `${currentHeight}px`;
+    // Ép trình duyệt ghi nhận chiều cao hiện tại trước khi chạy hiệu ứng trượt.
+    void els.extendReasonList.offsetHeight;
+  }
+
+  els.extendReasonList.style.maxHeight = `${Math.max(0, targetHeight)}px`;
+
+  if (!animate) {
+    requestAnimationFrame(() => {
+      els.extendReasonList?.classList.remove("no-transition");
+    });
+  }
+}
+
 function renderCustomExtendReasonList() {
   if (!els.extendReasonList) return;
 
   const customReasons = state.timeExtensionReasons || [];
 
   if (!customReasons.length) {
-    els.extendReasonList.innerHTML = `<p class="small-note">Chưa có mục đích nào do Admin tự tạo.</p>`;
+    els.extendReasonList.innerHTML = `
+      <div class="reason-empty-state">
+        Chưa có mục đích nào do Admin tự tạo.
+      </div>
+    `;
+    state.extendReasonListExpanded = false;
+    requestAnimationFrame(() => syncExtendReasonListDisclosure({ animate: false }));
     return;
   }
 
   els.extendReasonList.innerHTML = customReasons
     .map((reason) => `
       <div class="reason-item">
-        <span>${escapeHtml(reason.name || "Không tên")}</span>
+        <span class="reason-item-name">${escapeHtml(reason.name || "Không tên")}</span>
         <button class="btn danger tiny" type="button" data-delete-extend-reason-id="${escapeHtml(reason.id)}" data-delete-extend-reason-name="${escapeHtml(reason.name || "")}">
           Xoá
         </button>
       </div>
     `)
     .join("");
+
+  requestAnimationFrame(() => syncExtendReasonListDisclosure({ animate: false }));
 }
 
 function openExtendTimeModal(taskId) {
@@ -9501,6 +9588,7 @@ function openExtendTimeModal(taskId) {
   }
 
   state.extendTimeTaskId = taskId;
+  state.extendReasonListExpanded = false;
   els.extendTimeTaskTitle.textContent = task.title || "Công việc";
   els.extendMinutes.min = "1";
   els.extendMinutes.max = String(remaining);
@@ -9516,15 +9604,33 @@ function openExtendTimeModal(taskId) {
 
   renderExtendReasonOptions();
   els.extendTimeModal.classList.remove("hidden");
+
+  requestAnimationFrame(() => {
+    syncExtendReasonListDisclosure({ animate: false });
+  });
 }
 
 function closeExtendTimeModal() {
   state.extendTimeTaskId = null;
+  state.extendReasonListExpanded = false;
   els.extendTimeModal?.classList.add("hidden");
 }
 
 $$("[data-close-extend-modal]").forEach((button) => {
   button.addEventListener("click", closeExtendTimeModal);
+});
+
+els.extendReasonListToggle?.addEventListener("click", () => {
+  const reasonCount = els.extendReasonList?.querySelectorAll(".reason-item").length || 0;
+  if (reasonCount <= 1) return;
+
+  state.extendReasonListExpanded = !state.extendReasonListExpanded;
+  syncExtendReasonListDisclosure({ animate: true });
+});
+
+window.addEventListener("resize", () => {
+  if (els.extendTimeModal?.classList.contains("hidden")) return;
+  syncExtendReasonListDisclosure({ animate: false });
 });
 
 els.addExtendReasonBtn?.addEventListener("click", async () => {
