@@ -4110,6 +4110,180 @@
       display: contents;
     }
 
+    /* Popup danh sách nhân viên trên desktop.
+       Tận dụng cùng markup với bottom sheet mobile để không nhân đôi logic. */
+    @media (min-width: 769px) {
+      body.employee-status-dialog-open {
+        overflow: hidden !important;
+      }
+
+      #adminView .employee-status-card {
+        cursor: pointer;
+        transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+      }
+
+      #adminView .employee-status-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12) !important;
+      }
+
+      #adminView .employee-status-card:focus-visible {
+        outline: 3px solid rgba(37, 99, 235, 0.28);
+        outline-offset: 3px;
+      }
+
+      .mobile-status-detail-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1290;
+        display: block;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        background: rgba(15, 23, 42, 0.52);
+        opacity: 0;
+        transition: opacity 0.18s ease;
+      }
+
+      .mobile-status-detail-backdrop.hidden {
+        display: none !important;
+      }
+
+      .mobile-status-detail-backdrop.is-open {
+        opacity: 1;
+      }
+
+      .mobile-status-detail-sheet {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 1300;
+        display: flex;
+        flex-direction: column;
+        width: min(620px, calc(100vw - 48px));
+        max-width: 100%;
+        max-height: min(74vh, 720px);
+        margin: 0;
+        padding: 22px;
+        overflow: hidden;
+        border: 1px solid rgba(203, 213, 225, 0.95);
+        border-radius: 24px;
+        background: #ffffff;
+        box-shadow: 0 28px 80px rgba(15, 23, 42, 0.30);
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+        transform: translate(-50%, -48%) scale(0.97);
+        transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s step-end;
+      }
+
+      .mobile-status-detail-sheet.is-open {
+        visibility: visible;
+        opacity: 1;
+        pointer-events: auto;
+        transform: translate(-50%, -50%) scale(1);
+        transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s;
+      }
+
+      .mobile-status-detail-sheet .mobile-filter-sheet-handle {
+        display: none;
+      }
+
+      .mobile-status-detail-sheet .mobile-filter-sheet-header {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 16px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .mobile-status-detail-sheet .mobile-filter-sheet-header h4 {
+        margin: 0;
+        color: #0f172a;
+        font-size: 22px;
+        line-height: 1.25;
+      }
+
+      .mobile-status-detail-sheet .mobile-filter-sheet-close {
+        display: grid;
+        flex: 0 0 auto;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 14px;
+        background: #eef2f7;
+        color: #0f172a;
+        font: inherit;
+        font-size: 28px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .mobile-status-detail-sheet .mobile-filter-sheet-close:hover {
+        background: #e2e8f0;
+      }
+
+      .mobile-status-detail-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        padding: 2px 4px 4px 2px;
+        overscroll-behavior: contain;
+      }
+
+      .mobile-status-detail-person {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        min-height: 58px;
+        padding: 10px 12px;
+        border: 1px solid #dbe7f7;
+        border-radius: 15px;
+        background: #f8fbff;
+        color: #0f172a;
+        font-size: 14px;
+        font-weight: 850;
+      }
+
+      .mobile-status-detail-avatar {
+        display: grid;
+        flex: 0 0 auto;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #2563eb, #7c3aed);
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 950;
+      }
+
+      .mobile-status-detail-person span:last-child {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .mobile-status-detail-empty {
+        grid-column: 1 / -1;
+        padding: 28px 20px;
+        border-radius: 16px;
+        background: #f8fafc;
+        color: #64748b;
+        text-align: center;
+        font-size: 14px;
+        font-weight: 800;
+      }
+    }
+
     @media (max-width: 768px) {
       body.mobile-sheet-open {
         overflow: hidden !important;

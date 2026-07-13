@@ -4880,7 +4880,9 @@ function getEmployeeInitials(employee) {
 }
 
 function setEmployeeStatusDetailSheetOpen(open, type = "free") {
-  const shouldOpen = Boolean(open && isMobileManagementViewport());
+  // Dùng chung cửa sổ danh sách nhân viên cho cả desktop và mobile.
+  // Mobile hiển thị dạng bottom sheet, desktop hiển thị popup giữa màn hình.
+  const shouldOpen = Boolean(open);
 
   if (shouldOpen) {
     const config = getEmployeeStatusGroupConfig(type);
@@ -4912,6 +4914,11 @@ function setEmployeeStatusDetailSheetOpen(open, type = "free") {
     });
   }
 
+  document.body.classList.toggle(
+    "employee-status-dialog-open",
+    shouldOpen && !isMobileManagementViewport()
+  );
+
   syncMobileSheetBodyLock();
 }
 
@@ -4937,7 +4944,6 @@ function setupMobileAdminCompactControls() {
   });
 
   els.adminEmployeeStatusSummary?.addEventListener("click", (event) => {
-    if (!isMobileManagementViewport()) return;
     const card = event.target.closest("[data-employee-status-type]");
     if (!card) return;
     setEmployeeStatusDetailSheetOpen(true, card.dataset.employeeStatusType || "free");
@@ -4980,7 +4986,16 @@ function setupMobileAdminCompactControls() {
     if (!isMobileManagementViewport()) {
       setMobileTaskPanelMenuOpen(false);
       setAdminMobileFilterSheetOpen(false);
-      setEmployeeStatusDetailSheetOpen(false);
+    }
+
+    // Nếu cửa sổ danh sách nhân viên đang mở, giữ nguyên và để CSS
+    // tự chuyển giữa popup desktop và bottom sheet mobile.
+    if (els.adminEmployeeStatusDetailSheet?.classList.contains("is-open")) {
+      document.body.classList.toggle(
+        "employee-status-dialog-open",
+        !isMobileManagementViewport()
+      );
+      syncMobileSheetBodyLock();
     }
   });
 
