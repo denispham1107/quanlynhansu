@@ -113,6 +113,7 @@ const state = {
     to: ""
   },
   extendTimeTaskId: null,
+  extendReasonListExpanded: false,
   reassignTaskId: null,
   photoReportTaskId: null,
   photoReportReturnView: null,
@@ -334,6 +335,8 @@ const els = {
   newExtendReason: $("#newExtendReason"),
   addExtendReasonBtn: $("#addExtendReasonBtn"),
   extendReasonList: $("#extendReasonList"),
+  extendReasonListToggle: $("#extendReasonListToggle"),
+  extendReasonCount: $("#extendReasonCount"),
   confirmExtendTimeBtn: $("#confirmExtendTimeBtn"),
   reassignEmployeeModal: $("#reassignEmployeeModal"),
   reassignEmployeeForm: $("#reassignEmployeeForm"),
@@ -9270,19 +9273,61 @@ function renderExtendReasonOptions(selectedValue = "") {
   renderCustomExtendReasonList();
 }
 
+function setExtendReasonListExpanded(expanded) {
+  state.extendReasonListExpanded = Boolean(expanded);
+
+  const list = els.extendReasonList;
+  const toggle = els.extendReasonListToggle;
+
+  if (!list) return;
+
+  list.classList.toggle("is-expanded", state.extendReasonListExpanded);
+
+  const extraItems = Array.from(list.querySelectorAll(".reason-item-extra"));
+
+  extraItems.forEach((item) => {
+    const isHidden = !state.extendReasonListExpanded;
+    item.setAttribute("aria-hidden", String(isHidden));
+
+    item.querySelectorAll("button, input, select, textarea, a[href]").forEach((control) => {
+      if (isHidden) {
+        control.setAttribute("tabindex", "-1");
+      } else {
+        control.removeAttribute("tabindex");
+      }
+    });
+  });
+
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", String(state.extendReasonListExpanded));
+    toggle.innerHTML = state.extendReasonListExpanded
+      ? 'Thu gọn <span aria-hidden="true">⌃</span>'
+      : 'Chi tiết <span aria-hidden="true">⌄</span>';
+  }
+}
+
 function renderCustomExtendReasonList() {
   if (!els.extendReasonList) return;
 
   const customReasons = state.timeExtensionReasons || [];
 
+  if (els.extendReasonCount) {
+    els.extendReasonCount.textContent = `${customReasons.length} mục đích`;
+  }
+
+  if (els.extendReasonListToggle) {
+    els.extendReasonListToggle.hidden = customReasons.length <= 1;
+  }
+
   if (!customReasons.length) {
     els.extendReasonList.innerHTML = `<p class="small-note">Chưa có mục đích nào do Admin tự tạo.</p>`;
+    setExtendReasonListExpanded(false);
     return;
   }
 
   els.extendReasonList.innerHTML = customReasons
-    .map((reason) => `
-      <div class="reason-item">
+    .map((reason, index) => `
+      <div class="reason-item${index > 0 ? " reason-item-extra" : ""}"${index > 0 ? ' aria-hidden="true"' : ""}>
         <span>${escapeHtml(reason.name || "Không tên")}</span>
         <button class="btn danger tiny" type="button" data-delete-extend-reason-id="${escapeHtml(reason.id)}" data-delete-extend-reason-name="${escapeHtml(reason.name || "")}">
           Xoá
@@ -9290,6 +9335,8 @@ function renderCustomExtendReasonList() {
       </div>
     `)
     .join("");
+
+  setExtendReasonListExpanded(state.extendReasonListExpanded && customReasons.length > 1);
 }
 
 function openExtendTimeModal(taskId) {
@@ -9311,6 +9358,7 @@ function openExtendTimeModal(taskId) {
   els.extendTimeTaskTitle.textContent = task.title || "Công việc";
   els.extendMinutes.value = 15;
   els.newExtendReason.value = "";
+  state.extendReasonListExpanded = false;
   renderExtendReasonOptions();
   els.extendTimeModal.classList.remove("hidden");
 }
@@ -9366,6 +9414,10 @@ els.addExtendReasonBtn?.addEventListener("click", async () => {
   } finally {
     setButtonLoading(els.addExtendReasonBtn, false);
   }
+});
+
+els.extendReasonListToggle?.addEventListener("click", () => {
+  setExtendReasonListExpanded(!state.extendReasonListExpanded);
 });
 
 els.extendReasonList?.addEventListener("click", async (event) => {

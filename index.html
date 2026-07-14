@@ -6759,6 +6759,174 @@
       }
     }
 
+
+
+    /* Modal Thêm giờ: danh sách mục đích mặc định thu gọn và modal desktop bo đủ 4 góc */
+    #extendTimeModal .reason-tools {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid #dbeafe;
+      border-radius: 18px;
+      background: #f8fbff;
+    }
+
+    #extendTimeModal .extend-reason-list-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    #extendTimeModal .extend-reason-list-title {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+
+    #extendTimeModal .extend-reason-list-title strong,
+    #extendTimeModal .extend-reason-list-title span {
+      display: block;
+    }
+
+    #extendTimeModal .extend-reason-list-toggle {
+      flex: 0 0 auto;
+      min-height: 40px;
+      padding: 8px 14px;
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #1d4ed8;
+      font: inherit;
+      font-weight: 900;
+      cursor: pointer;
+      transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+    }
+
+    #extendTimeModal .extend-reason-list-toggle:hover,
+    #extendTimeModal .extend-reason-list-toggle:focus-visible {
+      border-color: #60a5fa;
+      background: #eff6ff;
+      outline: none;
+      transform: translateY(-1px);
+    }
+
+    #extendTimeModal .reason-list {
+      display: block;
+      overflow: hidden;
+    }
+
+    #extendTimeModal .reason-item {
+      transition:
+        max-height 0.28s ease,
+        margin-top 0.28s ease,
+        padding-top 0.28s ease,
+        padding-bottom 0.28s ease,
+        border-width 0.28s ease,
+        opacity 0.2s ease,
+        transform 0.28s ease;
+    }
+
+    #extendTimeModal .reason-item + .reason-item {
+      margin-top: 10px;
+    }
+
+    #extendTimeModal .reason-list:not(.is-expanded) .reason-item-extra {
+      max-height: 0 !important;
+      min-height: 0 !important;
+      margin-top: 0 !important;
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+      border-top-width: 0 !important;
+      border-bottom-width: 0 !important;
+      opacity: 0;
+      overflow: hidden;
+      transform: translateY(-8px);
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    #extendTimeModal .reason-list.is-expanded .reason-item-extra {
+      max-height: 96px;
+      opacity: 1;
+      transform: translateY(0);
+      visibility: visible;
+      pointer-events: auto;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #extendTimeModal .reason-item,
+      #extendTimeModal .extend-reason-list-toggle {
+        transition: none !important;
+      }
+    }
+
+    @media (min-width: 769px) {
+      #extendTimeModal:not(.hidden) {
+        position: fixed !important;
+        inset: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-sizing: border-box !important;
+        padding: 32px !important;
+        overflow: hidden !important;
+        z-index: 10000 !important;
+      }
+
+      #extendTimeModal .modal-backdrop {
+        position: fixed !important;
+        inset: 0 !important;
+      }
+
+      #extendTimeModal .modal-card.small-modal {
+        position: relative !important;
+        width: min(700px, calc(100vw - 64px)) !important;
+        max-width: min(700px, calc(100vw - 64px)) !important;
+        max-height: calc(100dvh - 64px) !important;
+        margin: 0 auto !important;
+        box-sizing: border-box !important;
+        border-radius: 28px !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        background: #ffffff !important;
+        background-clip: padding-box !important;
+        clip-path: inset(0 round 28px) !important;
+        box-shadow: 0 28px 90px rgba(15, 23, 42, 0.28) !important;
+        scrollbar-gutter: stable;
+      }
+
+      #extendTimeModal .modal-header {
+        border-radius: 28px 28px 0 0 !important;
+      }
+
+      #extendTimeModal .modal-card.small-modal::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      #extendTimeModal .modal-card.small-modal::-webkit-scrollbar-track {
+        margin: 22px 0;
+        background: transparent;
+      }
+
+      #extendTimeModal .modal-card.small-modal::-webkit-scrollbar-thumb {
+        border: 3px solid transparent;
+        border-radius: 999px;
+        background: rgba(100, 116, 139, 0.55);
+        background-clip: content-box;
+      }
+    }
+
+    @media (max-width: 640px) {
+      #extendTimeModal .extend-reason-list-head {
+        align-items: flex-start;
+      }
+
+      #extendTimeModal .extend-reason-list-toggle {
+        min-height: 38px;
+        padding: 7px 12px;
+      }
+    }
 </style>
 </head>
 <body>
@@ -7529,7 +7697,23 @@
         </div>
 
         <div class="reason-tools">
-          <p class="small-note">Danh sách mục đích thêm giờ chỉ gồm các mục do Admin tự tạo. Hệ thống không tự tạo sẵn mục đích mặc định.</p>
+          <div class="extend-reason-list-head">
+            <div class="extend-reason-list-title">
+              <strong>Danh sách mục đích đã tạo</strong>
+              <span id="extendReasonCount" class="small-note">0 mục đích</span>
+            </div>
+            <button
+              id="extendReasonListToggle"
+              class="extend-reason-list-toggle"
+              type="button"
+              aria-controls="extendReasonList"
+              aria-expanded="false"
+              hidden
+            >
+              Chi tiết <span aria-hidden="true">⌄</span>
+            </button>
+          </div>
+          <p class="small-note">Danh sách mục đích thêm giờ chỉ gồm các mục do Admin tự tạo. Mặc định chỉ hiển thị một mục; bấm “Chi tiết” để xem đầy đủ.</p>
           <div id="extendReasonList" class="reason-list" aria-live="polite"></div>
         </div>
 
