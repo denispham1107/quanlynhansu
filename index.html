@@ -556,6 +556,42 @@
       border-radius: 12px;
       background: #e2e8f0;
     }
+    .photo-report-image-wrap {
+      position: relative;
+      display: block;
+      overflow: hidden;
+      border-radius: 12px;
+      background: #e2e8f0;
+    }
+
+    .photo-report-item.is-pre-assignment-photo .photo-report-image-wrap img {
+      filter: blur(3px) brightness(0.58) saturate(0.8);
+      transform: scale(1.04);
+    }
+
+    .photo-capture-warning {
+      position: absolute;
+      inset: 0;
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      margin: 0 !important;
+      padding: 14px;
+      color: #fff !important;
+      font-size: 14px !important;
+      font-weight: 900;
+      line-height: 1.3 !important;
+      text-align: center;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+      background: rgba(15, 23, 42, 0.24);
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .photo-report-item.is-pre-assignment-photo {
+      border-color: #f59e0b;
+      background: #fffbeb;
+    }
     .photo-report-item strong {
       display: block;
       font-size: 13px;
@@ -960,6 +996,33 @@
 
     .photo-viewer-stage.is-loading .photo-viewer-image:not(.photo-viewer-image-ghost) {
       opacity: 0.22;
+    }
+
+    .photo-viewer-stage.is-pre-assignment-photo .photo-viewer-image:not(.photo-viewer-image-ghost) {
+      filter: blur(5px) brightness(0.55) saturate(0.8);
+      transform: scale(1.015);
+    }
+
+    .photo-viewer-stage.is-pre-assignment-photo::after {
+      content: "Ảnh chụp trước khi giao việc";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      z-index: 8;
+      transform: translate(-50%, -50%);
+      width: min(78%, 520px);
+      padding: 14px 18px;
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      border-radius: 16px;
+      background: rgba(15, 23, 42, 0.72);
+      color: #fff;
+      font-size: clamp(17px, 2.2vw, 25px);
+      font-weight: 900;
+      line-height: 1.3;
+      text-align: center;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(8px);
+      pointer-events: none;
     }
 
     @keyframes photoViewerSpin {

@@ -667,6 +667,127 @@ const PHOTO_UPLOAD_MAX_DIMENSION = 1600;
 const PHOTO_UPLOAD_JPEG_QUALITY = 0.82;
 const PHOTO_UPLOAD_MIN_OPTIMIZE_BYTES = 350 * 1024;
 
+const PHOTO_CAPTURE_BEFORE_ASSIGNMENT_TOLERANCE_MS = 2 * 60 * 1000;
+
+function readExifAscii(view, offset, length) {
+  if (!Number.isFinite(offset) || !Number.isFinite(length) || offset < 0 || length <= 0 || offset + length > view.byteLength) return "";
+  let value = "";
+  for (let index = 0; index < length; index += 1) {
+    const code = view.getUint8(offset + index);
+    if (!code) break;
+    value += String.fromCharCode(code);
+  }
+  return value.trim();
+}
+
+function parseExifDateText(value = "") {
+  const match = String(value).trim().match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function readTiffIfdEntries(view, tiffStart, ifdOffset, littleEndian) {
+  const absoluteOffset = tiffStart + ifdOffset;
+  if (absoluteOffset < 0 || absoluteOffset + 2 > view.byteLength) return [];
+  const count = view.getUint16(absoluteOffset, littleEndian);
+  const entries = [];
+  for (let index = 0; index < count; index += 1) {
+    const entryOffset = absoluteOffset + 2 + index * 12;
+    if (entryOffset + 12 > view.byteLength) break;
+    entries.push({
+      tag: view.getUint16(entryOffset, littleEndian),
+      type: view.getUint16(entryOffset + 2, littleEndian),
+      count: view.getUint32(entryOffset + 4, littleEndian),
+      valueOffset: entryOffset + 8,
+      rawValue: view.getUint32(entryOffset + 8, littleEndian)
+    });
+  }
+  return entries;
+}
+
+function readExifEntryAscii(view, tiffStart, entry, littleEndian) {
+  if (!entry || entry.type !== 2 || !entry.count) return "";
+  const dataOffset = entry.count <= 4 ? entry.valueOffset : tiffStart + entry.rawValue;
+  return readExifAscii(view, dataOffset, entry.count);
+}
+
+async function readPhotoCapturedAt(file) {
+  const fallbackDate = Number(file?.lastModified || 0) > 946684800000
+    ? new Date(Number(file.lastModified))
+    : null;
+
+  try {
+    const type = String(file?.type || "").toLowerCase();
+    const name = String(file?.name || "").toLowerCase();
+    const canContainJpegExif = type.includes("jpeg") || type.includes("jpg") || /\.jpe?g$/i.test(name);
+    if (!canContainJpegExif) {
+      return fallbackDate && !Number.isNaN(fallbackDate.getTime())
+        ? { date: fallbackDate, source: "file_last_modified" }
+        : { date: null, source: "unavailable" };
+    }
+
+    const buffer = await file.slice(0, Math.min(file.size, 1024 * 1024)).arrayBuffer();
+    const view = new DataView(buffer);
+    if (view.byteLength < 4 || view.getUint16(0, false) !== 0xffd8) throw new Error("Not JPEG");
+
+    let offset = 2;
+    while (offset + 4 <= view.byteLength) {
+      if (view.getUint8(offset) !== 0xff) break;
+      const marker = view.getUint8(offset + 1);
+      const segmentLength = view.getUint16(offset + 2, false);
+      if (segmentLength < 2 || offset + 2 + segmentLength > view.byteLength) break;
+
+      if (marker === 0xe1 && segmentLength >= 10 && readExifAscii(view, offset + 4, 6) === "Exif") {
+        const tiffStart = offset + 10;
+        if (tiffStart + 8 > view.byteLength) break;
+        const byteOrder = view.getUint16(tiffStart, false);
+        const littleEndian = byteOrder === 0x4949;
+        if (!littleEndian && byteOrder !== 0x4d4d) break;
+        if (view.getUint16(tiffStart + 2, littleEndian) !== 42) break;
+
+        const ifd0Offset = view.getUint32(tiffStart + 4, littleEndian);
+        const ifd0Entries = readTiffIfdEntries(view, tiffStart, ifd0Offset, littleEndian);
+        const exifPointer = ifd0Entries.find((entry) => entry.tag === 0x8769);
+        const exifEntries = exifPointer
+          ? readTiffIfdEntries(view, tiffStart, exifPointer.rawValue, littleEndian)
+          : [];
+
+        const dateEntry = exifEntries.find((entry) => entry.tag === 0x9003)
+          || exifEntries.find((entry) => entry.tag === 0x9004)
+          || ifd0Entries.find((entry) => entry.tag === 0x0132);
+        const exifDate = parseExifDateText(readExifEntryAscii(view, tiffStart, dateEntry, littleEndian));
+        if (exifDate) return { date: exifDate, source: "exif" };
+        break;
+      }
+
+      offset += 2 + segmentLength;
+    }
+  } catch (error) {
+    console.warn("Không đọc được EXIF của ảnh:", file?.name, error);
+  }
+
+  return fallbackDate && !Number.isNaN(fallbackDate.getTime())
+    ? { date: fallbackDate, source: "file_last_modified" }
+    : { date: null, source: "unavailable" };
+}
+
+function getTaskAssignmentDate(task) {
+  return timestampToDate(task?.dispatchedAt) || timestampToDate(task?.createdAt);
+}
+
+function isPhotoCapturedBeforeTaskAssignment(capturedAt, task) {
+  const capturedDate = capturedAt instanceof Date ? capturedAt : timestampToDate(capturedAt);
+  const assignmentDate = getTaskAssignmentDate(task);
+  if (!capturedDate || !assignmentDate) return false;
+  return capturedDate.getTime() + PHOTO_CAPTURE_BEFORE_ASSIGNMENT_TOLERANCE_MS < assignmentDate.getTime();
+}
+
+function isPreAssignmentPhoto(photo) {
+  return Boolean(photo?.capturedBeforeAssignment || photo?.takenBeforeDispatch);
+}
+
 function getOptimizedImageFileName(fileName = "image.jpg") {
   const safeName = sanitizeStorageFileName(fileName || "image.jpg");
   const dotIndex = safeName.lastIndexOf(".");
@@ -8186,9 +8307,15 @@ function updatePhotoViewerContent(options = {}) {
     els.photoViewerName.textContent = displayName;
   }
 
+  const capturedBeforeAssignment = isPreAssignmentPhoto(photo);
+  const capturedAtText = photo.capturedAt ? formatFullDateTime(photo.capturedAt) : "";
+
   if (els.photoViewerMeta) {
-    els.photoViewerMeta.textContent = `${uploader} • ${uploadedAt} • ${sizeText}`;
+    const captureText = capturedAtText ? ` • Chụp lúc ${capturedAtText}` : "";
+    els.photoViewerMeta.textContent = `${uploader} • ${uploadedAt} • ${sizeText}${captureText}`;
   }
+
+  els.photoViewerStage?.classList.toggle("is-pre-assignment-photo", capturedBeforeAssignment);
 
   if (els.photoViewerOpenOriginal) {
     els.photoViewerOpenOriginal.href = photo.url;
@@ -9251,10 +9378,11 @@ function renderPhotoReportPageContent(task) {
         const photoKey = getPhotoStableKey(photo, index);
         const selected = isManager && state.photoReportSelectedKeys.has(photoKey);
         const displayName = photo.name || `Ảnh ${index + 1}`;
+        const capturedBeforeAssignment = isPreAssignmentPhoto(photo);
 
         return `
           <article
-            class="photo-report-item ${selected ? "is-selected" : ""}"
+            class="photo-report-item ${selected ? "is-selected" : ""} ${capturedBeforeAssignment ? "is-pre-assignment-photo" : ""}"
             data-photo-key="${escapeHtml(photoKey)}"
           >
             <button
@@ -9263,7 +9391,10 @@ function renderPhotoReportPageContent(task) {
               data-photo-viewer-index="${index}"
               aria-label="Xem ${escapeHtml(displayName)}"
             >
-              <img src="${escapeHtml(photo.url)}" alt="Ảnh báo cáo ${index + 1}" loading="lazy" />
+              <span class="photo-report-image-wrap">
+                <img src="${escapeHtml(photo.url)}" alt="Ảnh báo cáo ${index + 1}" loading="lazy" />
+                ${capturedBeforeAssignment ? `<span class="photo-capture-warning">Ảnh chụp trước khi giao việc</span>` : ""}
+              </span>
               <div>
                 <strong>${escapeHtml(displayName)}</strong>
                 <span>${escapeHtml(photo.uploadedByName || "Nhân viên")} • ${formatFullDateTime(photo.uploadedAt)} • ${formatFileSize(photo.size)}</span>
@@ -9396,8 +9527,16 @@ async function openPhotoUploadPicker(taskId, button) {
       const optimizedResults = [];
 
       for (let index = 0; index < files.length; index += 1) {
+        if (button) button.textContent = `Đang kiểm tra ${index + 1}/${files.length}...`;
+        const captureInfo = await readPhotoCapturedAt(files[index]);
         if (button) button.textContent = `Đang tối ưu ${index + 1}/${files.length}...`;
-        optimizedResults.push(await optimizePhotoFileForUpload(files[index]));
+        const optimizedItem = await optimizePhotoFileForUpload(files[index]);
+        optimizedResults.push({
+          ...optimizedItem,
+          capturedAtDate: captureInfo.date,
+          captureTimeSource: captureInfo.source,
+          capturedBeforeAssignment: isPhotoCapturedBeforeTaskAssignment(captureInfo.date, task)
+        });
       }
 
       const optimizationSummary = getOptimizationSummary(optimizedResults);
@@ -9419,7 +9558,10 @@ async function openPhotoUploadPicker(taskId, button) {
             uploadedByUid: state.user.uid,
             optimized: item.optimized ? "true" : "false",
             originalName: item.originalName || file.name || safeName,
-            originalSize: String(item.originalSize || file.size || 0)
+            originalSize: String(item.originalSize || file.size || 0),
+            capturedAt: item.capturedAtDate?.toISOString?.() || "",
+            captureTimeSource: item.captureTimeSource || "unavailable",
+            capturedBeforeAssignment: item.capturedBeforeAssignment ? "true" : "false"
           }
         });
 
@@ -9438,6 +9580,10 @@ async function openPhotoUploadPicker(taskId, button) {
           width: Number(item.width || 0),
           height: Number(item.height || 0),
           uploadedAt: Timestamp.fromDate(now),
+          capturedAt: item.capturedAtDate ? Timestamp.fromDate(item.capturedAtDate) : null,
+          captureTimeSource: item.captureTimeSource || "unavailable",
+          capturedBeforeAssignment: Boolean(item.capturedBeforeAssignment),
+          assignmentAtSnapshot: getTaskAssignmentDate(task) ? Timestamp.fromDate(getTaskAssignmentDate(task)) : null,
           uploadedByUid: state.user.uid,
           uploadedByName: state.profile?.name || state.profile?.email || "Nhân viên"
         });
@@ -9454,7 +9600,11 @@ async function openPhotoUploadPicker(taskId, button) {
       const savedText = optimizationSummary.savedBytes > 0
         ? ` Đã tối ưu giảm khoảng ${formatFileSize(optimizationSummary.savedBytes)}.`
         : "";
-      toast(`Đã đăng thành công ${uploadedPhotos.length} hình.${savedText}`, "success");
+      const preAssignmentCount = uploadedPhotos.filter((photo) => photo.capturedBeforeAssignment).length;
+      const warningText = preAssignmentCount > 0
+        ? ` Có ${preAssignmentCount} ảnh được phát hiện chụp trước khi giao việc và đã được đánh dấu.`
+        : "";
+      toast(`Đã đăng thành công ${uploadedPhotos.length} hình.${savedText}${warningText}`, preAssignmentCount > 0 ? "warning" : "success");
     } catch (error) {
       console.error(error);
       toast(error.message || "Không đăng được hình. Kiểm tra Firebase Storage Rules hoặc kết nối mạng.", "error");
