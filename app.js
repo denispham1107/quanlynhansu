@@ -113,7 +113,6 @@ const state = {
     to: ""
   },
   extendTimeTaskId: null,
-  extendReasonListExpanded: false,
   reassignTaskId: null,
   photoReportTaskId: null,
   photoReportReturnView: null,
@@ -142,7 +141,7 @@ const SUPERVISOR_PERMISSION_DEFINITIONS = [
   { key: "editWorkOrder", label: "Sửa Phiếu chưa giao", description: "Sửa tên Phiếu, các dòng công việc, nhân viên, thời gian và yêu cầu ảnh trước khi giao." },
   { key: "reviewTasks", label: "Duyệt kết quả công việc", description: "Xác nhận hoàn thành, yêu cầu làm lại và kết thúc Phiếu nghỉ trưa." },
   { key: "reassignTasks", label: "Đổi nhân viên phụ trách", description: "Chuyển công việc sang nhân viên khác hoặc đưa về trạng thái Chờ chọn người." },
-  { key: "extendTaskTime", label: "Cho phép thêm giờ", description: "Cho phép Giám sát cộng thêm thời gian cho công việc. Admin chọn giới hạn tối đa 20, 30 hoặc 45 phút cho mỗi công việc." },
+  { key: "extendTaskTime", label: "Thêm giờ công việc", description: "Cộng thêm thời gian và quản lý danh sách mục đích thêm giờ." },
   { key: "managePhotoRequirements", label: "Chỉnh số ảnh bắt buộc", description: "Thay đổi số lượng ảnh báo cáo bắt buộc của công việc chưa hoàn thành." },
   { key: "deleteReportPhotos", label: "Xóa ảnh báo cáo", description: "Xóa ảnh đã chọn khỏi Phiếu và xóa file thật trên Firebase Storage." },
   { key: "manageHotelReports", label: "Lưu Tổng kết Hotel", description: "Nhập vệ sinh, số lượng bé và lưu báo cáo Hotel theo ngày." },
@@ -154,40 +153,6 @@ const SUPERVISOR_PERMISSION_DEFINITIONS = [
 ];
 
 const SUPERVISOR_PERMISSION_KEYS = SUPERVISOR_PERMISSION_DEFINITIONS.map((item) => item.key);
-const SUPERVISOR_EXTEND_TIME_LIMIT_OPTIONS = [20, 30, 45];
-const DEFAULT_SUPERVISOR_EXTEND_TIME_LIMIT = 20;
-
-function normalizeSupervisorPermissionSettings(value = {}) {
-  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const configuredLimit = Number(input.extendTaskTimeMaxMinutes);
-
-  return {
-    extendTaskTimeMaxMinutes: SUPERVISOR_EXTEND_TIME_LIMIT_OPTIONS.includes(configuredLimit)
-      ? configuredLimit
-      : DEFAULT_SUPERVISOR_EXTEND_TIME_LIMIT
-  };
-}
-
-function getSupervisorExtendTimeMaxMinutes(profile = state.profile) {
-  if (isAdminProfile(profile)) return 1440;
-  if (!isSupervisorProfile(profile) || !hasPermission("extendTaskTime", profile)) return 0;
-  return normalizeSupervisorPermissionSettings(profile?.permissionSettings).extendTaskTimeMaxMinutes;
-}
-
-function getSupervisorTaskExtendedMinutes(task, supervisorUid = state.user?.uid) {
-  if (!task || !supervisorUid) return 0;
-  const bySupervisor = task.timeExtensionMinutesBySupervisor;
-  if (!bySupervisor || typeof bySupervisor !== "object" || Array.isArray(bySupervisor)) return 0;
-  const used = Number(bySupervisor[supervisorUid] || 0);
-  return Number.isFinite(used) && used > 0 ? used : 0;
-}
-
-function getRemainingSupervisorExtendMinutes(task, profile = state.profile) {
-  if (isAdminProfile(profile)) return 1440;
-  const maximum = getSupervisorExtendTimeMaxMinutes(profile);
-  if (!maximum) return 0;
-  return Math.max(0, maximum - getSupervisorTaskExtendedMinutes(task, profile?.uid || state.user?.uid));
-}
 
 function isAdminProfile(profile = state.profile) {
   return profile?.role === "admin";
@@ -365,14 +330,10 @@ const els = {
   extendTimeForm: $("#extendTimeForm"),
   extendTimeTaskTitle: $("#extendTimeTaskTitle"),
   extendMinutes: $("#extendMinutes"),
-  extendTimePermissionHint: $("#extendTimePermissionHint"),
   extendReasonSelect: $("#extendReasonSelect"),
   newExtendReason: $("#newExtendReason"),
   addExtendReasonBtn: $("#addExtendReasonBtn"),
   extendReasonList: $("#extendReasonList"),
-  extendReasonListCount: $("#extendReasonListCount"),
-  extendReasonListToggle: $("#extendReasonListToggle"),
-  extendReasonListToggleLabel: $("#extendReasonListToggleLabel"),
   confirmExtendTimeBtn: $("#confirmExtendTimeBtn"),
   reassignEmployeeModal: $("#reassignEmployeeModal"),
   reassignEmployeeForm: $("#reassignEmployeeForm"),
@@ -523,55 +484,19 @@ function setButtonLoading(button, isLoading, textWhenLoading = "Đang xử lý..
   }
 }
 
-const recentToastTimes = new Map();
-
 function toast(message, type = "info") {
-  const normalizedMessage = String(message || "").trim();
-  if (!normalizedMessage) return;
-
-  const toastKey = `${type}:${normalizedMessage}`;
-  const now = Date.now();
-  const previousTime = Number(recentToastTimes.get(toastKey) || 0);
-
-  // Một thao tác có thể gồm nhiều write/read phụ. Nếu Firebase cùng lúc từ chối
-  // nhiều request, chỉ hiển thị một thông báo giống nhau để tránh phủ kín màn hình.
-  if (now - previousTime < 1500) return;
-  recentToastTimes.set(toastKey, now);
-
   const item = document.createElement("div");
   item.className = `toast ${type}`;
-  item.textContent = normalizedMessage;
+  item.textContent = message;
   $("#toastHost").appendChild(item);
 
-  setTimeout(() => {
-    item.remove();
-    if (recentToastTimes.get(toastKey) === now) recentToastTimes.delete(toastKey);
-  }, 4200);
+  setTimeout(() => item.remove(), 4200);
 }
 
 function requirePermission(permissionKey, deniedMessage = "Tài khoản của bạn chưa được Admin cấp quyền thực hiện chức năng này.") {
   if (hasPermission(permissionKey)) return true;
   toast(deniedMessage, "error");
   return false;
-}
-
-function isFirebasePermissionDenied(error) {
-  const code = String(error?.code || "").toLowerCase();
-  const message = String(error?.message || error || "").toLowerCase();
-  return code.includes("permission-denied")
-    || message.includes("missing or insufficient permissions")
-    || message.includes("insufficient permissions")
-    || message.includes("permission denied");
-}
-
-function getPermissionActionErrorMessage(error, fallbackMessage, actionLabel = "thao tác này") {
-  if (!isFirebasePermissionDenied(error)) return error?.message || fallbackMessage;
-
-  if (isSupervisorProfile()) {
-    return `Không thể thực hiện ${actionLabel}. Tài khoản đã được cấp quyền trên giao diện nhưng Firestore/Storage Rules chưa đồng bộ hoặc dữ liệu cập nhật chưa đúng phạm vi quyền. Hãy deploy bộ Rules đi kèm phiên bản mới nhất rồi đăng xuất và đăng nhập lại.`;
-  }
-
-  return `Không thể thực hiện ${actionLabel} do Firebase Rules từ chối. Hãy deploy bộ Rules mới nhất rồi thử lại.`;
 }
 
 function timestampToDate(value) {
@@ -1870,57 +1795,24 @@ function cleanupSubscriptions() {
 // =========================
 // Giao diện phân quyền Giám sát
 // =========================
-function permissionChecklistHtml(permissions = {}, permissionSettings = {}) {
+function permissionChecklistHtml(permissions = {}) {
   const normalized = normalizeSupervisorPermissions(permissions);
-  const normalizedSettings = normalizeSupervisorPermissionSettings(permissionSettings);
 
-  return SUPERVISOR_PERMISSION_DEFINITIONS.map((permission) => {
-    const isExtendTimePermission = permission.key === "extendTaskTime";
-    const isChecked = normalized[permission.key] === true;
-
-    return `
-      <div class="supervisor-permission-option ${permission.primary ? "is-primary" : ""} ${isExtendTimePermission ? "has-limit-setting" : ""}" data-supervisor-permission-option="${escapeHtml(permission.key)}">
-        <label class="supervisor-permission-main">
-          <input type="checkbox" data-supervisor-permission-key="${escapeHtml(permission.key)}" ${isChecked ? "checked" : ""} />
-          <span class="supervisor-permission-copy">
-            ${permission.primary ? '<span class="supervisor-permission-primary-tag">Quyền chính</span>' : ""}
-            <strong>${escapeHtml(permission.label)}</strong>
-            <span>${escapeHtml(permission.description)}</span>
-          </span>
-        </label>
-        ${isExtendTimePermission ? `
-          <div class="supervisor-permission-limit ${isChecked ? "" : "is-disabled"}">
-            <label>
-              <span>Giới hạn tối đa cho mỗi công việc</span>
-              <select data-supervisor-setting="extendTaskTimeMaxMinutes" ${isChecked ? "" : "disabled"}>
-                ${SUPERVISOR_EXTEND_TIME_LIMIT_OPTIONS.map((minutes) => `
-                  <option value="${minutes}" ${normalizedSettings.extendTaskTimeMaxMinutes === minutes ? "selected" : ""}>${minutes} phút</option>
-                `).join("")}
-              </select>
-            </label>
-            <small>Tổng thời gian Giám sát này được cộng thêm cho một công việc không vượt quá mức Admin chọn.</small>
-          </div>
-        ` : ""}
-      </div>
-    `;
-  }).join("");
+  return SUPERVISOR_PERMISSION_DEFINITIONS.map((permission) => `
+    <label class="supervisor-permission-option ${permission.primary ? "is-primary" : ""}">
+      <input type="checkbox" data-supervisor-permission-key="${escapeHtml(permission.key)}" ${normalized[permission.key] ? "checked" : ""} />
+      <span class="supervisor-permission-copy">
+        ${permission.primary ? '<span class="supervisor-permission-primary-tag">Quyền chính</span>' : ""}
+        <strong>${escapeHtml(permission.label)}</strong>
+        <span>${escapeHtml(permission.description)}</span>
+      </span>
+    </label>
+  `).join("");
 }
 
-function syncSupervisorPermissionSettingState(container) {
+function renderSupervisorPermissionChecklist(container, permissions = {}) {
   if (!container) return;
-  const checkbox = container.querySelector('[data-supervisor-permission-key="extendTaskTime"]');
-  const setting = container.querySelector('[data-supervisor-setting="extendTaskTimeMaxMinutes"]');
-  const settingBox = setting?.closest(".supervisor-permission-limit");
-  const enabled = checkbox?.checked === true;
-
-  if (setting) setting.disabled = !enabled;
-  settingBox?.classList.toggle("is-disabled", !enabled);
-}
-
-function renderSupervisorPermissionChecklist(container, permissions = {}, permissionSettings = {}) {
-  if (!container) return;
-  container.innerHTML = permissionChecklistHtml(permissions, permissionSettings);
-  syncSupervisorPermissionSettingState(container);
+  container.innerHTML = permissionChecklistHtml(permissions);
 }
 
 function readSupervisorPermissionChecklist(container) {
@@ -1935,18 +1827,10 @@ function readSupervisorPermissionChecklist(container) {
   return permissions;
 }
 
-function readSupervisorPermissionSettings(container) {
-  const setting = container?.querySelector('[data-supervisor-setting="extendTaskTimeMaxMinutes"]');
-  return normalizeSupervisorPermissionSettings({
-    extendTaskTimeMaxMinutes: Number(setting?.value || DEFAULT_SUPERVISOR_EXTEND_TIME_LIMIT)
-  });
-}
-
 function setSupervisorPermissionChecklist(container, checked) {
   container?.querySelectorAll("[data-supervisor-permission-key]").forEach((checkbox) => {
     checkbox.checked = Boolean(checked);
   });
-  syncSupervisorPermissionSettingState(container);
 }
 
 function updateCreateAccountRoleUI() {
@@ -1989,12 +1873,9 @@ function applyManagementPermissionUI() {
   if (els.supervisorPermissionBanner) {
     if (isSupervisorProfile()) {
       const permissions = normalizeSupervisorPermissions(state.profile?.permissions);
-      const permissionSettings = normalizeSupervisorPermissionSettings(state.profile?.permissionSettings);
       const grantedLabels = SUPERVISOR_PERMISSION_DEFINITIONS
         .filter((item) => permissions[item.key])
-        .map((item) => item.key === "extendTaskTime"
-          ? `${item.label} (tối đa ${permissionSettings.extendTaskTimeMaxMinutes} phút/công việc)`
-          : item.label);
+        .map((item) => item.label);
 
       els.supervisorPermissionBanner.innerHTML = `
         <strong>Tài khoản Giám sát • ${grantedLabels.length}/${SUPERVISOR_PERMISSION_KEYS.length} quyền đang bật</strong>
@@ -2088,21 +1969,13 @@ function openSupervisorPermissionModal(supervisorUid) {
   if (els.supervisorPermissionModalAccount) {
     els.supervisorPermissionModalAccount.textContent = `${supervisor.name || "Giám sát"} • ${supervisor.email || ""}`;
   }
-  renderSupervisorPermissionChecklist(els.editSupervisorPermissionList, supervisor.permissions, supervisor.permissionSettings);
+  renderSupervisorPermissionChecklist(els.editSupervisorPermissionList, supervisor.permissions);
   els.supervisorPermissionModal?.classList.remove("hidden");
 }
 
 function bindSupervisorPermissionUI() {
-  renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {}, {});
+  renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {});
   updateCreateAccountRoleUI();
-
-  [els.createSupervisorPermissionList, els.editSupervisorPermissionList].forEach((container) => {
-    container?.addEventListener("change", (event) => {
-      if (event.target.matches('[data-supervisor-permission-key="extendTaskTime"]')) {
-        syncSupervisorPermissionSettingState(container);
-      }
-    });
-  });
 
   els.staffAccountRole?.addEventListener("change", updateCreateAccountRoleUI);
   els.selectAllCreateSupervisorPermissions?.addEventListener("click", () => setSupervisorPermissionChecklist(els.createSupervisorPermissionList, true));
@@ -2124,13 +1997,11 @@ function bindSupervisorPermissionUI() {
     }
 
     const permissions = readSupervisorPermissionChecklist(els.editSupervisorPermissionList);
-    const permissionSettings = readSupervisorPermissionSettings(els.editSupervisorPermissionList);
     setButtonLoading(els.saveSupervisorPermissionsBtn, true, "Đang lưu...");
 
     try {
       await updateDoc(doc(db, "users", supervisor.uid), {
         permissions,
-        permissionSettings,
         permissionsUpdatedAt: serverTimestamp(),
         permissionsUpdatedByUid: state.user.uid,
         permissionsUpdatedByName: state.profile?.name || state.user?.email || "Admin"
@@ -2509,7 +2380,7 @@ async function deleteEmployeeData(employeeUid) {
     );
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, `Không xóa được dữ liệu của ${employeeName}.`, "quyền Quản lý tài khoản nhân viên"), "error");
+    toast(error.message || `Không xóa được dữ liệu của ${employeeName}.`, "error");
   } finally {
     state.deletingEmployeeUid = null;
     renderEmployees();
@@ -3272,7 +3143,7 @@ async function exportAllDataToJson() {
     toast(`Đã xuất ${countBackupDocuments(collections)} document ra file JSON.`, "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không xuất được dữ liệu JSON.", "quyền Xuất dữ liệu"), "error");
+    toast(error.message || "Không xuất được dữ liệu JSON.", "error");
   } finally {
     setButtonLoading(els.exportDataBtn, false);
   }
@@ -3354,7 +3225,7 @@ async function importBackupJsonFile(file) {
     toast(`Đã nhập thành công ${importedCount} document từ file JSON.`, "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không nhập được dữ liệu JSON.", "quyền Nhập dữ liệu"), "error");
+    toast(error.message || "Không nhập được dữ liệu JSON.", "error");
   } finally {
     setButtonLoading(els.importDataBtn, false);
     if (els.importDataInput) els.importDataInput.value = "";
@@ -3446,7 +3317,7 @@ els.workTemplateForm?.addEventListener("submit", async (event) => {
     }
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không tạo được công việc mẫu.", "quyền Quản lý công việc mẫu"), "error");
+    toast(error.message || "Không tạo được công việc mẫu.", "error");
   } finally {
     setButtonLoading(els.saveWorkTemplateBtn, false);
   }
@@ -3469,7 +3340,7 @@ els.deleteWorkTemplateBtn?.addEventListener("click", async () => {
     toast(`Đã xoá công việc “${templateName}”.`, "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không xoá được công việc mẫu.", "quyền Quản lý công việc mẫu"), "error");
+    toast(error.message || "Không xoá được công việc mẫu.", "error");
   } finally {
     setButtonLoading(els.deleteWorkTemplateBtn, false);
   }
@@ -3514,9 +3385,6 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
   const permissions = role === "supervisor"
     ? readSupervisorPermissionChecklist(els.createSupervisorPermissionList)
     : null;
-  const permissionSettings = role === "supervisor"
-    ? readSupervisorPermissionSettings(els.createSupervisorPermissionList)
-    : null;
 
   try {
     const sAuth = getSecondaryAuth();
@@ -3537,7 +3405,6 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
 
     if (role === "supervisor") {
       userData.permissions = normalizeSupervisorPermissions(permissions);
-      userData.permissionSettings = normalizeSupervisorPermissionSettings(permissionSettings);
       userData.permissionsUpdatedAt = serverTimestamp();
       userData.permissionsUpdatedByUid = state.user.uid;
       userData.permissionsUpdatedByName = state.profile?.name || state.user?.email || "Admin";
@@ -3547,7 +3414,7 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
     await signOut(sAuth);
 
     els.createEmployeeForm.reset();
-    renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {}, {});
+    renderSupervisorPermissionChecklist(els.createSupervisorPermissionList, {});
     updateCreateAccountRoleUI();
 
     toast(
@@ -4387,14 +4254,6 @@ async function persistWorkOrder(dispatch, button) {
     const now = new Date();
     const batch = writeBatch(db);
 
-    // Safari/Chrome không liên quan tới lỗi này. Với tài khoản Giám sát, tạo và giao
-    // trong cùng một batch có thể bị Firestore từ chối khi Rules phải đồng thời kiểm tra
-    // quyền tạo + quyền giao trên document mới. Vì vậy Giám sát dùng quy trình an toàn:
-    // (1) tạo Phiếu/task ở trạng thái draft, sau đó (2) chuyển sang trạng thái đã giao.
-    // Kết quả cuối cùng vẫn giống hệt Admin tạo & giao ngay, nhưng tương thích Rules ổn định hơn.
-    const supervisorTwoPhaseDispatch = dispatch && isSupervisorProfile();
-    const createAsDispatched = dispatch && !supervisorTwoPhaseDispatch;
-
     // Nếu đang sửa 1 phiếu nháp có sẵn: xoá phiếu + công việc cũ, sau đó tạo lại từ đầu.
     const previousWorkOrderId = state.editingWorkOrderId;
 
@@ -4415,15 +4274,15 @@ async function persistWorkOrder(dispatch, button) {
       createdByName: state.profile.name,
       createdAt: serverTimestamp(),
       taskCount: rows.length,
-      status: createAsDispatched ? "dispatched" : "draft"
+      status: dispatch ? "dispatched" : "draft"
     });
 
     const notificationItems = [];
     const createdTaskRefs = [];
 
-    // Admin vẫn tạo & giao trực tiếp trong một batch như trước. Giám sát sẽ tính hàng đợi
-    // ở batch thứ hai, sau khi các document draft đã được tạo thành công.
-    const employeeQueueEnd = createAsDispatched
+    // Chuẩn bị hàng đợi thời gian cho từng nhân viên xuất hiện trong phiếu này,
+    // dựa trên các công việc HỌ đã được giao trước đó (ở bất kỳ phiếu nào khác).
+    const employeeQueueEnd = dispatch
       ? getEmployeeQueueEndMap(rows.map((row) => row.assignedToUid))
       : {};
 
@@ -4446,6 +4305,7 @@ async function persistWorkOrder(dispatch, button) {
         assignedByName: state.profile.name,
         workOrderId: workOrderRef.id,
         workOrderName,
+        // Lưu tổng số công việc của phiếu vào từng task để các màn hình có thể hiển thị thống nhất.
         workOrderTaskCount: rows.length,
         rowIndex: row.index,
         createdAt: serverTimestamp(),
@@ -4467,6 +4327,8 @@ async function persistWorkOrder(dispatch, button) {
         resultType: null,
         differenceMinutes: null,
         differencePercent: null,
+        // Phiếu Nghỉ trưa là thời gian nghỉ nên không bắt buộc đăng hình.
+        // Phiếu Hotel vẫn áp dụng đúng cài đặt bắt buộc đăng hình của Admin.
         photoRequired: row.isLunchBreak ? false : photoOptions.photoRequired,
         requiredPhotoCount: row.isLunchBreak ? 0 : photoOptions.requiredPhotoCount,
         photos: [],
@@ -4474,7 +4336,7 @@ async function persistWorkOrder(dispatch, button) {
         lastPhotoUploadedAt: null
       };
 
-      if (createAsDispatched) {
+      if (dispatch) {
         if (assignedToUid) {
           const { queueStartDate, deadlineDate } = reserveQueueSlot(employeeQueueEnd, assignedToUid, deadlineMinutes, now);
 
@@ -4507,84 +4369,7 @@ async function persistWorkOrder(dispatch, button) {
 
     await batch.commit();
 
-    // Giám sát: sau khi tạo draft thành công, chuyển Phiếu và các task sang trạng thái đã giao
-    // bằng đúng quyền dispatchWorkOrder. Cách này tránh lỗi Missing or insufficient permissions
-    // ở thao tác tạo trực tiếp document đã giao.
-    if (supervisorTwoPhaseDispatch) {
-      const dispatchBatch = writeBatch(db);
-      const supervisorQueueEnd = getEmployeeQueueEndMap(rows.map((row) => row.assignedToUid));
-
-      rows.forEach((row, index) => {
-        const taskRef = createdTaskRefs[index];
-        const assignedToUid = row.assignedToUid || "";
-        const deadlineMinutes = Number(row.deadlineMinutes) || 0;
-
-        if (!assignedToUid) {
-          dispatchBatch.update(taskRef, {
-            status: "waiting_assignee",
-            pauseStartedAt: serverTimestamp(),
-            remainingMsAtPause: null,
-            accumulatedWorkedMs: 0,
-            dispatchedAt: null,
-            queueStartAt: null,
-            deadlineAt: null
-          });
-          return;
-        }
-
-        const { queueStartDate, deadlineDate } = reserveQueueSlot(
-          supervisorQueueEnd,
-          assignedToUid,
-          deadlineMinutes,
-          now
-        );
-
-        dispatchBatch.update(taskRef, {
-          status: getActiveTaskStatusFromFlags(row),
-          dispatchedAt: serverTimestamp(),
-          queueStartAt: Timestamp.fromDate(queueStartDate),
-          deadlineAt: Timestamp.fromDate(deadlineDate),
-          pauseStartedAt: null,
-          remainingMsAtPause: null,
-          accumulatedWorkedMs: 0
-        });
-
-        const isQueued = queueStartDate.getTime() > now.getTime();
-        const startNote = isQueued
-          ? ` Do bạn còn công việc khác chưa hết thời gian quy định, công việc này sẽ tự bắt đầu tính giờ lúc ${formatDateTime(Timestamp.fromDate(queueStartDate))}.`
-          : "";
-
-        notificationItems.push({
-          recipientUid: assignedToUid,
-          type: "task_assigned",
-          title: "Bạn có công việc mới",
-          message: `${state.profile.name || "Giám sát"} đã giao cho bạn: ${row.title} (phiếu “${workOrderName}”). Hạn hoàn thành: ${formatMinutes(deadlineMinutes)}.${startNote}`,
-          taskId: taskRef.id,
-          taskTitle: row.title
-        });
-      });
-
-      dispatchBatch.update(workOrderRef, { status: "dispatched" });
-
-      try {
-        await dispatchBatch.commit();
-      } catch (dispatchError) {
-        console.error("SUPERVISOR DISPATCH ERROR:", dispatchError);
-        state.editingWorkOrderId = null;
-        els.workOrderName.value = "";
-        resetTaskRows();
-        resetPhotoRequirementControls();
-        $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
-        els.taskModal.classList.add("hidden");
-        toast(
-          `Phiếu “${workOrderName}” đã được lưu ở trạng thái Chưa giao việc nhưng chưa thể giao. Hãy mở Phiếu và bấm “Giao việc” lại.`,
-          "error"
-        );
-        return;
-      }
-    }
-
-    const managementWorkOrderNotification = {
+    const adminWorkOrderNotification = {
       recipientUid: state.user.uid,
       type: dispatch ? "task_assigned_admin" : "work_order_draft_saved",
       title: dispatch ? "Đã tạo phiếu công việc" : "Đã lưu phiếu chưa giao việc",
@@ -4595,7 +4380,7 @@ async function persistWorkOrder(dispatch, button) {
       taskTitle: workOrderName
     };
 
-    notificationItems.push(managementWorkOrderNotification);
+    notificationItems.push(adminWorkOrderNotification);
     await createNotifications(notificationItems);
 
     state.editingWorkOrderId = null;
@@ -4613,16 +4398,8 @@ async function persistWorkOrder(dispatch, button) {
       "success"
     );
   } catch (error) {
-    console.error("PERSIST WORK ORDER ERROR:", error);
-    const isPermissionError = error?.code === "permission-denied"
-      || String(error?.message || "").toLowerCase().includes("insufficient permissions");
-
-    toast(
-      isPermissionError
-        ? "Không thể tạo Phiếu do quyền Firestore chưa đồng bộ. Hãy deploy firestore.rules mới nhất rồi đăng xuất/đăng nhập lại tài khoản Giám sát."
-        : (error.message || "Không lưu được phiếu công việc."),
-      "error"
-    );
+    console.error(error);
+    toast(error.message || "Không lưu được phiếu công việc.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -4759,7 +4536,7 @@ async function dispatchWorkOrder(workOrderId, button) {
     toast("Đã giao việc thành công và gửi thông báo.", "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không giao được việc.", "quyền Giao Phiếu công việc"), "error");
+    toast(error.message || "Không giao được việc.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -4867,7 +4644,7 @@ async function deleteWorkOrder(workOrderId, button) {
     toast("Đã xoá phiếu và hình ảnh báo cáo trong phiếu.", "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không xoá được phiếu.", "quyền Xóa Phiếu"), "error");
+    toast(error.message || "Không xoá được phiếu.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -4941,7 +4718,7 @@ async function deleteAllWorkOrders(button) {
     toast("Đã xoá toàn bộ phiếu, báo cáo, thống kê, thông báo và hình ảnh liên quan.", "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không xoá được toàn bộ phiếu.", "quyền Xóa toàn bộ Phiếu"), "error");
+    toast(error.message || "Không xoá được toàn bộ phiếu.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -5468,7 +5245,7 @@ els.adminCompletedTypeReport?.addEventListener("click", async (event) => {
     toast(`Đã lưu tổng kết Hotel ngày ${formatDateOnly(dateKey)}.`, "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không lưu được tổng kết Hotel trong ngày.", "quyền Lưu Tổng kết Hotel"), "error");
+    toast("Không lưu được tổng kết Hotel trong ngày. Kiểm tra Firestore Rules hotelDailyReports.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -7231,21 +7008,16 @@ async function editTaskPhotoRequirement(taskId) {
 
   const nextRequired = nextCount > 0;
 
-  try {
-    await updateDoc(doc(db, "tasks", task.id), {
-      photoRequired: nextRequired,
-      requiredPhotoCount: nextRequired ? nextCount : 0
-    });
+  await updateDoc(doc(db, "tasks", task.id), {
+    photoRequired: nextRequired,
+    requiredPhotoCount: nextRequired ? nextCount : 0
+  });
 
-    showToast(
-      nextRequired
-        ? `Đã cập nhật yêu cầu ảnh báo cáo thành ${nextCount} hình.`
-        : "Đã tắt bắt buộc đăng hình cho task này."
-    );
-  } catch (error) {
-    console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không chỉnh được số lượng ảnh bắt buộc.", "quyền Chỉnh số ảnh bắt buộc"), "error");
-  }
+  showToast(
+    nextRequired
+      ? `Đã cập nhật yêu cầu ảnh báo cáo thành ${nextCount} hình.`
+      : "Đã tắt bắt buộc đăng hình cho task này."
+  );
 }
 
 function renderResultBox(task) {
@@ -8763,7 +8535,7 @@ async function deleteSelectedPhotoReportPhotos() {
     }
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không xóa được các ảnh đã chọn.", "quyền Xóa ảnh báo cáo"), "error");
+    toast(error.message || "Không xóa được các ảnh đã chọn.", "error");
   } finally {
     setButtonLoading(button, false);
     const currentTask = state.tasks.find((item) => item.id === state.photoReportTaskId);
@@ -9473,7 +9245,7 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
     toast(`Đã cập nhật nhân viên phụ trách sang ${newEmployeeName}.`, "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không cập nhật được nhân viên phụ trách.", "quyền Đổi nhân viên phụ trách"), "error");
+    toast(error.message || "Không cập nhật được nhân viên phụ trách.", "error");
   } finally {
     setButtonLoading(els.confirmReassignEmployeeBtn, false);
   }
@@ -9498,113 +9270,26 @@ function renderExtendReasonOptions(selectedValue = "") {
   renderCustomExtendReasonList();
 }
 
-function getExtendReasonCollapsedHeight() {
-  if (!els.extendReasonList) return 0;
-
-  const firstItem = els.extendReasonList.querySelector(".reason-item, .reason-empty-state");
-  if (!firstItem) return 0;
-
-  return Math.ceil(firstItem.getBoundingClientRect().height || firstItem.scrollHeight || 0);
-}
-
-function syncExtendReasonListDisclosure({ animate = true } = {}) {
-  if (!els.extendReasonList) return;
-
-  const reasonItems = Array.from(els.extendReasonList.querySelectorAll(".reason-item"));
-  const reasonCount = reasonItems.length;
-  const canExpand = reasonCount > 1;
-
-  if (!canExpand) {
-    state.extendReasonListExpanded = false;
-  }
-
-  const expanded = canExpand && state.extendReasonListExpanded;
-
-  reasonItems.forEach((item, index) => {
-    const hiddenByCollapse = !expanded && index > 0;
-    item.setAttribute("aria-hidden", String(hiddenByCollapse));
-
-    const deleteButton = item.querySelector("[data-delete-extend-reason-id]");
-    if (deleteButton instanceof HTMLElement) {
-      deleteButton.tabIndex = hiddenByCollapse ? -1 : 0;
-    }
-  });
-
-  if (els.extendReasonListCount) {
-    els.extendReasonListCount.textContent = reasonCount
-      ? `${reasonCount} mục đích`
-      : "Chưa có mục đích";
-  }
-
-  if (els.extendReasonListToggle) {
-    els.extendReasonListToggle.classList.toggle("hidden", !canExpand);
-    els.extendReasonListToggle.setAttribute("aria-expanded", String(expanded));
-    els.extendReasonListToggle.disabled = !canExpand;
-  }
-
-  if (els.extendReasonListToggleLabel) {
-    els.extendReasonListToggleLabel.textContent = expanded ? "Thu gọn" : "Chi tiết";
-  }
-
-  els.extendReasonList.classList.toggle("is-expanded", expanded);
-  els.extendReasonList.classList.toggle("is-collapsed", !expanded);
-
-  if (!animate) {
-    els.extendReasonList.classList.add("no-transition");
-  }
-
-  const currentHeight = Math.ceil(els.extendReasonList.getBoundingClientRect().height || 0);
-  const collapsedHeight = getExtendReasonCollapsedHeight();
-  const expandedHeight = Math.ceil(els.extendReasonList.scrollHeight || collapsedHeight);
-  const targetHeight = expanded ? expandedHeight : collapsedHeight;
-
-  if (animate && currentHeight > 0) {
-    els.extendReasonList.style.maxHeight = `${currentHeight}px`;
-    // Ép trình duyệt ghi nhận chiều cao hiện tại trước khi chạy hiệu ứng trượt.
-    void els.extendReasonList.offsetHeight;
-  }
-
-  els.extendReasonList.style.maxHeight = `${Math.max(0, targetHeight)}px`;
-
-  if (!animate) {
-    requestAnimationFrame(() => {
-      els.extendReasonList?.classList.remove("no-transition");
-    });
-  }
-}
-
 function renderCustomExtendReasonList() {
   if (!els.extendReasonList) return;
 
   const customReasons = state.timeExtensionReasons || [];
 
   if (!customReasons.length) {
-    els.extendReasonList.innerHTML = `
-      <div class="reason-empty-state">
-        Chưa có mục đích nào do Admin tự tạo.
-      </div>
-    `;
-    state.extendReasonListExpanded = false;
-    requestAnimationFrame(() => syncExtendReasonListDisclosure({ animate: false }));
+    els.extendReasonList.innerHTML = `<p class="small-note">Chưa có mục đích nào do Admin tự tạo.</p>`;
     return;
   }
-
-  const canManageReasons = isAdminProfile();
 
   els.extendReasonList.innerHTML = customReasons
     .map((reason) => `
       <div class="reason-item">
-        <span class="reason-item-name">${escapeHtml(reason.name || "Không tên")}</span>
-        ${canManageReasons ? `
-          <button class="btn danger tiny" type="button" data-delete-extend-reason-id="${escapeHtml(reason.id)}" data-delete-extend-reason-name="${escapeHtml(reason.name || "")}">
-            Xoá
-          </button>
-        ` : ""}
+        <span>${escapeHtml(reason.name || "Không tên")}</span>
+        <button class="btn danger tiny" type="button" data-delete-extend-reason-id="${escapeHtml(reason.id)}" data-delete-extend-reason-name="${escapeHtml(reason.name || "")}">
+          Xoá
+        </button>
       </div>
     `)
     .join("");
-
-  requestAnimationFrame(() => syncExtendReasonListDisclosure({ animate: false }));
 }
 
 function openExtendTimeModal(taskId) {
@@ -9622,46 +9307,16 @@ function openExtendTimeModal(taskId) {
     return;
   }
 
-  const isSupervisor = isSupervisorProfile();
-  const maximum = getSupervisorExtendTimeMaxMinutes();
-  const used = isSupervisor ? getSupervisorTaskExtendedMinutes(task) : 0;
-  const remaining = isSupervisor ? Math.max(0, maximum - used) : 1440;
-
-  if (isSupervisor && remaining <= 0) {
-    toast(`Bạn đã dùng hết giới hạn ${maximum} phút thêm giờ cho công việc này.`, "error");
-    return;
-  }
-
   state.extendTimeTaskId = taskId;
-  state.extendReasonListExpanded = false;
   els.extendTimeTaskTitle.textContent = task.title || "Công việc";
-  els.extendMinutes.min = "1";
-  els.extendMinutes.max = String(remaining);
-  els.extendMinutes.value = String(Math.min(15, remaining));
+  els.extendMinutes.value = 15;
   els.newExtendReason.value = "";
-
-  if (els.extendTimePermissionHint) {
-    els.extendTimePermissionHint.textContent = isSupervisor
-      ? `Admin cho phép tối đa ${maximum} phút cho mỗi công việc. Bạn đã dùng ${used} phút, còn được thêm ${remaining} phút.`
-      : "Admin có thể nhập số phút cần thêm cho công việc.";
-    els.extendTimePermissionHint.classList.toggle("is-supervisor-limit", isSupervisor);
-  }
-
-  const canManageReasons = isAdminProfile();
-  els.newExtendReason?.closest(".inline-add-box")?.classList.toggle("hidden", !canManageReasons);
-  els.extendReasonList?.closest(".reason-tools")?.classList.toggle("is-read-only", !canManageReasons);
-
   renderExtendReasonOptions();
   els.extendTimeModal.classList.remove("hidden");
-
-  requestAnimationFrame(() => {
-    syncExtendReasonListDisclosure({ animate: false });
-  });
 }
 
 function closeExtendTimeModal() {
   state.extendTimeTaskId = null;
-  state.extendReasonListExpanded = false;
   els.extendTimeModal?.classList.add("hidden");
 }
 
@@ -9669,24 +9324,8 @@ $$("[data-close-extend-modal]").forEach((button) => {
   button.addEventListener("click", closeExtendTimeModal);
 });
 
-els.extendReasonListToggle?.addEventListener("click", () => {
-  const reasonCount = els.extendReasonList?.querySelectorAll(".reason-item").length || 0;
-  if (reasonCount <= 1) return;
-
-  state.extendReasonListExpanded = !state.extendReasonListExpanded;
-  syncExtendReasonListDisclosure({ animate: true });
-});
-
-window.addEventListener("resize", () => {
-  if (els.extendTimeModal?.classList.contains("hidden")) return;
-  syncExtendReasonListDisclosure({ animate: false });
-});
-
 els.addExtendReasonBtn?.addEventListener("click", async () => {
-  if (!isAdminProfile()) {
-    toast("Chỉ Admin được thêm mục đích thêm giờ. Giám sát chỉ được chọn các mục đích Admin đã tạo.", "error");
-    return;
-  }
+  if (!requirePermission("extendTaskTime", "Tài khoản của bạn chưa được cấp quyền quản lý mục đích thêm giờ.")) return;
 
   const name = els.newExtendReason.value.trim();
 
@@ -9732,7 +9371,7 @@ els.addExtendReasonBtn?.addEventListener("click", async () => {
 els.extendReasonList?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-delete-extend-reason-id]");
 
-  if (!button || !isAdminProfile()) return;
+  if (!button || !hasPermission("extendTaskTime")) return;
 
   const reasonId = button.dataset.deleteExtendReasonId;
   const reasonName = button.dataset.deleteExtendReasonName || "mục đích này";
@@ -9764,7 +9403,7 @@ els.extendReasonList?.addEventListener("click", async (event) => {
 async function ensureCustomTimeExtensionReason(name) {
   const cleanName = String(name || "").trim();
 
-  if (!cleanName || !isAdminProfile()) return;
+  if (!cleanName || !hasPermission("extendTaskTime")) return;
 
   const existed = (state.timeExtensionReasons || []).some((reason) =>
     String(reason.name || "").trim().toLowerCase() === cleanName.toLowerCase()
@@ -9805,16 +9444,6 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     return;
   }
 
-  const currentTask = state.tasks.find((item) => item.id === taskId);
-  if (isSupervisorProfile()) {
-    const maximum = getSupervisorExtendTimeMaxMinutes();
-    const remaining = getRemainingSupervisorExtendMinutes(currentTask);
-    if (minutes > remaining) {
-      toast(`Bạn chỉ còn được thêm tối đa ${remaining} phút cho công việc này (giới hạn Admin cấp: ${maximum} phút).`, "error");
-      return;
-    }
-  }
-
   if (!reason) {
     toast("Vui lòng chọn hoặc nhập mục đích thêm giờ. Nếu chưa có mục đích, Admin có thể tự tạo trong ô bên trên.", "error");
     return;
@@ -9843,17 +9472,10 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
 
       const oldDeadlineMinutes = Number(task.deadlineMinutes || 0);
       const oldDeadlineDate = timestampToDate(task.deadlineAt) || new Date();
-      const oldDeadlineMillis = typeof task.deadlineAt?.toMillis === "function"
-        ? task.deadlineAt.toMillis()
-        : oldDeadlineDate.getTime();
       const newDeadlineMinutes = oldDeadlineMinutes + minutes;
-      const newDeadlineDate = new Date(oldDeadlineMillis + minutes * 60 * 1000);
+      const newDeadlineDate = new Date(oldDeadlineDate.getTime() + minutes * 60 * 1000);
       const now = new Date();
       const oldExtensions = Array.isArray(task.timeExtensions) ? task.timeExtensions : [];
-      const oldExtensionCount = Number.isInteger(Number(task.timeExtensionCount))
-        ? Number(task.timeExtensionCount)
-        : oldExtensions.length;
-      const oldExtensionTotalMinutes = Number(task.timeExtensionTotalMinutes || 0);
       const extensionRecord = {
         minutes,
         reason,
@@ -9862,45 +9484,20 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
         addedAt: Timestamp.fromDate(now)
       };
       const newStatus = task.status === "overdue" && newDeadlineDate.getTime() > now.getTime()
-        ? (task.isHotel ? "hotel" : task.isLunchBreak ? "lunch_break" : "doing")
+        ? "doing"
         : task.status;
 
-      const updateData = {
+      transaction.update(taskRef, {
         deadlineMinutes: newDeadlineMinutes,
         deadlineAt: Timestamp.fromDate(newDeadlineDate),
         status: newStatus,
-        timeExtensionCount: oldExtensionCount + 1,
-        timeExtensionTotalMinutes: oldExtensionTotalMinutes + minutes,
+        timeExtensionCount: oldExtensions.length + 1,
+        timeExtensionTotalMinutes: Number(task.timeExtensionTotalMinutes || 0) + minutes,
         timeExtensions: [...oldExtensions, extensionRecord],
         lastTimeExtendedAt: Timestamp.fromDate(now),
         lastTimeExtendedByUid: state.user.uid,
         lastTimeExtendedByName: state.profile.name || state.user.email || "Admin"
-      };
-
-      if (isSupervisorProfile()) {
-        const maximum = getSupervisorExtendTimeMaxMinutes();
-        const alreadyUsed = getSupervisorTaskExtendedMinutes(task, state.user.uid);
-        const nextUsed = alreadyUsed + minutes;
-
-        if (nextUsed > maximum) {
-          throw new Error(`Giới hạn thêm giờ của bạn cho công việc này là ${maximum} phút.`);
-        }
-
-        // Ghi lại toàn bộ map theo dạng chuẩn. Cách này tương thích cả task cũ
-        // chưa có field, field từng bị lưu null/sai kiểu hoặc được khôi phục từ backup.
-        // Các bộ đếm của Giám sát khác vẫn được giữ nguyên.
-        const previousUsageMap = task.timeExtensionMinutesBySupervisor
-          && typeof task.timeExtensionMinutesBySupervisor === "object"
-          && !Array.isArray(task.timeExtensionMinutesBySupervisor)
-          ? task.timeExtensionMinutesBySupervisor
-          : {};
-        updateData.timeExtensionMinutesBySupervisor = {
-          ...previousUsageMap,
-          [state.user.uid]: nextUsed
-        };
-      }
-
-      transaction.update(taskRef, updateData);
+      });
 
       updatedTask = {
         ...task,
@@ -9911,14 +9508,12 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     });
 
     if (updatedTask?.assignedToUid) {
-      const actorName = state.profile?.name || state.user?.email || "Người quản lý";
-      const actorLabel = isAdminProfile() ? "Admin" : `Giám sát ${actorName}`;
       await createNotifications([
         {
           recipientUid: updatedTask.assignedToUid,
           type: "task_time_extended",
           title: "Công việc được thêm giờ",
-          message: `${actorLabel} đã thêm ${minutes} phút cho “${updatedTask.title}”. Mục đích: ${reason}.`,
+          message: `Admin đã thêm ${minutes} phút cho “${updatedTask.title}”. Mục đích: ${reason}.`,
           taskId,
           taskTitle: updatedTask.title
         },
@@ -9937,7 +9532,7 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     toast(`Đã cộng thêm ${minutes} phút vào công việc.`, "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không thêm giờ được cho công việc.", "quyền Cho phép thêm giờ"), "error");
+    toast(error.message || "Không thêm giờ được cho công việc.", "error");
   } finally {
     setButtonLoading(els.confirmExtendTimeBtn, false);
   }
@@ -10039,7 +9634,7 @@ async function approveTask(taskId, button) {
     toast("Đã xác nhận hoàn thành, tính kết quả và gửi thông báo.", "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không xác nhận được công việc.", "quyền Duyệt kết quả công việc"), "error");
+    toast(error.message || "Không xác nhận được công việc.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -10105,7 +9700,7 @@ async function endLunchBreakTask(taskId, button) {
     toast("Đã kết thúc phiếu Nghỉ trưa và chuyển sang trạng thái Đã hoàn thành.", "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không kết thúc được phiếu Nghỉ trưa.", "quyền Duyệt kết quả công việc"), "error");
+    toast(error.message || "Không kết thúc được phiếu Nghỉ trưa.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -10174,7 +9769,7 @@ async function requestRedo(taskId, button) {
     toast("Đã yêu cầu nhân viên làm lại.", "success");
   } catch (error) {
     console.error(error);
-    toast(getPermissionActionErrorMessage(error, "Không cập nhật được yêu cầu làm lại.", "quyền Duyệt kết quả công việc"), "error");
+    toast("Không cập nhật được yêu cầu làm lại.", "error");
   } finally {
     setButtonLoading(button, false);
   }

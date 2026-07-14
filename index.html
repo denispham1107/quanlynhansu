@@ -2528,19 +2528,14 @@
 
     .supervisor-permission-option {
       display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: flex-start;
       gap: 10px;
       min-height: 68px;
       padding: 12px;
       border: 1px solid #d8e4f8;
       border-radius: 14px;
       background: #fff;
-    }
-
-    .supervisor-permission-main {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      align-items: flex-start;
-      gap: 10px;
       cursor: pointer;
     }
 
@@ -2554,181 +2549,6 @@
     .supervisor-permission-copy strong { color: #13233f; font-size: 0.94rem; }
     .supervisor-permission-copy span { color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
     .supervisor-permission-primary-tag { color: #1d4ed8; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
-
-    .supervisor-permission-limit {
-      margin-left: 29px;
-      padding: 10px 12px;
-      border: 1px solid #bfdbfe;
-      border-radius: 12px;
-      background: #f8fbff;
-      transition: opacity 0.2s ease, filter 0.2s ease;
-    }
-
-    .supervisor-permission-limit.is-disabled { opacity: 0.55; filter: grayscale(0.25); }
-    .supervisor-permission-limit label { display: grid; grid-template-columns: minmax(0, 1fr) 130px; align-items: center; gap: 10px; font-weight: 800; color: #1e3a8a; }
-    .supervisor-permission-limit select { min-width: 0; width: 100%; min-height: 40px; padding: 7px 10px; border-radius: 10px; background: #fff; }
-    .supervisor-permission-limit small { display: block; margin-top: 7px; color: var(--muted); line-height: 1.4; }
-
-    .extend-time-permission-hint {
-      margin: -4px 0 2px;
-      padding: 9px 11px;
-      border-radius: 11px;
-      background: #eff6ff;
-      color: #1e40af;
-      font-size: 0.82rem;
-      line-height: 1.45;
-      font-weight: 700;
-    }
-    .extend-time-permission-hint.is-supervisor-limit { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
-
-
-    /* Danh sách mục đích thêm giờ: mặc định chỉ hiện một mục. */
-    #extendTimeModal .reason-tools {
-      display: grid;
-      gap: 10px;
-      padding: 12px;
-      border: 1px solid #dbe7f7;
-      border-radius: 14px;
-      background: #f8fbff;
-    }
-
-    #extendTimeModal .reason-tools-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    #extendTimeModal .reason-tools-heading {
-      min-width: 0;
-      display: grid;
-      gap: 2px;
-    }
-
-    #extendTimeModal .reason-tools-heading strong {
-      color: #14213d;
-      font-size: 0.94rem;
-    }
-
-    #extendTimeModal .reason-tools-heading span {
-      color: var(--muted);
-      font-size: 0.78rem;
-      font-weight: 700;
-    }
-
-    #extendTimeModal .reason-list-toggle {
-      flex: 0 0 auto;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 7px;
-      min-height: 38px;
-      padding: 8px 12px;
-      border: 1px solid #bfdbfe;
-      border-radius: 999px;
-      background: #fff;
-      color: #1d4ed8;
-      font: inherit;
-      font-size: 0.82rem;
-      font-weight: 800;
-      cursor: pointer;
-      transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-    }
-
-    #extendTimeModal .reason-list-toggle:hover {
-      background: #eff6ff;
-      border-color: #93c5fd;
-    }
-
-    #extendTimeModal .reason-list-toggle:active {
-      transform: translateY(1px);
-    }
-
-    #extendTimeModal .reason-list-toggle-chevron {
-      display: inline-flex;
-      font-size: 1.05rem;
-      line-height: 1;
-      transition: transform 0.28s ease;
-    }
-
-    #extendTimeModal .reason-list-toggle[aria-expanded="true"] .reason-list-toggle-chevron {
-      transform: rotate(180deg);
-    }
-
-    #extendTimeModal .reason-tools > .small-note {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.45;
-    }
-
-    #extendTimeModal .reason-list {
-      display: grid;
-      gap: 9px;
-      overflow: hidden;
-      max-height: 0;
-      opacity: 1;
-      transition: max-height 0.32s cubic-bezier(0.22, 1, 0.36, 1);
-      will-change: max-height;
-    }
-
-    #extendTimeModal .reason-list.no-transition {
-      transition: none !important;
-    }
-
-    #extendTimeModal .reason-item,
-    #extendTimeModal .reason-empty-state {
-      box-sizing: border-box;
-      min-width: 0;
-      min-height: 58px;
-      padding: 10px 11px;
-      border: 1px solid #d7e4f5;
-      border-radius: 12px;
-      background: #fff;
-    }
-
-    #extendTimeModal .reason-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    #extendTimeModal .reason-item-name {
-      min-width: 0;
-      color: #14213d;
-      font-weight: 700;
-      overflow-wrap: anywhere;
-    }
-
-    #extendTimeModal .reason-item .btn.tiny {
-      flex: 0 0 auto;
-      min-height: 38px;
-      padding: 7px 13px;
-      border-radius: 10px;
-    }
-
-    #extendTimeModal .reason-empty-state {
-      display: flex;
-      align-items: center;
-      color: var(--muted);
-      font-size: 0.88rem;
-      line-height: 1.4;
-    }
-
-    @media (max-width: 640px) {
-      #extendTimeModal .reason-tools {
-        padding: 10px;
-      }
-
-      #extendTimeModal .reason-tools-header {
-        align-items: flex-start;
-      }
-
-      #extendTimeModal .reason-list-toggle {
-        min-height: 40px;
-        padding-inline: 11px;
-      }
-    }
 
     .supervisor-permission-modal-card { width: min(920px, calc(100vw - 28px)); max-height: min(88vh, 860px); overflow: auto; }
 
@@ -2759,8 +2579,6 @@
       .supervisor-permission-quick-actions { justify-content: flex-start; }
       .staff-account-actions { flex-direction: column; align-items: stretch; }
       .staff-permission-btn, .employee-delete-btn { min-width: 44px; }
-      .supervisor-permission-limit { margin-left: 0; }
-      .supervisor-permission-limit label { grid-template-columns: 1fr; }
     }
 
 
@@ -7694,7 +7512,6 @@
           Số phút cần thêm
           <input id="extendMinutes" type="number" min="1" max="1440" step="1" value="15" required />
         </label>
-        <p id="extendTimePermissionHint" class="extend-time-permission-hint">Admin có thể nhập số phút cần thêm cho công việc.</p>
 
         <label>
           Mục đích thêm giờ
@@ -7712,24 +7529,8 @@
         </div>
 
         <div class="reason-tools">
-          <div class="reason-tools-header">
-            <div class="reason-tools-heading">
-              <strong>Danh sách mục đích đã tạo</strong>
-              <span id="extendReasonListCount">Chưa có mục đích</span>
-            </div>
-            <button
-              id="extendReasonListToggle"
-              class="reason-list-toggle hidden"
-              type="button"
-              aria-expanded="false"
-              aria-controls="extendReasonList"
-            >
-              <span id="extendReasonListToggleLabel">Chi tiết</span>
-              <span class="reason-list-toggle-chevron" aria-hidden="true">⌄</span>
-            </button>
-          </div>
-          <p class="small-note">Danh sách mục đích thêm giờ chỉ gồm các mục do Admin tự tạo. Mặc định chỉ hiển thị một mục; bấm “Chi tiết” để xem đầy đủ.</p>
-          <div id="extendReasonList" class="reason-list is-collapsed" aria-live="polite"></div>
+          <p class="small-note">Danh sách mục đích thêm giờ chỉ gồm các mục do Admin tự tạo. Hệ thống không tự tạo sẵn mục đích mặc định.</p>
+          <div id="extendReasonList" class="reason-list" aria-live="polite"></div>
         </div>
 
         <div class="modal-footer-actions">
