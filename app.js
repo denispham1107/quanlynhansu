@@ -37,6 +37,10 @@ import {
   getBlob,
   getBytes
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
+import {
+  getFunctions,
+  httpsCallable
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js";
 
 // =========================
 // Firebase init
@@ -45,6 +49,16 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
+const functions = getFunctions(app, "asia-southeast1");
+
+const verifyWorkOrderSettingsPasswordCallable = httpsCallable(
+  functions,
+  "verifyWorkOrderSettingsPassword"
+);
+const saveWorkOrderControlSettingsCallable = httpsCallable(
+  functions,
+  "saveWorkOrderControlSettings"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -131,7 +145,9 @@ const state = {
     maxExtendMinutes: null,
     preventWorkOrderDeletion: false
   },
-  workOrderControlSettingsReady: false
+  workOrderControlSettingsReady: false,
+  workOrderSettingsAuthorizationToken: "",
+  workOrderSettingsAuthorizationExpiresAt: 0
 };
 
 
@@ -312,6 +328,12 @@ const els = {
   saveDraftBtn: $("#saveDraftBtn"),
   deleteAllWorkOrdersBtn: $("#deleteAllWorkOrdersBtn"),
   openWorkOrderSettingsBtn: $("#openWorkOrderSettingsBtn"),
+  workOrderSettingsPasswordModal: $("#workOrderSettingsPasswordModal"),
+  workOrderSettingsPasswordForm: $("#workOrderSettingsPasswordForm"),
+  workOrderSettingsPasswordInput: $("#workOrderSettingsPasswordInput"),
+  workOrderSettingsPasswordError: $("#workOrderSettingsPasswordError"),
+  verifyWorkOrderSettingsPasswordBtn: $("#verifyWorkOrderSettingsPasswordBtn"),
+  toggleWorkOrderSettingsPasswordBtn: $("#toggleWorkOrderSettingsPasswordBtn"),
   workOrderSettingsModal: $("#workOrderSettingsModal"),
   workOrderSettingsForm: $("#workOrderSettingsForm"),
   enableMaxExtendMinutes: $("#enableMaxExtendMinutes"),
@@ -1796,6 +1818,8 @@ onAuthStateChanged(auth, async (user) => {
   state.notificationsReady = false;
   state.workOrderControlSettings = normalizeWorkOrderControlSettings({});
   state.workOrderControlSettingsReady = false;
+  state.workOrderSettingsAuthorizationToken = "";
+  state.workOrderSettingsAuthorizationExpiresAt = 0;
 
   if (!user) {
     showLogin();
@@ -5151,8 +5175,88 @@ function setEmployeeStatusDetailSheetOpen(open, type = "free") {
 }
 
 // =========================
-// Popup Cài đặt Phiếu công việc
+// Xác thực & Popup Cài đặt Phiếu công việc
 // =========================
+function clearWorkOrderSettingsAuthorization() {
+  state.workOrderSettingsAuthorizationToken = "";
+  state.workOrderSettingsAuthorizationExpiresAt = 0;
+}
+
+function hasValidWorkOrderSettingsAuthorization() {
+  return Boolean(
+    state.workOrderSettingsAuthorizationToken
+    && Number(state.workOrderSettingsAuthorizationExpiresAt) > Date.now() + 3000
+  );
+}
+
+function setWorkOrderSettingsPasswordError(message = "") {
+  if (!els.workOrderSettingsPasswordError) return;
+  els.workOrderSettingsPasswordError.textContent = message;
+  els.workOrderSettingsPasswordError.classList.toggle("hidden", !message);
+}
+
+function openWorkOrderSettingsPasswordModal() {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được thay đổi Cài đặt Phiếu công việc.", "error");
+    return;
+  }
+
+  clearWorkOrderSettingsAuthorization();
+  setWorkOrderSettingsPasswordError("");
+
+  if (els.workOrderSettingsPasswordInput) {
+    els.workOrderSettingsPasswordInput.value = "";
+    els.workOrderSettingsPasswordInput.type = "password";
+  }
+  if (els.toggleWorkOrderSettingsPasswordBtn) {
+    els.toggleWorkOrderSettingsPasswordBtn.textContent = "Hiện";
+    els.toggleWorkOrderSettingsPasswordBtn.setAttribute("aria-pressed", "false");
+  }
+
+  els.workOrderSettingsPasswordModal?.classList.remove("hidden");
+  els.workOrderSettingsPasswordModal?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("work-order-settings-password-open");
+  setMobileTaskPanelMenuOpen(false);
+
+  requestAnimationFrame(() => {
+    els.workOrderSettingsPasswordInput?.focus({ preventScroll: true });
+  });
+}
+
+function closeWorkOrderSettingsPasswordModal({ preserveAuthorization = false } = {}) {
+  els.workOrderSettingsPasswordModal?.classList.add("hidden");
+  els.workOrderSettingsPasswordModal?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("work-order-settings-password-open");
+  setWorkOrderSettingsPasswordError("");
+
+  if (els.workOrderSettingsPasswordInput) {
+    els.workOrderSettingsPasswordInput.value = "";
+    els.workOrderSettingsPasswordInput.type = "password";
+  }
+
+  if (!preserveAuthorization) clearWorkOrderSettingsAuthorization();
+}
+
+function getSettingsPasswordErrorMessage(error) {
+  const code = String(error?.code || "");
+  if (code.includes("resource-exhausted")) {
+    return "Bạn đã nhập sai quá nhiều lần. Vui lòng chờ vài phút rồi thử lại.";
+  }
+  if (code.includes("unauthenticated")) {
+    return "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+  }
+  if (code.includes("permission-denied")) {
+    return "Mật khẩu không đúng hoặc tài khoản không có quyền Admin.";
+  }
+  if (code.includes("invalid-argument")) {
+    return "Vui lòng nhập mật khẩu Cài đặt.";
+  }
+  if (code.includes("unavailable") || code.includes("deadline-exceeded")) {
+    return "Không kết nối được máy chủ xác thực. Vui lòng kiểm tra mạng và thử lại.";
+  }
+  return "Không xác thực được mật khẩu Cài đặt. Vui lòng thử lại.";
+}
+
 function syncWorkOrderSettingsLimitControls() {
   const enabled = els.enableMaxExtendMinutes?.checked === true;
   els.maxExtendMinutesOptions?.classList.toggle("is-disabled", !enabled);
@@ -5164,6 +5268,11 @@ function syncWorkOrderSettingsLimitControls() {
 function openWorkOrderSettingsModal() {
   if (!isAdminProfile()) {
     toast("Chỉ Admin được thay đổi Cài đặt Phiếu công việc.", "error");
+    return;
+  }
+
+  if (!hasValidWorkOrderSettingsAuthorization()) {
+    openWorkOrderSettingsPasswordModal();
     return;
   }
 
@@ -5181,19 +5290,96 @@ function openWorkOrderSettingsModal() {
 
   syncWorkOrderSettingsLimitControls();
   els.workOrderSettingsModal?.classList.remove("hidden");
+  els.workOrderSettingsModal?.setAttribute("aria-hidden", "false");
   document.body.classList.add("work-order-settings-open");
   setMobileTaskPanelMenuOpen(false);
 }
 
-function closeWorkOrderSettingsModal() {
+function closeWorkOrderSettingsModal({ keepAuthorization = false } = {}) {
   els.workOrderSettingsModal?.classList.add("hidden");
+  els.workOrderSettingsModal?.setAttribute("aria-hidden", "true");
   document.body.classList.remove("work-order-settings-open");
+  if (!keepAuthorization) clearWorkOrderSettingsAuthorization();
 }
 
+els.toggleWorkOrderSettingsPasswordBtn?.addEventListener("click", () => {
+  const input = els.workOrderSettingsPasswordInput;
+  if (!input) return;
+  const shouldShow = input.type === "password";
+  input.type = shouldShow ? "text" : "password";
+  els.toggleWorkOrderSettingsPasswordBtn.textContent = shouldShow ? "Ẩn" : "Hiện";
+  els.toggleWorkOrderSettingsPasswordBtn.setAttribute("aria-pressed", String(shouldShow));
+  input.focus({ preventScroll: true });
+});
+
+els.workOrderSettingsPasswordForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!isAdminProfile()) {
+    setWorkOrderSettingsPasswordError("Chỉ Admin được mở Cài đặt Phiếu công việc.");
+    return;
+  }
+
+  const password = String(els.workOrderSettingsPasswordInput?.value || "");
+  if (!password) {
+    setWorkOrderSettingsPasswordError("Vui lòng nhập mật khẩu Cài đặt.");
+    els.workOrderSettingsPasswordInput?.focus({ preventScroll: true });
+    return;
+  }
+
+  setWorkOrderSettingsPasswordError("");
+  setButtonLoading(els.verifyWorkOrderSettingsPasswordBtn, true, "Đang xác thực...");
+
+  try {
+    const result = await verifyWorkOrderSettingsPasswordCallable({ password });
+    const data = result?.data || {};
+
+    if (!data.authorized || !data.authorizationToken) {
+      throw new Error("settings-authorization-failed");
+    }
+
+    state.workOrderSettingsAuthorizationToken = String(data.authorizationToken);
+    state.workOrderSettingsAuthorizationExpiresAt = Number(data.expiresAt || 0);
+
+    closeWorkOrderSettingsPasswordModal({ preserveAuthorization: true });
+    openWorkOrderSettingsModal();
+  } catch (error) {
+    console.error("Không xác thực được mật khẩu Cài đặt:", error);
+    clearWorkOrderSettingsAuthorization();
+    setWorkOrderSettingsPasswordError(getSettingsPasswordErrorMessage(error));
+    if (els.workOrderSettingsPasswordInput) {
+      els.workOrderSettingsPasswordInput.value = "";
+      els.workOrderSettingsPasswordInput.focus({ preventScroll: true });
+    }
+  } finally {
+    setButtonLoading(els.verifyWorkOrderSettingsPasswordBtn, false);
+  }
+});
+
 els.enableMaxExtendMinutes?.addEventListener("change", syncWorkOrderSettingsLimitControls);
-els.openWorkOrderSettingsBtn?.addEventListener("click", openWorkOrderSettingsModal);
+els.openWorkOrderSettingsBtn?.addEventListener("click", openWorkOrderSettingsPasswordModal);
+
+document.querySelectorAll("[data-close-work-order-settings-password]").forEach((button) => {
+  button.addEventListener("click", () => closeWorkOrderSettingsPasswordModal());
+});
+
 document.querySelectorAll("[data-close-work-order-settings]").forEach((button) => {
-  button.addEventListener("click", closeWorkOrderSettingsModal);
+  button.addEventListener("click", () => closeWorkOrderSettingsModal());
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+
+  if (!els.workOrderSettingsPasswordModal?.classList.contains("hidden")) {
+    event.preventDefault();
+    closeWorkOrderSettingsPasswordModal();
+    return;
+  }
+
+  if (!els.workOrderSettingsModal?.classList.contains("hidden")) {
+    event.preventDefault();
+    closeWorkOrderSettingsModal();
+  }
 });
 
 els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
@@ -5201,6 +5387,13 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
 
   if (!isAdminProfile()) {
     toast("Chỉ Admin được lưu Cài đặt Phiếu công việc.", "error");
+    return;
+  }
+
+  if (!hasValidWorkOrderSettingsAuthorization()) {
+    closeWorkOrderSettingsModal();
+    toast("Phiên xác thực Cài đặt đã hết hạn. Vui lòng nhập lại mật khẩu.", "error");
+    openWorkOrderSettingsPasswordModal();
     return;
   }
 
@@ -5217,23 +5410,28 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
   setButtonLoading(els.saveWorkOrderSettingsBtn, true, "Đang lưu...");
 
   try {
-    await setDoc(
-      doc(db, "appSettings", WORK_ORDER_CONTROL_SETTINGS_DOC_ID),
-      {
-        maxExtendMinutes: limitEnabled ? selectedLimit : null,
-        preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true,
-        updatedAt: serverTimestamp(),
-        updatedByUid: state.user?.uid || "",
-        updatedByName: state.profile?.name || state.user?.email || "Admin"
-      },
-      { merge: true }
-    );
+    const result = await saveWorkOrderControlSettingsCallable({
+      authorizationToken: state.workOrderSettingsAuthorizationToken,
+      maxExtendMinutes: limitEnabled ? selectedLimit : null,
+      preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true
+    });
+
+    const savedSettings = normalizeWorkOrderControlSettings(result?.data?.settings || {});
+    state.workOrderControlSettings = savedSettings;
+    state.workOrderControlSettingsReady = true;
 
     closeWorkOrderSettingsModal();
     toast("Đã lưu Cài đặt Phiếu công việc.", "success");
   } catch (error) {
-    console.error(error);
-    toast("Không lưu được Cài đặt. Hãy kiểm tra Firestore Rules.", "error");
+    console.error("Không lưu được Cài đặt:", error);
+    const code = String(error?.code || "");
+    if (code.includes("unauthenticated") || code.includes("permission-denied")) {
+      closeWorkOrderSettingsModal();
+      toast("Phiên xác thực Cài đặt không còn hợp lệ. Vui lòng nhập lại mật khẩu.", "error");
+      openWorkOrderSettingsPasswordModal();
+    } else {
+      toast("Không lưu được Cài đặt. Vui lòng kiểm tra kết nối và Cloud Functions.", "error");
+    }
   } finally {
     setButtonLoading(els.saveWorkOrderSettingsBtn, false);
   }

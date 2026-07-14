@@ -6929,6 +6929,181 @@
     }
 
 
+    /* =========================
+       Mật khẩu bảo vệ Cài đặt Phiếu công việc
+       ========================= */
+    body.work-order-settings-password-open,
+    body.work-order-settings-open {
+      overflow: hidden;
+    }
+
+    .work-order-settings-password-modal:not(.hidden) {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
+      z-index: 1450;
+    }
+
+    .work-order-settings-password-card {
+      position: relative;
+      z-index: 2;
+      width: min(100%, 480px);
+      max-height: calc(100dvh - 32px);
+      overflow: auto;
+      border: 1px solid #bbf7d0;
+      border-radius: 24px;
+      background: #ffffff;
+      box-shadow: 0 28px 70px rgba(15, 23, 42, 0.28);
+    }
+
+    .work-order-settings-password-header {
+      align-items: flex-start;
+      gap: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .settings-password-heading {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .settings-password-lock {
+      display: grid;
+      flex: 0 0 auto;
+      place-items: center;
+      width: 46px;
+      height: 46px;
+      border-radius: 15px;
+      background: #dcfce7;
+      color: #15803d;
+      font-size: 23px;
+    }
+
+    .work-order-settings-password-header h3 {
+      margin: 2px 0 4px;
+      font-size: clamp(21px, 3vw, 28px);
+      line-height: 1.15;
+    }
+
+    .work-order-settings-password-form {
+      gap: 14px;
+      padding-top: 18px;
+    }
+
+    .settings-password-field {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      font-weight: 850;
+      color: #0f172a;
+    }
+
+    .settings-password-input-wrap {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      min-width: 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 15px;
+      background: #ffffff;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease;
+    }
+
+    .settings-password-input-wrap:focus-within {
+      border-color: #16a34a;
+      box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.12);
+    }
+
+    .settings-password-input-wrap input {
+      min-width: 0;
+      width: 100%;
+      height: 50px;
+      padding: 0 14px;
+      border: 0 !important;
+      outline: 0;
+      background: transparent;
+      box-shadow: none !important;
+      font-size: 16px;
+    }
+
+    .settings-password-toggle {
+      min-width: 62px;
+      height: 38px;
+      margin-right: 6px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 11px;
+      background: #f1f5f9;
+      color: #166534;
+      font-weight: 850;
+      cursor: pointer;
+    }
+
+    .settings-password-error {
+      margin: 0;
+      padding: 10px 12px;
+      border: 1px solid #fecaca;
+      border-radius: 12px;
+      background: #fef2f2;
+      color: #b91c1c;
+      font-size: 13px;
+      font-weight: 750;
+      line-height: 1.45;
+    }
+
+    .settings-password-security-note {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      margin: 0;
+      padding: 11px 12px;
+      border: 1px solid #dbeafe;
+      border-radius: 12px;
+      background: #eff6ff;
+      color: #475569;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .settings-password-actions {
+      margin-top: 2px;
+      padding-top: 14px;
+      border-top: 1px solid #e2e8f0;
+    }
+
+    .settings-password-verify-btn {
+      background: #16a34a !important;
+      box-shadow: 0 10px 24px rgba(22, 163, 74, 0.22);
+    }
+
+    @media (max-width: 520px) {
+      .work-order-settings-password-modal:not(.hidden) {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+
+      .work-order-settings-password-card {
+        padding: 16px !important;
+        border-radius: 21px;
+      }
+
+      .settings-password-heading {
+        gap: 10px;
+      }
+
+      .settings-password-lock {
+        width: 42px;
+        height: 42px;
+      }
+
+      .settings-password-actions {
+        grid-template-columns: 0.8fr 1.2fr;
+      }
+    }
+
     /* =========================================================
        Cài đặt chung cho Phiếu công việc
        ========================================================= */
@@ -7926,6 +8101,56 @@
     </div>
   </div>
 
+
+  <!-- WORK ORDER SETTINGS PASSWORD MODAL -->
+  <div id="workOrderSettingsPasswordModal" class="modal work-order-settings-password-modal hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="workOrderSettingsPasswordTitle">
+    <div class="modal-backdrop" data-close-work-order-settings-password></div>
+    <div class="modal-card small-modal work-order-settings-password-card">
+      <div class="modal-header work-order-settings-password-header">
+        <div class="settings-password-heading">
+          <span class="settings-password-lock" aria-hidden="true">🔒</span>
+          <div>
+            <p class="eyebrow">Xác thực bảo mật</p>
+            <h3 id="workOrderSettingsPasswordTitle">Nhập mật khẩu Cài đặt</h3>
+            <p class="muted">Chỉ Admin biết mật khẩu mới có thể mở khu vực Cài đặt.</p>
+          </div>
+        </div>
+        <button class="icon-btn" type="button" data-close-work-order-settings-password aria-label="Đóng xác thực Cài đặt">×</button>
+      </div>
+
+      <form id="workOrderSettingsPasswordForm" class="form-stack work-order-settings-password-form" autocomplete="off">
+        <label class="settings-password-field" for="workOrderSettingsPasswordInput">
+          <span>Mật khẩu Cài đặt</span>
+          <span class="settings-password-input-wrap">
+            <input
+              id="workOrderSettingsPasswordInput"
+              type="password"
+              inputmode="text"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              maxlength="128"
+              required
+              aria-describedby="workOrderSettingsPasswordError"
+            />
+            <button id="toggleWorkOrderSettingsPasswordBtn" class="settings-password-toggle" type="button" aria-pressed="false">Hiện</button>
+          </span>
+        </label>
+
+        <p id="workOrderSettingsPasswordError" class="settings-password-error hidden" role="alert" aria-live="polite"></p>
+
+        <p class="settings-password-security-note">
+          <span aria-hidden="true">🛡️</span>
+          <span>Mật khẩu được gửi qua kết nối bảo mật để xác thực tại Cloud Functions và không được lưu trong trình duyệt.</span>
+        </p>
+
+        <div class="modal-footer-actions settings-password-actions">
+          <button class="btn ghost" type="button" data-close-work-order-settings-password>Hủy</button>
+          <button id="verifyWorkOrderSettingsPasswordBtn" class="btn primary settings-password-verify-btn" type="submit">Mở Cài đặt</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- WORK ORDER CONTROL SETTINGS MODAL -->
   <div id="workOrderSettingsModal" class="modal work-order-settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="workOrderSettingsModalTitle">
