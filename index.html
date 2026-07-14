@@ -5473,6 +5473,38 @@
       pointer-events: none;
     }
 
+    #taskModal .task-row.is-template-duration-locked .task-row-duration-grid {
+      position: relative;
+    }
+
+    #taskModal .task-row.is-template-duration-locked .task-row-duration-grid::after {
+      content: "🔒 Thời gian cố định theo Danh sách công việc";
+      grid-column: 1 / -1;
+      display: block;
+      margin-top: -2px;
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    #taskModal .duration-input-shell input.is-template-duration-locked,
+    #taskModal .duration-input-shell input[readonly].is-template-duration-locked {
+      cursor: not-allowed !important;
+      color: #1e40af !important;
+      border-color: #bfdbfe !important;
+      background: #eff6ff !important;
+      box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.08) !important;
+      opacity: 1 !important;
+      -webkit-text-fill-color: #1e40af !important;
+    }
+
+    #taskModal .duration-input-shell input.is-template-duration-locked::-webkit-inner-spin-button,
+    #taskModal .duration-input-shell input.is-template-duration-locked::-webkit-outer-spin-button {
+      pointer-events: none;
+      opacity: 0.35;
+    }
+
     #taskModal .task-type-options {
       display: flex !important;
       flex-wrap: wrap !important;

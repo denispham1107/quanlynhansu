@@ -2971,6 +2971,12 @@ function renderWorkTemplateOptions() {
   els.workTemplateOptions.innerHTML = state.workTemplates
     .map((template) => `<option value="${escapeHtml(template.name || "")}"></option>`)
     .join("");
+
+  // Nếu Danh sách công việc thay đổi trong lúc modal đang mở, đồng bộ lại
+  // trạng thái khóa thời gian của các công việc đang nhập.
+  $$("#taskRowsContainer .task-row").forEach((row) => {
+    syncWorkTemplateDurationLock(row, { applyDuration: true });
+  });
 }
 
 function renderWorkTemplateList() {
@@ -3100,6 +3106,61 @@ function applyWorkTemplateToRow(row, template) {
 
   if (hoursInput) hoursInput.value = Math.floor(deadlineMinutes / 60);
   if (minutesInput) minutesInput.value = deadlineMinutes % 60;
+}
+
+function setTaskDurationInputsLocked(row, locked, template = null) {
+  if (!row) return;
+
+  const hoursInput = row.querySelector(".row-hours");
+  const minutesInput = row.querySelector(".row-minutes");
+  const isLocked = Boolean(locked && template);
+  const templateName = isLocked ? String(template.name || "").trim() : "";
+  const deadlineMinutes = isLocked ? Number(template.deadlineMinutes || 0) : 0;
+
+  row.classList.toggle("is-template-duration-locked", isLocked);
+
+  if (isLocked) {
+    row.dataset.workTemplateId = String(template.id || "");
+    row.dataset.workTemplateName = templateName;
+    row.dataset.workTemplateDeadlineMinutes = String(deadlineMinutes);
+  } else {
+    delete row.dataset.workTemplateId;
+    delete row.dataset.workTemplateName;
+    delete row.dataset.workTemplateDeadlineMinutes;
+  }
+
+  [hoursInput, minutesInput].forEach((input) => {
+    if (!input) return;
+
+    input.readOnly = isLocked;
+    input.setAttribute("aria-readonly", String(isLocked));
+    input.classList.toggle("is-template-duration-locked", isLocked);
+
+    if (isLocked) {
+      input.dataset.templateLocked = "true";
+      input.title = `Thời gian cố định theo công việc mẫu “${templateName}”.`;
+    } else {
+      delete input.dataset.templateLocked;
+      input.removeAttribute("title");
+    }
+  });
+}
+
+function syncWorkTemplateDurationLock(row, { applyDuration = true } = {}) {
+  if (!row) return null;
+
+  const title = row.querySelector(".row-title")?.value || "";
+  const template = findWorkTemplateByName(title);
+  const deadlineMinutes = Number(template?.deadlineMinutes || 0);
+
+  if (!template || deadlineMinutes <= 0) {
+    setTaskDurationInputsLocked(row, false);
+    return null;
+  }
+
+  if (applyDuration) applyWorkTemplateToRow(row, template);
+  setTaskDurationInputsLocked(row, true, template);
+  return template;
 }
 
 els.openWorkTemplatePageBtn?.addEventListener("click", openWorkTemplatePage);
@@ -3726,6 +3787,7 @@ function createTaskRowElement(prefill = null) {
   }
 
   syncLunchBreakRowControls(wrapper);
+  syncWorkTemplateDurationLock(wrapper, { applyDuration: true });
   syncTaskRowSummary(wrapper);
   return wrapper;
 }
@@ -4052,7 +4114,10 @@ els.taskRowsContainer.addEventListener("input", (event) => {
   const row = event.target.closest(".task-row");
   if (!row) return;
 
-  if (event.target.matches(".row-title")) syncTaskRowSummary(row);
+  if (event.target.matches(".row-title")) {
+    syncTaskRowSummary(row);
+    syncWorkTemplateDurationLock(row, { applyDuration: true });
+  }
 });
 
 els.taskRowsContainer.addEventListener("change", (event) => {
@@ -4061,6 +4126,7 @@ els.taskRowsContainer.addEventListener("change", (event) => {
 
   if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning, .row-hours, .row-minutes")) {
     syncLunchBreakRowControls(row, event.target);
+    syncWorkTemplateDurationLock(row, { applyDuration: true });
     syncTaskRowSummary(row);
 
     if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning")) {
@@ -4071,13 +4137,17 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   const titleInput = event.target.closest(".row-title");
   if (!titleInput) return;
 
-  const template = findWorkTemplateByName(titleInput.value);
-  if (!template) return;
+  const template = syncWorkTemplateDurationLock(row, { applyDuration: true });
+  syncLunchBreakRowControls(row);
+  syncWorkTemplateDurationLock(row, { applyDuration: true });
+  syncTaskRowSummary(row);
 
-  applyWorkTemplateToRow(titleInput.closest(".task-row"), template);
-  syncLunchBreakRowControls(titleInput.closest(".task-row"));
-  syncTaskRowSummary(titleInput.closest(".task-row"));
-  toast(`Đã áp dụng thời gian ${formatMinutes(Number(template.deadlineMinutes || 0))} cho công việc “${template.name}”.`, "success");
+  if (template) {
+    toast(
+      `Đã áp dụng và khóa thời gian ${formatMinutes(Number(template.deadlineMinutes || 0))} theo Danh sách công việc “${template.name}”.`,
+      "success"
+    );
+  }
 });
 
 function openCreateWorkOrderModal() {
@@ -4162,7 +4232,13 @@ function readTaskRowsData() {
     const hotelAllowedMinutes = 0;
     const hours = Number(row.querySelector(".row-hours").value || 0);
     const minutes = Number(row.querySelector(".row-minutes").value || 0);
-    const deadlineMinutes = hours * 60 + minutes;
+    const matchedTemplate = findWorkTemplateByName(title);
+    const templateDeadlineMinutes = Number(matchedTemplate?.deadlineMinutes || 0);
+    // Bảo vệ lớp dữ liệu: nếu tên công việc khớp chính xác với Danh sách công việc,
+    // luôn dùng thời gian của công việc mẫu kể cả khi DOM bị chỉnh thủ công.
+    const deadlineMinutes = templateDeadlineMinutes > 0
+      ? templateDeadlineMinutes
+      : (hours * 60 + minutes);
     const assignedEmployee = state.employees.find((employee) => employee.uid === assignedToUid);
 
     return {
