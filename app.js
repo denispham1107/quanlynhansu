@@ -9843,8 +9843,11 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
 
       const oldDeadlineMinutes = Number(task.deadlineMinutes || 0);
       const oldDeadlineDate = timestampToDate(task.deadlineAt) || new Date();
+      const oldDeadlineMillis = typeof task.deadlineAt?.toMillis === "function"
+        ? task.deadlineAt.toMillis()
+        : oldDeadlineDate.getTime();
       const newDeadlineMinutes = oldDeadlineMinutes + minutes;
-      const newDeadlineDate = new Date(oldDeadlineDate.getTime() + minutes * 60 * 1000);
+      const newDeadlineDate = new Date(oldDeadlineMillis + minutes * 60 * 1000);
       const now = new Date();
       const oldExtensions = Array.isArray(task.timeExtensions) ? task.timeExtensions : [];
       const oldExtensionCount = Number.isInteger(Number(task.timeExtensionCount))
@@ -9883,9 +9886,18 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
           throw new Error(`Giới hạn thêm giờ của bạn cho công việc này là ${maximum} phút.`);
         }
 
-        // Chỉ cập nhật đúng khóa UID của Giám sát đang thao tác. Không ghi đè
-        // bộ đếm của Giám sát khác nếu hai người cùng xử lý một công việc.
-        updateData[`timeExtensionMinutesBySupervisor.${state.user.uid}`] = nextUsed;
+        // Ghi lại toàn bộ map theo dạng chuẩn. Cách này tương thích cả task cũ
+        // chưa có field, field từng bị lưu null/sai kiểu hoặc được khôi phục từ backup.
+        // Các bộ đếm của Giám sát khác vẫn được giữ nguyên.
+        const previousUsageMap = task.timeExtensionMinutesBySupervisor
+          && typeof task.timeExtensionMinutesBySupervisor === "object"
+          && !Array.isArray(task.timeExtensionMinutesBySupervisor)
+          ? task.timeExtensionMinutesBySupervisor
+          : {};
+        updateData.timeExtensionMinutesBySupervisor = {
+          ...previousUsageMap,
+          [state.user.uid]: nextUsed
+        };
       }
 
       transaction.update(taskRef, updateData);
