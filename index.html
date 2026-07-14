@@ -6927,6 +6927,304 @@
         padding: 7px 12px;
       }
     }
+
+
+    /* =========================================================
+       Cài đặt chung cho Phiếu công việc
+       ========================================================= */
+    body.work-order-settings-open {
+      overflow: hidden !important;
+    }
+
+    .settings-action-btn {
+      border-color: #16a34a !important;
+      background: #16a34a !important;
+      color: #ffffff !important;
+      box-shadow: 0 8px 20px rgba(22, 163, 74, 0.22);
+    }
+
+    .settings-action-btn:hover {
+      border-color: #15803d !important;
+      background: #15803d !important;
+      transform: translateY(-1px);
+    }
+
+    .settings-action-btn > span {
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .work-order-settings-card {
+      width: min(620px, calc(100vw - 32px));
+      max-height: min(86dvh, 760px);
+      overflow: auto;
+      border-radius: 24px !important;
+      background: #ffffff;
+      box-shadow: 0 28px 90px rgba(15, 23, 42, 0.30);
+    }
+
+    .work-order-settings-header {
+      position: sticky;
+      top: 0;
+      z-index: 4;
+      margin: 0;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #e2e8f0;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(14px);
+    }
+
+    .work-order-settings-header h3 {
+      margin: 2px 0 4px;
+    }
+
+    .work-order-settings-form {
+      gap: 14px;
+      padding-top: 4px;
+    }
+
+    .work-order-setting-section {
+      padding: 17px;
+      border: 1px solid #dbe7f7;
+      border-radius: 18px;
+      background: #f8fbff;
+    }
+
+    .work-order-setting-section.is-time-setting {
+      border-color: #bbf7d0;
+      background: linear-gradient(145deg, #f0fdf4, #f8fbff 62%);
+    }
+
+    .work-order-setting-section.is-danger-setting {
+      border-color: #fecaca;
+      background: linear-gradient(145deg, #fff7ed, #fffafa 62%);
+    }
+
+    .work-order-setting-toggle-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin: 0;
+      cursor: pointer;
+    }
+
+    .work-order-setting-toggle-copy {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      color: #0f172a;
+    }
+
+    .work-order-setting-toggle-copy strong {
+      font-size: 15px;
+      line-height: 1.3;
+    }
+
+    .work-order-setting-toggle-copy span {
+      color: #64748b;
+      font-size: 12.5px;
+      line-height: 1.45;
+    }
+
+    .work-order-setting-toggle-row > input[type="checkbox"] {
+      appearance: none;
+      position: relative;
+      flex: 0 0 auto;
+      width: 48px;
+      height: 28px;
+      margin: 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: #e2e8f0;
+      cursor: pointer;
+      transition: background 0.18s ease, border-color 0.18s ease;
+    }
+
+    .work-order-setting-toggle-row > input[type="checkbox"]::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.20);
+      transition: transform 0.18s ease;
+    }
+
+    .work-order-setting-toggle-row > input[type="checkbox"]:checked {
+      border-color: #16a34a;
+      background: #16a34a;
+    }
+
+    .work-order-setting-toggle-row > input[type="checkbox"]:checked::after {
+      transform: translateX(20px);
+    }
+
+    .max-extend-minute-options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+      transition: opacity 0.18s ease, filter 0.18s ease;
+    }
+
+    .max-extend-minute-options.is-disabled {
+      opacity: 0.48;
+      filter: grayscale(0.35);
+    }
+
+    .max-extend-minute-option {
+      position: relative;
+      margin: 0;
+      cursor: pointer;
+    }
+
+    .max-extend-minute-option input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .max-extend-minute-option span {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 5px;
+      min-height: 62px;
+      padding: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 15px;
+      background: #ffffff;
+      color: #334155;
+      transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+    }
+
+    .max-extend-minute-option span strong {
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .max-extend-minute-option span small {
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .max-extend-minute-option input:checked + span {
+      border-color: #16a34a;
+      background: #dcfce7;
+      color: #166534;
+      box-shadow: 0 6px 18px rgba(22, 163, 74, 0.16);
+      transform: translateY(-1px);
+    }
+
+    .work-order-setting-help,
+    .work-order-setting-warning {
+      margin: 11px 0 0;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .work-order-setting-warning {
+      color: #b45309;
+      font-weight: 750;
+    }
+
+    .work-order-settings-actions {
+      position: sticky;
+      bottom: 0;
+      z-index: 4;
+      margin-top: 2px;
+      padding-top: 14px;
+      padding-bottom: max(2px, env(safe-area-inset-bottom));
+      border-top: 1px solid #e2e8f0;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(14px);
+    }
+
+    .settings-save-btn {
+      background: #16a34a !important;
+      box-shadow: 0 10px 24px rgba(22, 163, 74, 0.22);
+    }
+
+    .extend-time-limit-note {
+      margin: -4px 0 2px;
+      padding: 9px 11px;
+      border: 1px solid #dbe7f7;
+      border-radius: 12px;
+      background: #eff6ff;
+      color: #475569;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .extend-time-limit-note.is-limited {
+      border-color: #fed7aa;
+      background: #fff7ed;
+      color: #9a3412;
+      font-weight: 750;
+    }
+
+    .extend-time-limit-note.is-exhausted {
+      border-color: #fecaca;
+      background: #fef2f2;
+      color: #b91c1c;
+    }
+
+    @media (min-width: 769px) {
+      .task-panel-header-actions .mobile-task-panel-menu {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .mobile-task-panel-menu {
+        border-color: #dbe7f7 !important;
+      }
+
+      .mobile-task-panel-menu .settings-action-btn {
+        margin-top: 6px;
+      }
+
+      .work-order-settings-modal:not(.hidden) {
+        align-items: center !important;
+        padding-top: max(12px, env(safe-area-inset-top, 0px)) !important;
+        padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
+      }
+
+      .work-order-settings-card {
+        width: min(calc(100% - 18px), 620px) !important;
+        max-height: calc(100dvh - 24px) !important;
+        margin: auto !important;
+        padding: 16px !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        border-radius: 22px !important;
+      }
+
+      .work-order-setting-section {
+        padding: 14px;
+      }
+
+      .work-order-setting-toggle-row {
+        gap: 12px;
+      }
+
+      .max-extend-minute-options {
+        gap: 7px;
+      }
+
+      .max-extend-minute-option span {
+        min-height: 56px;
+        padding: 10px 6px;
+      }
+    }
+
 </style>
 </head>
 <body>
@@ -7126,6 +7424,9 @@
             >⋮</button>
             <div id="mobileTaskPanelMenu" class="mobile-task-panel-menu" aria-hidden="true">
               <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
+              <button id="openWorkOrderSettingsBtn" class="btn settings-action-btn small hidden" type="button" aria-haspopup="dialog" aria-controls="workOrderSettingsModal">
+                <span aria-hidden="true">⚙</span> Cài đặt
+              </button>
             </div>
           </div>
         </div>
@@ -7625,6 +7926,67 @@
     </div>
   </div>
 
+
+  <!-- WORK ORDER CONTROL SETTINGS MODAL -->
+  <div id="workOrderSettingsModal" class="modal work-order-settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="workOrderSettingsModalTitle">
+    <div class="modal-backdrop" data-close-work-order-settings></div>
+    <div class="modal-card small-modal work-order-settings-card">
+      <div class="modal-header work-order-settings-header">
+        <div>
+          <p class="eyebrow">Cài đặt</p>
+          <h3 id="workOrderSettingsModalTitle">⚙ Cài đặt Phiếu công việc</h3>
+          <p class="muted">Các lựa chọn được đồng bộ cho toàn bộ tài khoản quản lý.</p>
+        </div>
+        <button class="icon-btn" type="button" data-close-work-order-settings aria-label="Đóng Cài đặt">×</button>
+      </div>
+
+      <form id="workOrderSettingsForm" class="form-stack work-order-settings-form">
+        <section class="work-order-setting-section is-time-setting">
+          <label class="work-order-setting-toggle-row" for="enableMaxExtendMinutes">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Giới hạn thời gian được thêm</strong>
+              <span>Bật để giới hạn tổng số phút được cộng thêm cho mỗi công việc.</span>
+            </span>
+            <input id="enableMaxExtendMinutes" type="checkbox" />
+          </label>
+
+          <div id="maxExtendMinutesOptions" class="max-extend-minute-options is-disabled" role="radiogroup" aria-label="Giới hạn thêm giờ tối đa">
+            <label class="max-extend-minute-option">
+              <input type="radio" name="maxExtendMinutes" value="20" checked />
+              <span><strong>20</strong><small>phút</small></span>
+            </label>
+            <label class="max-extend-minute-option">
+              <input type="radio" name="maxExtendMinutes" value="30" />
+              <span><strong>30</strong><small>phút</small></span>
+            </label>
+            <label class="max-extend-minute-option">
+              <input type="radio" name="maxExtendMinutes" value="45" />
+              <span><strong>45</strong><small>phút</small></span>
+            </label>
+          </div>
+
+          <p class="work-order-setting-help">Khi tắt giới hạn, nút “Thêm giờ” có thể nhập số phút bất kỳ như trước.</p>
+        </section>
+
+        <section class="work-order-setting-section is-danger-setting">
+          <label class="work-order-setting-toggle-row" for="preventWorkOrderDeletion">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Không cho xóa Phiếu công việc</strong>
+              <span>Ẩn và khóa cả “Xóa Phiếu” lẫn “Xóa toàn bộ Phiếu” cho các tài khoản quản lý.</span>
+            </span>
+            <input id="preventWorkOrderDeletion" type="checkbox" />
+          </label>
+          <p class="work-order-setting-warning">Có thể mở lại quyền xóa bất cứ lúc nào bằng cách bỏ chọn mục này.</p>
+        </section>
+
+        <div class="modal-footer-actions work-order-settings-actions">
+          <button class="btn ghost" type="button" data-close-work-order-settings>Hủy</button>
+          <button id="saveWorkOrderSettingsBtn" class="btn primary settings-save-btn" type="submit">Lưu Cài đặt</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- PHOTO VIEWER / LIGHTBOX -->
   <div id="photoViewer" class="photo-viewer hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="photoViewerName">
     <div class="photo-viewer-backdrop" data-close-photo-viewer></div>
@@ -7680,6 +8042,7 @@
           Số phút cần thêm
           <input id="extendMinutes" type="number" min="1" max="1440" step="1" value="15" required />
         </label>
+        <p id="extendTimeLimitNote" class="extend-time-limit-note">Cài đặt hiện không giới hạn tổng số phút được thêm cho mỗi công việc.</p>
 
         <label>
           Mục đích thêm giờ

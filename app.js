@@ -126,7 +126,12 @@ const state = {
   editingSupervisorUid: null,
   mobileTaskDetailOverrides: new Map(),
   desktopTaskDetailOverrides: new Map(),
-  desktopTaskViewMode: "compact"
+  desktopTaskViewMode: "compact",
+  workOrderControlSettings: {
+    maxExtendMinutes: null,
+    preventWorkOrderDeletion: false
+  },
+  workOrderControlSettingsReady: false
 };
 
 
@@ -191,6 +196,51 @@ function getRoleDisplayName(role) {
   if (role === "admin") return "Admin";
   if (role === "supervisor") return "Giám sát";
   return "Nhân viên";
+}
+
+// =========================
+// Cài đặt chung cho Phiếu công việc
+// =========================
+const WORK_ORDER_CONTROL_SETTINGS_DOC_ID = "workOrderControls";
+const WORK_ORDER_EXTENSION_LIMIT_OPTIONS = [20, 30, 45];
+
+function normalizeWorkOrderControlSettings(value = {}) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const parsedMax = Number(input.maxExtendMinutes);
+
+  return {
+    maxExtendMinutes: WORK_ORDER_EXTENSION_LIMIT_OPTIONS.includes(parsedMax) ? parsedMax : null,
+    preventWorkOrderDeletion: input.preventWorkOrderDeletion === true
+  };
+}
+
+function getWorkOrderControlSettings() {
+  return normalizeWorkOrderControlSettings(state.workOrderControlSettings);
+}
+
+function getConfiguredMaxExtendMinutes() {
+  return getWorkOrderControlSettings().maxExtendMinutes;
+}
+
+function isWorkOrderDeletionLocked() {
+  return getWorkOrderControlSettings().preventWorkOrderDeletion === true;
+}
+
+function getTaskExtensionTotalMinutes(task = {}) {
+  const storedTotal = Number(task.timeExtensionTotalMinutes);
+  if (Number.isFinite(storedTotal) && storedTotal >= 0) return storedTotal;
+
+  const extensions = Array.isArray(task.timeExtensions) ? task.timeExtensions : [];
+  return extensions.reduce((sum, item) => {
+    const minutes = Number(item?.minutes || 0);
+    return sum + (Number.isFinite(minutes) && minutes > 0 ? minutes : 0);
+  }, 0);
+}
+
+function getRemainingExtendMinutes(task = {}) {
+  const maxMinutes = getConfiguredMaxExtendMinutes();
+  if (!maxMinutes) return null;
+  return Math.max(0, maxMinutes - getTaskExtensionTotalMinutes(task));
 }
 
 // =========================
@@ -261,6 +311,14 @@ const els = {
   taskRowsContainer: $("#taskRowsContainer"),
   saveDraftBtn: $("#saveDraftBtn"),
   deleteAllWorkOrdersBtn: $("#deleteAllWorkOrdersBtn"),
+  openWorkOrderSettingsBtn: $("#openWorkOrderSettingsBtn"),
+  workOrderSettingsModal: $("#workOrderSettingsModal"),
+  workOrderSettingsForm: $("#workOrderSettingsForm"),
+  enableMaxExtendMinutes: $("#enableMaxExtendMinutes"),
+  maxExtendMinutesOptions: $("#maxExtendMinutesOptions"),
+  preventWorkOrderDeletion: $("#preventWorkOrderDeletion"),
+  saveWorkOrderSettingsBtn: $("#saveWorkOrderSettingsBtn"),
+  extendTimeLimitNote: $("#extendTimeLimitNote"),
   destructiveConfirmModal: $("#destructiveConfirmModal"),
   destructiveConfirmBackdrop: $("#destructiveConfirmBackdrop"),
   destructiveConfirmTitle: $("#destructiveConfirmTitle"),
@@ -1736,6 +1794,8 @@ onAuthStateChanged(auth, async (user) => {
   state.notifications = [];
   state.knownNotificationIds = new Set();
   state.notificationsReady = false;
+  state.workOrderControlSettings = normalizeWorkOrderControlSettings({});
+  state.workOrderControlSettingsReady = false;
 
   if (!user) {
     showLogin();
@@ -1897,7 +1957,13 @@ function applyManagementPermissionUI() {
   els.openEmployeeManagerPageBtn?.classList.toggle("hidden", !canAccessEmployees);
   els.exportDataBtn?.classList.toggle("hidden", !canExport);
   els.importDataBtn?.classList.toggle("hidden", !canImport);
-  els.deleteAllWorkOrdersBtn?.classList.toggle("hidden", !hasPermission("deleteAllWorkOrders"));
+
+  const deletionLocked = isWorkOrderDeletionLocked();
+  els.deleteAllWorkOrdersBtn?.classList.toggle(
+    "hidden",
+    !hasPermission("deleteAllWorkOrders") || deletionLocked
+  );
+  els.openWorkOrderSettingsBtn?.classList.toggle("hidden", !isAdmin);
   updateMobileTaskPanelMenuAvailability();
   els.openWorkTemplateModalBtn?.classList.toggle("hidden", !hasPermission("manageWorkTemplates"));
 
@@ -2136,7 +2202,34 @@ function setupAdminDashboard() {
     }
   );
 
-  state.unsubs.push(unsubUsers, unsubTasks, unsubWorkOrders, unsubWorkTemplates, unsubTimeExtensionReasons, unsubHotelDailyReports);
+  const workOrderSettingsRef = doc(db, "appSettings", WORK_ORDER_CONTROL_SETTINGS_DOC_ID);
+  const unsubWorkOrderControlSettings = onSnapshot(
+    workOrderSettingsRef,
+    (snapshot) => {
+      state.workOrderControlSettings = normalizeWorkOrderControlSettings(
+        snapshot.exists() ? snapshot.data() : {}
+      );
+      state.workOrderControlSettingsReady = true;
+      applyManagementPermissionUI();
+      renderAdminTasks();
+      updateExtendTimeLimitUI();
+    },
+    (error) => {
+      console.error(error);
+      state.workOrderControlSettingsReady = false;
+      toast("Không đọc được Cài đặt Phiếu công việc. Hãy deploy Firestore Rules mới nhất.", "error");
+    }
+  );
+
+  state.unsubs.push(
+    unsubUsers,
+    unsubTasks,
+    unsubWorkOrders,
+    unsubWorkTemplates,
+    unsubTimeExtensionReasons,
+    unsubHotelDailyReports,
+    unsubWorkOrderControlSettings
+  );
 }
 
 function handleSnapshotError(error) {
@@ -4617,6 +4710,11 @@ async function getCollectionDeleteOperations(collectionName) {
 async function deleteWorkOrder(workOrderId, button) {
   if (!requirePermission("deleteWorkOrder", "Tài khoản của bạn chưa được cấp quyền xóa Phiếu công việc.")) return;
 
+  if (isWorkOrderDeletionLocked()) {
+    toast("Chức năng Xóa Phiếu đang bị khóa trong Cài đặt.", "error");
+    return;
+  }
+
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
   const workOrder = state.workOrders.find((item) => item.id === workOrderId);
@@ -4664,6 +4762,11 @@ async function commitInChunks(operations, chunkSize = 450) {
 
 async function deleteAllWorkOrders(button) {
   if (!requirePermission("deleteAllWorkOrders", "Tài khoản của bạn chưa được cấp quyền xóa toàn bộ Phiếu công việc.")) return;
+
+  if (isWorkOrderDeletionLocked()) {
+    toast("Chức năng Xóa Phiếu và Xóa toàn bộ Phiếu đang bị khóa trong Cài đặt.", "error");
+    return;
+  }
 
   const hasAnyWorkData = Boolean(
     state.tasks.length
@@ -4775,8 +4878,13 @@ function syncMobileSheetBodyLock() {
   document.body.classList.toggle("mobile-sheet-open", hasOpenSheet && isMobileManagementViewport());
 }
 
+function hasVisibleTaskPanelMenuAction() {
+  return [els.deleteAllWorkOrdersBtn, els.openWorkOrderSettingsBtn]
+    .some((button) => button && !button.classList.contains("hidden"));
+}
+
 function setMobileTaskPanelMenuOpen(open) {
-  const canShow = !els.deleteAllWorkOrdersBtn?.classList.contains("hidden");
+  const canShow = hasVisibleTaskPanelMenuAction();
   const shouldOpen = Boolean(open && canShow && isMobileManagementViewport());
 
   els.mobileTaskPanelMenu?.classList.toggle("is-open", shouldOpen);
@@ -4786,7 +4894,7 @@ function setMobileTaskPanelMenuOpen(open) {
 
 function updateMobileTaskPanelMenuAvailability() {
   if (!els.mobileTaskPanelMenuBtn) return;
-  const canShow = !els.deleteAllWorkOrdersBtn?.classList.contains("hidden");
+  const canShow = hasVisibleTaskPanelMenuAction();
   els.mobileTaskPanelMenuBtn.classList.toggle("hidden", !canShow);
   if (!canShow) setMobileTaskPanelMenuOpen(false);
 }
@@ -5042,6 +5150,95 @@ function setEmployeeStatusDetailSheetOpen(open, type = "free") {
   syncMobileSheetBodyLock();
 }
 
+// =========================
+// Popup Cài đặt Phiếu công việc
+// =========================
+function syncWorkOrderSettingsLimitControls() {
+  const enabled = els.enableMaxExtendMinutes?.checked === true;
+  els.maxExtendMinutesOptions?.classList.toggle("is-disabled", !enabled);
+  els.maxExtendMinutesOptions?.querySelectorAll('input[name="maxExtendMinutes"]').forEach((input) => {
+    input.disabled = !enabled;
+  });
+}
+
+function openWorkOrderSettingsModal() {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được thay đổi Cài đặt Phiếu công việc.", "error");
+    return;
+  }
+
+  const settings = getWorkOrderControlSettings();
+  const hasLimit = Boolean(settings.maxExtendMinutes);
+  if (els.enableMaxExtendMinutes) els.enableMaxExtendMinutes.checked = hasLimit;
+  if (els.preventWorkOrderDeletion) {
+    els.preventWorkOrderDeletion.checked = settings.preventWorkOrderDeletion;
+  }
+
+  const selectedValue = String(settings.maxExtendMinutes || 20);
+  els.maxExtendMinutesOptions?.querySelectorAll('input[name="maxExtendMinutes"]').forEach((input) => {
+    input.checked = input.value === selectedValue;
+  });
+
+  syncWorkOrderSettingsLimitControls();
+  els.workOrderSettingsModal?.classList.remove("hidden");
+  document.body.classList.add("work-order-settings-open");
+  setMobileTaskPanelMenuOpen(false);
+}
+
+function closeWorkOrderSettingsModal() {
+  els.workOrderSettingsModal?.classList.add("hidden");
+  document.body.classList.remove("work-order-settings-open");
+}
+
+els.enableMaxExtendMinutes?.addEventListener("change", syncWorkOrderSettingsLimitControls);
+els.openWorkOrderSettingsBtn?.addEventListener("click", openWorkOrderSettingsModal);
+document.querySelectorAll("[data-close-work-order-settings]").forEach((button) => {
+  button.addEventListener("click", closeWorkOrderSettingsModal);
+});
+
+els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được lưu Cài đặt Phiếu công việc.", "error");
+    return;
+  }
+
+  const limitEnabled = els.enableMaxExtendMinutes?.checked === true;
+  const selectedLimit = Number(
+    els.maxExtendMinutesOptions?.querySelector('input[name="maxExtendMinutes"]:checked')?.value
+  );
+
+  if (limitEnabled && !WORK_ORDER_EXTENSION_LIMIT_OPTIONS.includes(selectedLimit)) {
+    toast("Vui lòng chọn giới hạn 20, 30 hoặc 45 phút.", "error");
+    return;
+  }
+
+  setButtonLoading(els.saveWorkOrderSettingsBtn, true, "Đang lưu...");
+
+  try {
+    await setDoc(
+      doc(db, "appSettings", WORK_ORDER_CONTROL_SETTINGS_DOC_ID),
+      {
+        maxExtendMinutes: limitEnabled ? selectedLimit : null,
+        preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true,
+        updatedAt: serverTimestamp(),
+        updatedByUid: state.user?.uid || "",
+        updatedByName: state.profile?.name || state.user?.email || "Admin"
+      },
+      { merge: true }
+    );
+
+    closeWorkOrderSettingsModal();
+    toast("Đã lưu Cài đặt Phiếu công việc.", "success");
+  } catch (error) {
+    console.error(error);
+    toast("Không lưu được Cài đặt. Hãy kiểm tra Firestore Rules.", "error");
+  } finally {
+    setButtonLoading(els.saveWorkOrderSettingsBtn, false);
+  }
+});
+
 function setupMobileAdminCompactControls() {
   try {
     state.mobileEmployeeStatusExpanded = localStorage.getItem("quanlynhansu-mobile-employee-status") !== "collapsed";
@@ -5100,6 +5297,7 @@ function setupMobileAdminCompactControls() {
     setMobileTaskPanelMenuOpen(false);
     setAdminMobileFilterSheetOpen(false);
     setEmployeeStatusDetailSheetOpen(false);
+    closeWorkOrderSettingsModal();
   });
 
   window.addEventListener("resize", () => {
@@ -6265,7 +6463,7 @@ function renderTicketGroup(group, mode = "admin") {
     }
   }
 
-  if (mode === "admin" && hasPermission("deleteWorkOrder")) {
+  if (mode === "admin" && hasPermission("deleteWorkOrder") && !isWorkOrderDeletionLocked()) {
     actionButtons.push(`<button class="btn danger small" data-action="delete-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">🗑 Xoá phiếu</button>`);
   }
 
@@ -9339,6 +9537,29 @@ function renderCustomExtendReasonList() {
   setExtendReasonListExpanded(state.extendReasonListExpanded && customReasons.length > 1);
 }
 
+function updateExtendTimeLimitUI(task = null) {
+  if (!els.extendMinutes || !els.extendTimeLimitNote) return;
+
+  const activeTask = task || state.tasks.find((item) => item.id === state.extendTimeTaskId);
+  const maxMinutes = getConfiguredMaxExtendMinutes();
+
+  if (!maxMinutes) {
+    els.extendMinutes.max = "1440";
+    els.extendTimeLimitNote.textContent = "Cài đặt hiện không giới hạn tổng số phút được thêm cho mỗi công việc.";
+    els.extendTimeLimitNote.classList.remove("is-limited", "is-exhausted");
+    return;
+  }
+
+  const usedMinutes = activeTask ? getTaskExtensionTotalMinutes(activeTask) : 0;
+  const remainingMinutes = Math.max(0, maxMinutes - usedMinutes);
+  els.extendMinutes.max = String(Math.max(1, remainingMinutes));
+  els.extendTimeLimitNote.textContent = remainingMinutes > 0
+    ? `Cài đặt giới hạn tối đa ${maxMinutes} phút cho mỗi công việc. Đã dùng ${usedMinutes} phút, còn được thêm ${remainingMinutes} phút.`
+    : `Công việc này đã dùng đủ giới hạn ${maxMinutes} phút và không thể thêm giờ tiếp.`;
+  els.extendTimeLimitNote.classList.add("is-limited");
+  els.extendTimeLimitNote.classList.toggle("is-exhausted", remainingMinutes <= 0);
+}
+
 function openExtendTimeModal(taskId) {
   if (!requirePermission("extendTaskTime", "Tài khoản của bạn chưa được cấp quyền thêm giờ công việc.")) return;
 
@@ -9354,9 +9575,16 @@ function openExtendTimeModal(taskId) {
     return;
   }
 
+  const remainingMinutes = getRemainingExtendMinutes(task);
+  if (remainingMinutes !== null && remainingMinutes <= 0) {
+    toast(`Công việc này đã dùng đủ giới hạn ${getConfiguredMaxExtendMinutes()} phút.`, "error");
+    return;
+  }
+
   state.extendTimeTaskId = taskId;
   els.extendTimeTaskTitle.textContent = task.title || "Công việc";
-  els.extendMinutes.value = 15;
+  els.extendMinutes.value = String(remainingMinutes === null ? 15 : Math.min(15, remainingMinutes));
+  updateExtendTimeLimitUI(task);
   els.newExtendReason.value = "";
   state.extendReasonListExpanded = false;
   renderExtendReasonOptions();
@@ -9496,6 +9724,13 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
     return;
   }
 
+  const currentTask = state.tasks.find((item) => item.id === taskId);
+  const remainingBeforeSubmit = currentTask ? getRemainingExtendMinutes(currentTask) : null;
+  if (remainingBeforeSubmit !== null && minutes > remainingBeforeSubmit) {
+    toast(`Chỉ còn được thêm tối đa ${remainingBeforeSubmit} phút cho công việc này.`, "error");
+    return;
+  }
+
   if (!reason) {
     toast("Vui lòng chọn hoặc nhập mục đích thêm giờ. Nếu chưa có mục đích, Admin có thể tự tạo trong ô bên trên.", "error");
     return;
@@ -9520,6 +9755,13 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
 
       if (!canAdminExtendTaskTime(task, "admin")) {
         throw new Error("Chỉ thêm giờ cho công việc đang làm, yêu cầu làm lại hoặc quá hạn.");
+      }
+
+      const configuredMaxMinutes = getConfiguredMaxExtendMinutes();
+      const usedExtensionMinutes = getTaskExtensionTotalMinutes(task);
+      if (configuredMaxMinutes && usedExtensionMinutes + minutes > configuredMaxMinutes) {
+        const remaining = Math.max(0, configuredMaxMinutes - usedExtensionMinutes);
+        throw new Error(`Cài đặt chỉ cho phép thêm tối đa ${configuredMaxMinutes} phút cho mỗi công việc. Công việc này còn ${remaining} phút.`);
       }
 
       const oldDeadlineMinutes = Number(task.deadlineMinutes || 0);
