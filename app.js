@@ -4280,6 +4280,13 @@ function openCreateWorkOrderModal() {
   resetTaskRows();
   resetPhotoRequirementControls();
 
+  // Khi Admin mở form tạo Phiếu mới, mặc định luôn yêu cầu ít nhất 1 ảnh báo cáo.
+  // Admin vẫn có thể tự bỏ chọn hoặc thay đổi số lượng trước khi lưu Phiếu.
+  if (isAdminProfile()) {
+    if (els.requiredPhotoCount) els.requiredPhotoCount.value = 1;
+    setPhotoRequirementChecked(true);
+  }
+
   els.taskModal.classList.remove("hidden");
 }
 
