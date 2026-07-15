@@ -7191,11 +7191,22 @@ function renderDesktopTaskSummary(task, mode, employeeName, initialCountdownText
 
 function renderDesktopTaskQuickActions(task, mode) {
   const buttons = [];
+  const workPhotoCount = getTaskWorkPhotos(task).length;
   const photoCount = getTaskPhotoCount(task);
   const canViewPhotos = photoCount > 0 && (mode === "admin" || mode === "employee");
   const canEditPhotoRequirement = mode === "admin"
     && hasPermission("managePhotoRequirements")
     && task.status !== "completed";
+
+  // Ảnh CV là ảnh hướng dẫn/mẫu của công việc, vì vậy mọi tài khoản có thể
+  // nhìn thấy công việc đều được mở xem ngay cả khi thẻ đang Thu gọn trên desktop.
+  if (workPhotoCount > 0) {
+    buttons.push(`
+      <button class="btn ghost small task-desktop-work-photo-action" data-action="view-work-photos" data-task-id="${escapeHtml(task.id)}" type="button">
+        Ảnh CV (${workPhotoCount})
+      </button>
+    `);
+  }
 
   if (canViewPhotos) {
     buttons.push(`
