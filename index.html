@@ -8043,49 +8043,97 @@
         </div>
       </section>
 
-      <section class="panel task-panel">
-        <div class="panel-header task-filter-row">
+      <section class="panel task-panel employee-task-panel">
+        <div class="panel-header">
           <div>
             <h3>Danh sách việc cần làm</h3>
             <p class="muted">Bấm “Hoàn thành” khi đã làm xong để gửi Admin duyệt.</p>
           </div>
-          <div class="filters enhanced-filters employee-date-filters">
-            <select id="employeeStatusFilter" aria-label="Lọc trạng thái công việc của tôi">
-              <option value="all">Tất cả trạng thái</option>
-              <option value="draft">Chưa giao việc</option>
-              <option value="waiting_assignee">Chờ chọn người</option>
-              <option value="lunch_break">Nghỉ trưa</option>
-              <option value="hotel">Hotel</option>
-              <option value="doing">Đang làm</option>
-              <option value="near_due">Gần hết giờ</option>
-              <option value="overdue">Quá hạn</option>
-              <option value="submitted">Chờ xác nhận</option>
-              <option value="completed">Đã hoàn thành</option>
-              <option value="redo">Yêu cầu làm lại</option>
-            </select>
-            <select id="employeeCompletedTypeFilter" class="completed-subfilter hidden" aria-label="Lọc nhóm công việc đã hoàn thành của tôi">
-              <option value="all">Tất cả đã hoàn thành</option>
-              <option value="normal">Công việc bình thường</option>
-              <option value="lunch_break">Đã nghỉ trưa</option>
-              <option value="hotel">Hotel đã làm</option>
-            </select>
-            <select id="employeeDateMode" aria-label="Lọc thời gian công việc của tôi">
-              <option value="all">Tất cả ngày</option>
-              <option value="today">Hôm nay</option>
-              <option value="yesterday">Hôm qua</option>
-              <option value="current_month">Tháng này</option>
-              <option value="previous_month">Tháng trước</option>
-              <option value="single">Chọn 1 ngày</option>
-              <option value="range">Khoảng ngày</option>
-            </select>
-            <input id="employeeSingleDate" class="date-filter-control hidden" type="date" aria-label="Chọn ngày" />
-            <input id="employeeDateFrom" class="date-filter-control hidden" type="date" aria-label="Từ ngày" />
-            <input id="employeeDateTo" class="date-filter-control hidden" type="date" aria-label="Đến ngày" />
-            <button id="employeeClearDateFilter" class="btn ghost small" type="button">Xóa lọc ngày</button>
-          </div>
         </div>
+
+        <div class="task-filter-row-secondary mobile-filter-toolbar employee-filter-toolbar">
+          <div id="employeeMobileFilterModalRoot" class="mobile-filter-modal-root" aria-hidden="true">
+            <div id="employeeMobileFilterBackdrop" class="mobile-filter-backdrop hidden" aria-hidden="true"></div>
+            <div id="employeeMobileFilterSheet" class="filters enhanced-filters mobile-filter-sheet employee-date-filters" role="group" aria-labelledby="employeeMobileFilterSheetTitle">
+              <div class="mobile-filter-sheet-handle" aria-hidden="true"></div>
+              <div class="mobile-filter-sheet-header">
+                <h4 id="employeeMobileFilterSheetTitle">Bộ lọc công việc</h4>
+                <button id="employeeMobileFilterCloseBtn" class="mobile-filter-sheet-close" type="button" aria-label="Đóng bộ lọc">×</button>
+              </div>
+
+              <span class="mobile-filter-field-label">Trạng thái</span>
+              <select id="employeeStatusFilter" aria-label="Lọc trạng thái công việc của tôi">
+                <option value="all">Tất cả trạng thái</option>
+                <option value="draft">Chưa giao việc</option>
+                <option value="waiting_assignee">Chờ chọn người</option>
+                <option value="lunch_break">Nghỉ trưa</option>
+                <option value="hotel">Hotel</option>
+                <option value="doing">Đang làm</option>
+                <option value="near_due">Gần hết giờ</option>
+                <option value="overdue">Quá hạn</option>
+                <option value="submitted">Chờ xác nhận</option>
+                <option value="completed">Đã hoàn thành</option>
+                <option value="redo">Yêu cầu làm lại</option>
+              </select>
+
+              <span class="mobile-filter-field-label mobile-completed-filter-label hidden">Nhóm đã hoàn thành</span>
+              <select id="employeeCompletedTypeFilter" class="completed-subfilter hidden" aria-label="Lọc nhóm công việc đã hoàn thành của tôi">
+                <option value="all">Tất cả đã hoàn thành</option>
+                <option value="normal">Công việc bình thường</option>
+                <option value="lunch_break">Đã nghỉ trưa</option>
+                <option value="hotel">Hotel đã làm</option>
+              </select>
+
+              <span class="mobile-filter-field-label">Thời gian</span>
+              <select id="employeeDateMode" aria-label="Lọc thời gian công việc của tôi">
+                <option value="all">Tất cả ngày</option>
+                <option value="today">Hôm nay</option>
+                <option value="yesterday">Hôm qua</option>
+                <option value="current_month">Tháng này</option>
+                <option value="previous_month">Tháng trước</option>
+                <option value="single">Chọn 1 ngày</option>
+                <option value="range">Khoảng ngày</option>
+              </select>
+
+              <span class="mobile-filter-field-label mobile-single-date-label hidden">Ngày cụ thể</span>
+              <input id="employeeSingleDate" class="date-filter-control hidden" type="date" aria-label="Chọn ngày" />
+              <span class="mobile-filter-field-label mobile-date-from-label hidden">Từ ngày</span>
+              <input id="employeeDateFrom" class="date-filter-control hidden" type="date" aria-label="Từ ngày" />
+              <span class="mobile-filter-field-label mobile-date-to-label hidden">Đến ngày</span>
+              <input id="employeeDateTo" class="date-filter-control hidden" type="date" aria-label="Đến ngày" />
+              <button id="employeeClearDateFilter" class="btn ghost small mobile-clear-date-control" type="button">Xóa lọc ngày</button>
+
+              <div class="mobile-filter-sheet-note">Ngày chỉ hiển thị khi chọn “Chọn 1 ngày” hoặc “Khoảng ngày”.</div>
+              <div class="mobile-filter-sheet-actions">
+                <button id="employeeMobileFilterResetBtn" class="btn ghost" type="button">Đặt lại</button>
+                <button id="employeeMobileFilterApplyBtn" class="btn primary" type="button">Áp dụng</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="admin-work-order-search employee-work-order-search">
+            <div class="admin-work-order-search-control">
+              <span class="admin-work-order-search-icon" aria-hidden="true">⌕</span>
+              <input id="employeeWorkOrderSearch" class="admin-work-order-search-input" type="text" inputmode="search" enterkeyhint="search" role="searchbox"
+                placeholder="Tìm Phiếu công việc..." autocomplete="off" aria-label="Tìm kiếm tên Phiếu công việc của tôi"
+                aria-autocomplete="list" aria-controls="employeeWorkOrderSuggestions" aria-expanded="false" />
+              <button id="employeeClearWorkOrderSearch" class="admin-work-order-search-clear hidden" type="button" aria-label="Xóa nội dung tìm kiếm">×</button>
+              <div id="employeeWorkOrderSuggestions" class="admin-work-order-suggestions hidden" role="listbox" aria-label="Gợi ý tên Phiếu công việc"></div>
+            </div>
+            <p id="employeeWorkOrderSearchSummary" class="admin-work-order-search-summary hidden"></p>
+          </div>
+
+          <button id="employeeMobileFilterOpenBtn" class="mobile-filter-open-btn" type="button" aria-expanded="false" aria-controls="employeeMobileFilterSheet">
+            <span aria-hidden="true">⌯</span> Bộ lọc
+            <span id="employeeMobileFilterCount" class="mobile-filter-count hidden">0</span>
+          </button>
+        </div>
+
+        <div id="employeeActiveFilterChips" class="mobile-active-filter-chips" aria-label="Bộ lọc đang áp dụng"></div>
+        <div id="employeeMobileResultSummary" class="mobile-result-summary" aria-live="polite"></div>
         <p id="employeeDateSummary" class="filter-summary muted">Đang hiển thị tất cả ngày giao việc.</p>
         <div id="employeeCompletedTypeReport" class="completed-type-report hidden"></div>
+        <h4 class="mobile-task-list-heading">Danh sách Phiếu công việc</h4>
         <div id="employeeTaskList" class="task-list empty-box">Chưa có công việc.</div>
       </section>
     </main>

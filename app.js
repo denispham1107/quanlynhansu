@@ -114,6 +114,9 @@ const state = {
   adminHotelReportDrafts: {},
   employeeStatusFilter: "all",
   employeeCompletedTypeFilter: "all",
+  employeeWorkOrderSearch: "",
+  employeeWorkOrderSuggestionIndex: -1,
+  employeeMobileFilterSheetOpen: false,
   adminDateFilter: {
     mode: "today",
     single: "",
@@ -398,6 +401,20 @@ const els = {
   employeeDateTo: $("#employeeDateTo"),
   employeeClearDateFilter: $("#employeeClearDateFilter"),
   employeeDateSummary: $("#employeeDateSummary"),
+  employeeWorkOrderSearch: $("#employeeWorkOrderSearch"),
+  employeeClearWorkOrderSearch: $("#employeeClearWorkOrderSearch"),
+  employeeWorkOrderSuggestions: $("#employeeWorkOrderSuggestions"),
+  employeeWorkOrderSearchSummary: $("#employeeWorkOrderSearchSummary"),
+  employeeMobileFilterModalRoot: $("#employeeMobileFilterModalRoot"),
+  employeeMobileFilterBackdrop: $("#employeeMobileFilterBackdrop"),
+  employeeMobileFilterSheet: $("#employeeMobileFilterSheet"),
+  employeeMobileFilterOpenBtn: $("#employeeMobileFilterOpenBtn"),
+  employeeMobileFilterCount: $("#employeeMobileFilterCount"),
+  employeeMobileFilterCloseBtn: $("#employeeMobileFilterCloseBtn"),
+  employeeMobileFilterResetBtn: $("#employeeMobileFilterResetBtn"),
+  employeeMobileFilterApplyBtn: $("#employeeMobileFilterApplyBtn"),
+  employeeActiveFilterChips: $("#employeeActiveFilterChips"),
+  employeeMobileResultSummary: $("#employeeMobileResultSummary"),
   employeeTaskList: $("#employeeTaskList"),
   statDraft: $("#statDraft"),
   statDoing: $("#statDoing"),
@@ -1585,6 +1602,10 @@ function showTaskInCurrentDashboard(task) {
 
   state.employeeStatusFilter = "all";
   state.employeeCompletedTypeFilter = "all";
+  state.employeeWorkOrderSearch = "";
+  state.employeeWorkOrderSuggestionIndex = -1;
+  if (els.employeeWorkOrderSearch) els.employeeWorkOrderSearch.value = "";
+  hideEmployeeWorkOrderSuggestions();
   state.employeeDateFilter = {
     mode: taskDate ? "single" : "all",
     single: taskDate || "",
@@ -1746,7 +1767,10 @@ function bindDateFilterControls(scope) {
       // Nếu ô tìm kiếm đang mở, cập nhật ngay gợi ý theo phạm vi thời gian mới.
       renderAdminWorkOrderSuggestions();
     }
-    if (scope === "employee") renderEmployeeTasks();
+    if (scope === "employee") {
+      renderEmployeeTasks();
+      renderEmployeeWorkOrderSuggestions();
+    }
   };
 
   modeEl.addEventListener("change", () => {
@@ -1791,27 +1815,22 @@ function refreshDateFilterVisibility(scope) {
   const clearEl = els[`${prefix}ClearDateFilter`];
   const summaryEl = els[`${prefix}DateSummary`];
 
-  if (scope === "admin") {
-    // Popup Bộ lọc của Admin chỉ hiển thị đúng các ô ngày cần nhập:
-    // - “Chọn 1 ngày”: 1 ô lịch.
-    // - “Khoảng ngày”: 2 ô lịch (Từ ngày/Đến ngày).
-    // - Các chế độ còn lại: không hiển thị ô lịch phụ.
-    const showSingleDate = filter.mode === "single";
-    const showDateRange = filter.mode === "range";
+  // Cả Admin và Nhân viên dùng cùng giao diện Bộ lọc:
+  // - “Chọn 1 ngày”: chỉ hiện 1 ô lịch.
+  // - “Khoảng ngày”: chỉ hiện 2 ô lịch.
+  // - Các chế độ còn lại không hiện ô lịch phụ.
+  const showSingleDate = filter.mode === "single";
+  const showDateRange = filter.mode === "range";
+  const sheet = singleEl?.closest?.(".mobile-filter-sheet") || fromEl?.closest?.(".mobile-filter-sheet");
 
-    singleEl?.classList.toggle("hidden", !showSingleDate);
-    singleEl?.classList.remove("mobile-auto-date-control");
-    fromEl?.classList.toggle("hidden", !showDateRange);
-    toEl?.classList.toggle("hidden", !showDateRange);
+  singleEl?.classList.toggle("hidden", !showSingleDate);
+  singleEl?.classList.remove("mobile-auto-date-control");
+  fromEl?.classList.toggle("hidden", !showDateRange);
+  toEl?.classList.toggle("hidden", !showDateRange);
 
-    document.querySelector(".mobile-single-date-label")?.classList.toggle("hidden", !showSingleDate);
-    document.querySelector(".mobile-date-from-label")?.classList.toggle("hidden", !showDateRange);
-    document.querySelector(".mobile-date-to-label")?.classList.toggle("hidden", !showDateRange);
-  } else {
-    singleEl?.classList.toggle("hidden", !["single", "today"].includes(filter.mode));
-    fromEl?.classList.toggle("hidden", filter.mode !== "range");
-    toEl?.classList.toggle("hidden", filter.mode !== "range");
-  }
+  sheet?.querySelector(".mobile-single-date-label")?.classList.toggle("hidden", !showSingleDate);
+  sheet?.querySelector(".mobile-date-from-label")?.classList.toggle("hidden", !showDateRange);
+  sheet?.querySelector(".mobile-date-to-label")?.classList.toggle("hidden", !showDateRange);
 
   clearEl?.classList.toggle("hidden", filter.mode === "all");
 
@@ -1871,6 +1890,7 @@ function isTaskInDateFilter(task, filter) {
 bindDateFilterControls("admin");
 bindDateFilterControls("employee");
 bindAdminWorkOrderSearch();
+bindEmployeeWorkOrderSearch();
 
 // =========================
 // Auth flow
@@ -5133,6 +5153,7 @@ function restoreAdminMobileFilterFromBody() {
 function syncMobileSheetBodyLock() {
   const hasOpenSheet = Boolean(
     state.adminMobileFilterSheetOpen
+    || state.employeeMobileFilterSheetOpen
     || els.adminEmployeeStatusDetailSheet?.classList.contains("is-open")
   );
   document.body.classList.toggle("mobile-sheet-open", hasOpenSheet && isMobileManagementViewport());
@@ -5673,6 +5694,283 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
   }
 });
 
+
+const employeeMobileFilterPortal = { initialized: false, rootAnchor: null };
+
+function initializeEmployeeMobileFilterPortal() {
+  if (employeeMobileFilterPortal.initialized) return;
+  const root = els.employeeMobileFilterModalRoot;
+  if (!root || !root.parentNode) return;
+  employeeMobileFilterPortal.rootAnchor = document.createComment("employee-mobile-filter-modal-root-anchor");
+  root.parentNode.insertBefore(employeeMobileFilterPortal.rootAnchor, root);
+  employeeMobileFilterPortal.initialized = true;
+}
+
+function portalEmployeeMobileFilterToBody() {
+  initializeEmployeeMobileFilterPortal();
+  const root = els.employeeMobileFilterModalRoot;
+  if (root && root.parentNode !== document.body) document.body.appendChild(root);
+}
+
+function restoreEmployeeMobileFilterFromBody() {
+  const root = els.employeeMobileFilterModalRoot;
+  const anchor = employeeMobileFilterPortal.rootAnchor;
+  if (root && anchor?.parentNode) anchor.parentNode.insertBefore(root, anchor.nextSibling);
+}
+
+function setEmployeeMobileFilterSheetOpen(open) {
+  const shouldOpen = Boolean(open && isMobileManagementViewport());
+  if (shouldOpen) portalEmployeeMobileFilterToBody();
+  state.employeeMobileFilterSheetOpen = shouldOpen;
+  const root = els.employeeMobileFilterModalRoot;
+  root?.classList.toggle("is-open", shouldOpen);
+  root?.setAttribute("aria-hidden", String(!shouldOpen));
+  els.employeeMobileFilterSheet?.classList.toggle("is-open", shouldOpen);
+  if (els.employeeMobileFilterSheet) {
+    if (isMobileManagementViewport()) {
+      els.employeeMobileFilterSheet.setAttribute("role", "dialog");
+      els.employeeMobileFilterSheet.setAttribute("aria-modal", "true");
+      els.employeeMobileFilterSheet.setAttribute("aria-hidden", String(!shouldOpen));
+    } else {
+      els.employeeMobileFilterSheet.setAttribute("role", "group");
+      els.employeeMobileFilterSheet.removeAttribute("aria-modal");
+      els.employeeMobileFilterSheet.removeAttribute("aria-hidden");
+    }
+  }
+  els.employeeMobileFilterOpenBtn?.setAttribute("aria-expanded", String(shouldOpen));
+  if (els.employeeMobileFilterBackdrop) {
+    els.employeeMobileFilterBackdrop.classList.toggle("hidden", !shouldOpen);
+    if (shouldOpen) requestAnimationFrame(() => els.employeeMobileFilterBackdrop?.classList.add("is-open"));
+    else els.employeeMobileFilterBackdrop.classList.remove("is-open");
+  }
+  syncMobileSheetBodyLock();
+  if (shouldOpen && els.employeeMobileFilterSheet) els.employeeMobileFilterSheet.scrollTop = 0;
+  if (!shouldOpen) window.setTimeout(() => {
+    if (!state.employeeMobileFilterSheetOpen) restoreEmployeeMobileFilterFromBody();
+  }, 220);
+}
+
+function getEmployeeActiveMobileFilterDescriptors() {
+  const filters = [];
+  if (state.employeeStatusFilter !== "all") filters.push({ key: "status", label: getSelectOptionText(els.employeeStatusFilter, "Trạng thái") });
+  if (state.employeeStatusFilter === "completed" && state.employeeCompletedTypeFilter !== "all") {
+    filters.push({ key: "completedType", label: getSelectOptionText(els.employeeCompletedTypeFilter, "Nhóm hoàn thành") });
+  }
+  const dateFilter = state.employeeDateFilter || { mode: "all" };
+  if (dateFilter.mode !== "all") {
+    let label = getSelectOptionText(els.employeeDateMode, "Thời gian");
+    if (dateFilter.mode === "single" && dateFilter.single) label = formatDateOnly(dateFilter.single);
+    else if (dateFilter.mode === "range") {
+      if (dateFilter.from && dateFilter.to) label = `${formatDateOnly(dateFilter.from)} – ${formatDateOnly(dateFilter.to)}`;
+      else if (dateFilter.from) label = `Từ ${formatDateOnly(dateFilter.from)}`;
+      else if (dateFilter.to) label = `Đến ${formatDateOnly(dateFilter.to)}`;
+    }
+    filters.push({ key: "date", label });
+  }
+  return filters;
+}
+
+function updateEmployeeMobileFilterUI() {
+  const filters = getEmployeeActiveMobileFilterDescriptors();
+  if (els.employeeMobileFilterCount) {
+    els.employeeMobileFilterCount.textContent = String(filters.length);
+    els.employeeMobileFilterCount.classList.toggle("hidden", filters.length === 0);
+  }
+  if (els.employeeActiveFilterChips) {
+    els.employeeActiveFilterChips.innerHTML = filters.map((filter) => `
+      <span class="mobile-active-filter-chip"><span title="${escapeHtml(filter.label)}">${escapeHtml(filter.label)}</span>
+      <button type="button" data-clear-employee-mobile-filter="${escapeHtml(filter.key)}" aria-label="Bỏ lọc ${escapeHtml(filter.label)}">×</button></span>`).join("");
+  }
+}
+
+function getEmployeeMobileResultScopeLabel() {
+  const filter = state.employeeDateFilter || { mode: "all" };
+  if (filter.mode === "today") return formatDateOnly(todayInputValue());
+  if (filter.mode === "yesterday") return formatDateOnly(yesterdayInputValue());
+  if (filter.mode === "current_month") return "Tháng này";
+  if (filter.mode === "previous_month") return "Tháng trước";
+  if (filter.mode === "single") return filter.single ? formatDateOnly(filter.single) : "Ngày cụ thể";
+  if (filter.mode === "range") {
+    if (filter.from && filter.to) return `${formatDateOnly(filter.from)} – ${formatDateOnly(filter.to)}`;
+    if (filter.from) return `Từ ${formatDateOnly(filter.from)}`;
+    if (filter.to) return `Đến ${formatDateOnly(filter.to)}`;
+    return "Khoảng ngày";
+  }
+  return "Toàn thời gian";
+}
+
+function updateEmployeeMobileResultSummary(groupCount = 0) {
+  if (!els.employeeMobileResultSummary) return;
+  els.employeeMobileResultSummary.textContent = `▣ ${getEmployeeMobileResultScopeLabel()} • ${Math.max(0, Number(groupCount || 0))} Phiếu công việc`;
+}
+
+function resetEmployeeMobileFilters() {
+  state.employeeStatusFilter = "all";
+  state.employeeCompletedTypeFilter = "all";
+  state.employeeDateFilter = { mode: "today", single: todayInputValue(), from: "", to: "" };
+  if (els.employeeStatusFilter) els.employeeStatusFilter.value = "all";
+  if (els.employeeCompletedTypeFilter) els.employeeCompletedTypeFilter.value = "all";
+  if (els.employeeDateMode) els.employeeDateMode.value = "today";
+  if (els.employeeSingleDate) els.employeeSingleDate.value = todayInputValue();
+  if (els.employeeDateFrom) els.employeeDateFrom.value = "";
+  if (els.employeeDateTo) els.employeeDateTo.value = "";
+  updateCompletedTypeFilterVisibility("employee");
+  refreshDateFilterVisibility("employee");
+  renderEmployeeTasks();
+  renderEmployeeWorkOrderSuggestions();
+}
+
+function clearEmployeeMobileFilter(key) {
+  if (key === "status") {
+    state.employeeStatusFilter = "all";
+    state.employeeCompletedTypeFilter = "all";
+    if (els.employeeStatusFilter) els.employeeStatusFilter.value = "all";
+    if (els.employeeCompletedTypeFilter) els.employeeCompletedTypeFilter.value = "all";
+  } else if (key === "completedType") {
+    state.employeeCompletedTypeFilter = "all";
+    if (els.employeeCompletedTypeFilter) els.employeeCompletedTypeFilter.value = "all";
+  } else if (key === "date") {
+    state.employeeDateFilter = { mode: "all", single: "", from: "", to: "" };
+    if (els.employeeDateMode) els.employeeDateMode.value = "all";
+    if (els.employeeSingleDate) els.employeeSingleDate.value = "";
+    if (els.employeeDateFrom) els.employeeDateFrom.value = "";
+    if (els.employeeDateTo) els.employeeDateTo.value = "";
+  }
+  updateCompletedTypeFilterVisibility("employee");
+  refreshDateFilterVisibility("employee");
+  renderEmployeeTasks();
+  renderEmployeeWorkOrderSuggestions();
+}
+
+function getEmployeeSearchScopedTasks() {
+  let tasks = state.tasks
+    .filter((task) => isTaskInDateFilter(task, state.employeeDateFilter))
+    .map((task) => ({ ...task, displayStatus: getDisplayStatus(task) }));
+  if (state.employeeStatusFilter !== "all") tasks = tasks.filter((task) => taskMatchesStatusFilter(task, state.employeeStatusFilter));
+  if (state.employeeStatusFilter === "completed" && state.employeeCompletedTypeFilter !== "all") {
+    tasks = tasks.filter((task) => getCompletedTaskGroup(task) === state.employeeCompletedTypeFilter);
+  }
+  return tasks;
+}
+
+function getEmployeeWorkOrderSearchResults(queryText = state.employeeWorkOrderSearch) {
+  const queryValue = normalizeSearchText(queryText);
+  if (!queryValue) return [];
+  return sortTicketGroupsForDisplay(groupTasksByWorkOrder(getEmployeeSearchScopedTasks()))
+    .map((group) => ({ ...group, searchScore: getWorkOrderSearchScore(group.name, queryValue) }))
+    .filter((group) => Number.isFinite(group.searchScore))
+    .sort((a, b) => a.searchScore - b.searchScore || b.createdAtMs - a.createdAtMs || a.name.localeCompare(b.name, "vi"));
+}
+
+function hideEmployeeWorkOrderSuggestions() {
+  if (!els.employeeWorkOrderSuggestions) return;
+  els.employeeWorkOrderSuggestions.classList.add("hidden");
+  els.employeeWorkOrderSuggestions.innerHTML = "";
+  els.employeeWorkOrderSearch?.setAttribute("aria-expanded", "false");
+  state.employeeWorkOrderSuggestionIndex = -1;
+}
+
+function updateEmployeeWorkOrderSuggestionActiveState() {
+  const options = Array.from(els.employeeWorkOrderSuggestions?.querySelectorAll?.("[data-employee-work-order-search-value]") || []);
+  options.forEach((option, index) => {
+    const active = index === state.employeeWorkOrderSuggestionIndex;
+    option.classList.toggle("is-active", active);
+    option.setAttribute("aria-selected", active ? "true" : "false");
+    if (active) option.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function renderEmployeeWorkOrderSuggestions() {
+  const box = els.employeeWorkOrderSuggestions;
+  const input = els.employeeWorkOrderSearch;
+  if (!box || !input) return;
+  const queryText = input.value.trim();
+  state.employeeWorkOrderSearch = queryText;
+  els.employeeClearWorkOrderSearch?.classList.toggle("hidden", !queryText);
+  if (!queryText || document.activeElement !== input) return hideEmployeeWorkOrderSuggestions();
+  const unique = new Map();
+  getEmployeeWorkOrderSearchResults(queryText).forEach((item) => {
+    const key = normalizeSearchText(item.name);
+    const current = unique.get(key);
+    if (current) { current.ticketCount += 1; current.taskCount += Number(item.totalTaskCount || item.tasks?.length || 0); }
+    else unique.set(key, { ...item, ticketCount: 1, taskCount: Number(item.totalTaskCount || item.tasks?.length || 0) });
+  });
+  const suggestions = Array.from(unique.values()).slice(0, 8);
+  state.employeeWorkOrderSuggestionIndex = suggestions.length ? 0 : -1;
+  box.classList.remove("hidden");
+  input.setAttribute("aria-expanded", "true");
+  if (!suggestions.length) {
+    box.innerHTML = '<div class="admin-work-order-suggestion-empty">Không tìm thấy tên Phiếu công việc gần giống theo bộ lọc hiện tại.</div>';
+    return;
+  }
+  box.innerHTML = suggestions.map((item, index) => `
+    <button class="admin-work-order-suggestion${index === 0 ? " is-active" : ""}" type="button" role="option"
+      aria-selected="${index === 0 ? "true" : "false"}" data-employee-work-order-search-value="${escapeHtml(item.name)}">
+      <strong>${escapeHtml(item.name)}</strong><span>${item.ticketCount > 1 ? `${item.ticketCount} phiếu • ` : ""}${item.taskCount} công việc</span>
+    </button>`).join("");
+}
+
+function setEmployeeWorkOrderSearch(value) {
+  const next = String(value || "").trim();
+  state.employeeWorkOrderSearch = next;
+  state.employeeWorkOrderSuggestionIndex = -1;
+  if (els.employeeWorkOrderSearch) els.employeeWorkOrderSearch.value = next;
+  els.employeeClearWorkOrderSearch?.classList.toggle("hidden", !next);
+  hideEmployeeWorkOrderSuggestions();
+  renderEmployeeTasks();
+}
+
+function bindEmployeeWorkOrderSearch() {
+  const input = els.employeeWorkOrderSearch;
+  const box = els.employeeWorkOrderSuggestions;
+  if (!input || !box) return;
+  const handle = () => {
+    state.employeeWorkOrderSearch = input.value.trim();
+    state.employeeWorkOrderSuggestionIndex = -1;
+    renderEmployeeTasks();
+    renderEmployeeWorkOrderSuggestions();
+  };
+  input.addEventListener("input", handle);
+  input.addEventListener("search", handle);
+  input.addEventListener("focus", renderEmployeeWorkOrderSuggestions);
+  input.addEventListener("keydown", (event) => {
+    const options = Array.from(box.querySelectorAll("[data-employee-work-order-search-value]"));
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!options.length) return renderEmployeeWorkOrderSuggestions();
+      event.preventDefault();
+      const dir = event.key === "ArrowDown" ? 1 : -1;
+      const current = state.employeeWorkOrderSuggestionIndex < 0 ? 0 : state.employeeWorkOrderSuggestionIndex;
+      state.employeeWorkOrderSuggestionIndex = (current + dir + options.length) % options.length;
+      updateEmployeeWorkOrderSuggestionActiveState();
+    } else if (event.key === "Enter" && options.length) {
+      event.preventDefault();
+      const selected = options[state.employeeWorkOrderSuggestionIndex >= 0 ? state.employeeWorkOrderSuggestionIndex : 0];
+      if (selected) setEmployeeWorkOrderSearch(selected.dataset.employeeWorkOrderSearchValue || "");
+    } else if (event.key === "Escape") hideEmployeeWorkOrderSuggestions();
+  });
+  box.addEventListener("pointerdown", (event) => event.preventDefault());
+  box.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-employee-work-order-search-value]");
+    if (!option) return;
+    setEmployeeWorkOrderSearch(option.dataset.employeeWorkOrderSearchValue || "");
+    input.focus();
+  });
+  els.employeeClearWorkOrderSearch?.addEventListener("click", () => { setEmployeeWorkOrderSearch(""); input.focus(); });
+  document.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest(".employee-work-order-search")) hideEmployeeWorkOrderSuggestions();
+  });
+}
+
+function renderEmployeeWorkOrderSearchSummary(resultCount = 0) {
+  const el = els.employeeWorkOrderSearchSummary;
+  if (!el) return;
+  const query = String(state.employeeWorkOrderSearch || "").trim();
+  els.employeeClearWorkOrderSearch?.classList.toggle("hidden", !query);
+  if (!query) { el.classList.add("hidden"); el.textContent = ""; return; }
+  el.classList.remove("hidden");
+  el.textContent = `Đang tìm trong công việc của bạn: ${resultCount} kết quả gần giống “${query}”.`;
+}
+
 function setupMobileAdminCompactControls() {
   try {
     state.mobileEmployeeStatusExpanded = localStorage.getItem("quanlynhansu-mobile-employee-status") !== "collapsed";
@@ -5717,6 +6015,20 @@ function setupMobileAdminCompactControls() {
   els.adminMobileFilterApplyBtn?.addEventListener("click", () => setAdminMobileFilterSheetOpen(false));
   els.adminMobileFilterResetBtn?.addEventListener("click", resetAdminMobileFilters);
 
+  els.employeeMobileFilterOpenBtn?.addEventListener("click", () => setEmployeeMobileFilterSheetOpen(true));
+  els.employeeMobileFilterCloseBtn?.addEventListener("click", () => setEmployeeMobileFilterSheetOpen(false));
+  els.employeeMobileFilterBackdrop?.addEventListener("click", () => setEmployeeMobileFilterSheetOpen(false));
+  els.employeeMobileFilterModalRoot?.addEventListener("click", (event) => {
+    if (event.target === els.employeeMobileFilterModalRoot) setEmployeeMobileFilterSheetOpen(false);
+  });
+  els.employeeMobileFilterApplyBtn?.addEventListener("click", () => setEmployeeMobileFilterSheetOpen(false));
+  els.employeeMobileFilterResetBtn?.addEventListener("click", resetEmployeeMobileFilters);
+  els.employeeActiveFilterChips?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-clear-employee-mobile-filter]");
+    if (!button) return;
+    clearEmployeeMobileFilter(button.dataset.clearEmployeeMobileFilter || "");
+  });
+
   els.adminActiveFilterChips?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-clear-mobile-filter]");
     if (!button) return;
@@ -5730,6 +6042,7 @@ function setupMobileAdminCompactControls() {
     if (event.key !== "Escape") return;
     setMobileTaskPanelMenuOpen(false);
     setAdminMobileFilterSheetOpen(false);
+    setEmployeeMobileFilterSheetOpen(false);
     setEmployeeStatusDetailSheetOpen(false);
     closeWorkOrderSettingsModal();
   });
@@ -6936,6 +7249,8 @@ function renderEmployeeTasks() {
       displayStatus: getDisplayStatus(task)
     }));
 
+  updateEmployeeMobileFilterUI();
+
   if (state.employeeStatusFilter !== "all") {
     filtered = filtered.filter((task) => taskMatchesStatusFilter(task, state.employeeStatusFilter));
   }
@@ -6949,7 +7264,28 @@ function renderEmployeeTasks() {
   renderCompletedTypeReport(filtered, "employee");
   refreshDateFilterVisibility("employee");
 
+  const searchQuery = String(state.employeeWorkOrderSearch || "").trim();
+  if (searchQuery) {
+    const groups = getEmployeeWorkOrderSearchResults(searchQuery);
+    renderEmployeeWorkOrderSearchSummary(groups.length);
+    updateEmployeeMobileResultSummary(groups.length);
+    els.employeeCompletedTypeReport?.classList.add("hidden");
+    if (!groups.length) {
+      els.employeeTaskList.innerHTML = `Không tìm thấy Phiếu công việc có tên gần giống “${escapeHtml(searchQuery)}” theo bộ lọc hiện tại.`;
+      els.employeeTaskList.classList.add("empty");
+      return;
+    }
+    els.employeeTaskList.classList.remove("empty");
+    els.employeeTaskList.innerHTML = groups.map((group) => renderTicketGroup(group, "employee")).join("");
+    updateCountdowns();
+    refreshPhotoReportPageIfOpen();
+    return;
+  }
+
+  renderEmployeeWorkOrderSearchSummary(0);
+
   if (!filtered.length) {
+    updateEmployeeMobileResultSummary(0);
     els.employeeTaskList.innerHTML = "Không có công việc phù hợp bộ lọc.";
     els.employeeTaskList.classList.add("empty");
     return;
@@ -6957,12 +7293,13 @@ function renderEmployeeTasks() {
 
   els.employeeTaskList.classList.remove("empty");
 
+  const employeeGroups = sortTicketGroupsForDisplay(groupTasksByWorkOrder(filtered));
+  updateEmployeeMobileResultSummary(employeeGroups.length);
+
   // Tài khoản Nhân viên cũng dùng cùng thứ tự ưu tiên như Admin/Giám sát.
   // Đặc biệt khi chọn "Tất cả trạng thái", Phiếu quá hạn luôn nằm trên
   // Phiếu đang làm, nhưng vẫn ở dưới Phiếu chưa giao việc/chờ xác nhận.
-  els.employeeTaskList.innerHTML = sortTicketGroupsForDisplay(
-    groupTasksByWorkOrder(filtered)
-  )
+  els.employeeTaskList.innerHTML = employeeGroups
     .map((group) => renderTicketGroup(group, "employee"))
     .join("");
 
