@@ -7328,6 +7328,7 @@ function renderTaskCard(task, mode) {
         </div>
 
         ${renderPhotoReportBox(task, mode)}
+        ${renderPhotoRequirementHistoryBox(task)}
         ${renderHotelInfoBox(task)}
         ${renderTimeExtensionBox(task)}
         ${renderAssigneeHistoryBox(task)}
@@ -7611,9 +7612,28 @@ async function editTaskPhotoRequirement(taskId) {
 
   const nextRequired = nextCount > 0;
 
+  const previousRequired = currentRequired;
+  const previousCount = currentRequired ? currentCount : 0;
+  const appliedCount = nextRequired ? nextCount : 0;
+  const changedAt = Timestamp.now();
+  const historyRecord = {
+    previousRequired,
+    previousCount,
+    nextRequired,
+    nextCount: appliedCount,
+    changedAt,
+    changedByUid: state.user?.uid || "",
+    changedByName: state.profile?.name || state.user?.email || "Admin"
+  };
+
   await updateDoc(doc(db, "tasks", task.id), {
     photoRequired: nextRequired,
-    requiredPhotoCount: nextRequired ? nextCount : 0
+    requiredPhotoCount: appliedCount,
+    photoRequirementHistory: arrayUnion(historyRecord),
+    photoRequirementChangeCount: increment(1),
+    lastPhotoRequirementChangedAt: changedAt,
+    lastPhotoRequirementChangedByUid: historyRecord.changedByUid,
+    lastPhotoRequirementChangedByName: historyRecord.changedByName
   });
 
   showToast(
@@ -7621,6 +7641,44 @@ async function editTaskPhotoRequirement(taskId) {
       ? `Đã cập nhật yêu cầu ảnh báo cáo thành ${nextCount} hình.`
       : "Đã tắt bắt buộc đăng hình cho task này."
   );
+}
+
+function renderPhotoRequirementHistoryBox(task) {
+  const history = Array.isArray(task?.photoRequirementHistory)
+    ? task.photoRequirementHistory.filter((item) => item && typeof item === "object")
+    : [];
+  const count = Number(task?.photoRequirementChangeCount || history.length || 0);
+
+  if (!count && !history.length) return "";
+
+  const rows = history
+    .slice()
+    .sort((a, b) => (timestampToDate(b.changedAt)?.getTime() || 0) - (timestampToDate(a.changedAt)?.getTime() || 0))
+    .map((item, index) => {
+      const previousText = item.previousRequired
+        ? `${Number(item.previousCount || 0)} hình`
+        : "Không bắt buộc";
+      const nextText = item.nextRequired
+        ? `${Number(item.nextCount || 0)} hình`
+        : "Không bắt buộc";
+      return `
+        <li>
+          <strong>Lần ${history.length - index}: ${escapeHtml(previousText)} → ${escapeHtml(nextText)}</strong>
+          <span>${formatDateTime(item.changedAt)} • ${escapeHtml(item.changedByName || "Admin")}</span>
+        </li>
+      `;
+    })
+    .join("");
+
+  return `
+    <div class="extension-box photo-requirement-history-box">
+      <div class="extension-box-head">
+        <strong>Đã điều chỉnh số ảnh ${count} lần</strong>
+        <span>Lịch sử yêu cầu ảnh báo cáo</span>
+      </div>
+      ${rows ? `<ul class="extension-list">${rows}</ul>` : ""}
+    </div>
+  `;
 }
 
 function renderResultBox(task) {
