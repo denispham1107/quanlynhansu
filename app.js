@@ -136,6 +136,9 @@ const state = {
   photoViewerPhotos: [],
   photoViewerIndex: -1,
   photoReportSelectedKeys: new Set(),
+  workPhotoManagerRowId: null,
+  workPhotoManagerTaskId: null,
+  workPhotoManagerSelectedKeys: new Set(),
   deletingEmployeeUid: null,
   editingSupervisorUid: null,
   mobileTaskDetailOverrides: new Map(),
@@ -3739,6 +3742,7 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
 // =========================
 let taskRowIdCounter = 0;
 let photoRequirementTouched = false;
+const taskRowWorkPhotos = new Map();
 
 const LUNCH_BREAK_AUTO_TITLE = "Phiếu nghỉ trưa";
 const HOTEL_AUTO_TITLE = "Làm hotel";
@@ -3821,6 +3825,11 @@ function createTaskRowElement(prefill = null) {
         <button type="button" class="icon-btn small task-row-remove-btn" data-action="remove-task-row" data-row-id="${rowId}" aria-label="Xóa công việc này" title="Xóa công việc này">×</button>
       </div>
     </div>
+    <div class="task-work-photo-actions">
+      <button type="button" class="btn success small" data-action="upload-work-photos" data-row-id="${rowId}">Đăng ảnh CV</button>
+      <button type="button" class="btn ghost small work-photo-view-btn hidden" data-action="view-work-photos" data-row-id="${rowId}">Ảnh CV (0)</button>
+      <span class="task-work-photo-note">Ảnh hướng dẫn, mẫu hoặc yêu cầu cần thực hiện.</span>
+    </div>
     <label class="task-row-field task-row-title-field">
       <span class="task-field-label">Tên công việc</span>
       <input type="text" class="row-title" list="workTemplateOptions" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
@@ -3889,6 +3898,7 @@ function createTaskRowElement(prefill = null) {
   dateInput.value = prefill?.taskDate || todayInputValue();
 
   if (prefill) {
+    taskRowWorkPhotos.set(rowId, Array.isArray(prefill.workPhotos) ? prefill.workPhotos.slice() : []);
     wrapper.querySelector(".row-title").value = prefill.title || "";
     wrapper.querySelector(".row-description").value = prefill.description || "";
     wrapper.querySelector(".row-hours").value = Number.isFinite(prefill.hours) ? prefill.hours : 0;
@@ -3907,9 +3917,11 @@ function createTaskRowElement(prefill = null) {
     }
   }
 
+  if (!taskRowWorkPhotos.has(rowId)) taskRowWorkPhotos.set(rowId, []);
   syncLunchBreakRowControls(wrapper);
   syncWorkTemplateDurationLock(wrapper, { applyDuration: true });
   syncTaskRowSummary(wrapper);
+  syncTaskRowWorkPhotoButtons(wrapper);
   return wrapper;
 }
 
@@ -3983,6 +3995,7 @@ function removeTaskRow(rowId) {
   const row = els.taskRowsContainer.querySelector(`[data-row-id="${rowId}"]`);
   const rowToActivate = row?.nextElementSibling || row?.previousElementSibling || null;
   row?.remove();
+  taskRowWorkPhotos.delete(rowId);
   updateTaskRowHeadings();
   if (rowToActivate?.classList?.contains("task-row")) activateTaskRow(rowToActivate);
   syncPhotoRequirementDefaultFromTaskTypes();
@@ -4124,6 +4137,7 @@ function syncLunchBreakRowControls(row, changedInput = null) {
   if (Number(minutesInput.value || 0) < 0) minutesInput.value = 0;
 }
 function resetTaskRows() {
+  taskRowWorkPhotos.clear();
   els.taskRowsContainer.innerHTML = "";
   addTaskRow();
 }
@@ -4202,7 +4216,19 @@ els.addTaskRowBtn.addEventListener("click", () => {
   addTaskRow({ focusTitle: true, scrollIntoView: true });
 });
 
-els.taskRowsContainer.addEventListener("click", (event) => {
+els.taskRowsContainer.addEventListener("click", async (event) => {
+  const uploadWorkPhotoButton = event.target.closest('[data-action="upload-work-photos"]');
+  if (uploadWorkPhotoButton) {
+    await openWorkPhotoUploadPicker(uploadWorkPhotoButton.dataset.rowId, uploadWorkPhotoButton);
+    return;
+  }
+
+  const viewWorkPhotoButton = event.target.closest('[data-action="view-work-photos"]');
+  if (viewWorkPhotoButton) {
+    openWorkPhotoManager({ rowId: viewWorkPhotoButton.dataset.rowId });
+    return;
+  }
+
   const removeButton = event.target.closest('[data-action="remove-task-row"]');
   if (removeButton) {
     removeTaskRow(removeButton.dataset.rowId);
@@ -4322,6 +4348,7 @@ function openEditWorkOrderModal(workOrderId) {
         isLunchBreak: Boolean(task.isLunchBreak),
         isHotel: Boolean(task.isHotel),
         hotelPetCount: Number(task.hotelPetCount || 0),
+        workPhotos: Array.isArray(task.workPhotos) ? task.workPhotos : [],
         hours: Math.floor(deadlineMinutes / 60),
         minutes: deadlineMinutes % 60
       }));
@@ -4371,6 +4398,8 @@ function readTaskRowsData() {
 
     return {
       index,
+      rowId: row.dataset.rowId || "",
+      workPhotos: (taskRowWorkPhotos.get(row.dataset.rowId || "") || []).slice(),
       title,
       description,
       taskDate,
@@ -4651,6 +4680,9 @@ async function persistWorkOrder(dispatch, button) {
         resultType: null,
         differenceMinutes: null,
         differencePercent: null,
+        workPhotos: Array.isArray(row.workPhotos) ? row.workPhotos : [],
+        workPhotoCount: Array.isArray(row.workPhotos) ? row.workPhotos.length : 0,
+        lastWorkPhotoUploadedAt: getLatestUploadedAtFromPhotos(row.workPhotos || []),
         // Phiếu Nghỉ trưa là thời gian nghỉ nên không bắt buộc đăng hình.
         // Phiếu Hotel vẫn áp dụng đúng cài đặt bắt buộc đăng hình của Admin.
         photoRequired: row.isLunchBreak ? false : photoOptions.photoRequired,
@@ -4889,7 +4921,7 @@ function getTaskPhotoStoragePaths(tasks = []) {
   const paths = new Set();
 
   tasks.forEach((task) => {
-    getTaskPhotos(task).forEach((photo) => {
+    [...getTaskPhotos(task), ...getTaskWorkPhotos(task)].forEach((photo) => {
       const path = getStoragePathFromPhoto(photo);
       if (path) paths.add(path);
     });
@@ -7327,6 +7359,7 @@ function renderTaskCard(task, mode) {
           </div>
         </div>
 
+        ${renderWorkPhotoBox(task, mode)}
         ${renderPhotoReportBox(task, mode)}
         ${renderPhotoRequirementHistoryBox(task)}
         ${renderRedoRequestHistoryBox(task)}
@@ -7934,6 +7967,10 @@ document.addEventListener("click", async (event) => {
     openPhotoReportPage(taskId);
   }
 
+  if (action === "view-work-photos") {
+    openWorkPhotoManager({ taskId });
+  }
+
   if (action === "edit-photo-requirement") {
     if (event.__photoRequirementHandled) return;
     event.preventDefault();
@@ -8002,6 +8039,198 @@ document.addEventListener("keydown", async (event) => {
   }
 });
 
+
+
+// =========================
+// Ảnh công việc (Ảnh CV)
+// =========================
+function getTaskWorkPhotos(task) {
+  return Array.isArray(task?.workPhotos) ? task.workPhotos.filter((item) => item?.url) : [];
+}
+
+function syncTaskRowWorkPhotoButtons(row) {
+  if (!row) return;
+  const rowId = row.dataset.rowId || "";
+  const count = (taskRowWorkPhotos.get(rowId) || []).length;
+  const button = row.querySelector('[data-action="view-work-photos"]');
+  if (!button) return;
+  button.textContent = `Ảnh CV (${count})`;
+  button.classList.toggle("hidden", count === 0);
+}
+
+function getWorkPhotoManagerSource() {
+  if (state.workPhotoManagerRowId) {
+    return {
+      type: "row",
+      id: state.workPhotoManagerRowId,
+      photos: (taskRowWorkPhotos.get(state.workPhotoManagerRowId) || []).slice(),
+      title: "Ảnh công việc đang chuẩn bị"
+    };
+  }
+  const task = state.tasks.find((item) => item.id === state.workPhotoManagerTaskId);
+  return {
+    type: "task",
+    id: task?.id || "",
+    task,
+    photos: getTaskWorkPhotos(task).slice(),
+    title: task?.title || "Ảnh công việc"
+  };
+}
+
+function closeWorkPhotoManager() {
+  document.querySelector(".work-photo-manager-backdrop")?.remove();
+  state.workPhotoManagerRowId = null;
+  state.workPhotoManagerTaskId = null;
+  state.workPhotoManagerSelectedKeys = new Set();
+}
+
+async function deleteWorkPhotoFiles(photos) {
+  for (const photo of photos) {
+    const path = getStoragePathFromPhoto(photo);
+    if (!path) continue;
+    try { await deleteObject(storageRef(storage, path)); } catch (error) {
+      if (error?.code !== "storage/object-not-found") console.warn("Không xóa được ảnh CV", error);
+    }
+  }
+}
+
+async function saveWorkPhotoManagerPhotos(source, nextPhotos) {
+  if (source.type === "row") {
+    taskRowWorkPhotos.set(source.id, nextPhotos);
+    const row = els.taskRowsContainer.querySelector(`[data-row-id="${getSafeSelectorValue(source.id)}"]`);
+    syncTaskRowWorkPhotoButtons(row);
+    return;
+  }
+  if (!source.task) return;
+  await updateDoc(doc(db, "tasks", source.task.id), {
+    workPhotos: nextPhotos,
+    workPhotoCount: nextPhotos.length,
+    lastWorkPhotoUploadedAt: getLatestUploadedAtFromPhotos(nextPhotos)
+  });
+}
+
+function renderWorkPhotoManager() {
+  const source = getWorkPhotoManagerSource();
+  const photos = source.photos;
+  const selected = state.workPhotoManagerSelectedKeys;
+  const isManager = isManagementProfile();
+  const old = document.querySelector(".work-photo-manager-backdrop");
+  old?.remove();
+  const el = document.createElement("div");
+  el.className = "work-photo-manager-backdrop";
+  el.innerHTML = `
+    <section class="work-photo-manager-card" role="dialog" aria-modal="true" aria-label="Quản lý ảnh công việc">
+      <header class="work-photo-manager-head">
+        <div><span class="work-photo-manager-eyebrow">ẢNH CÔNG VIỆC</span><h3>${escapeHtml(source.title)}</h3><p>${photos.length} ảnh đã đăng</p></div>
+        <button type="button" class="icon-btn" data-work-photo-close aria-label="Đóng">×</button>
+      </header>
+      <div class="work-photo-manager-toolbar ${isManager ? "" : "is-view-only"}">
+        <strong>${isManager ? `Đã chọn ${selected.size}/${photos.length} ảnh` : `${photos.length} ảnh công việc`}</strong>
+        ${isManager ? `<div>
+          <button class="btn ghost small" type="button" data-work-photo-select-all>Chọn tất cả</button>
+          <button class="btn ghost small" type="button" data-work-photo-clear>Bỏ chọn</button>
+          <button class="btn primary small" type="button" data-work-photo-download ${selected.size ? "" : "disabled"}>Tải đã chọn</button>
+          <button class="btn secondary small" type="button" data-work-photo-share ${selected.size ? "" : "disabled"}>Chia sẻ</button>
+          <button class="btn danger small" type="button" data-work-photo-delete ${selected.size ? "" : "disabled"}>Xóa ảnh</button>
+        </div>` : ""}
+      </div>
+      <div class="work-photo-manager-grid ${photos.length ? "" : "empty-box"}">
+        ${photos.length ? photos.map((photo,index)=>{
+          const key=getPhotoStableKey(photo,index); const checked=selected.has(key);
+          return `<article class="work-photo-manager-item ${checked?"is-selected":""}">
+            <button type="button" class="work-photo-open" data-work-photo-index="${index}">
+              <img src="${escapeHtml(photo.url)}" alt="Ảnh công việc ${index+1}" loading="lazy" />
+              <strong>${escapeHtml(photo.name || `Ảnh ${index+1}`)}</strong>
+              <span>${formatFullDateTime(photo.uploadedAt)} • ${formatFileSize(photo.size)}</span>
+            </button>
+            ${isManager ? `<label class="work-photo-select"><input type="checkbox" data-work-photo-key="${escapeHtml(key)}" ${checked?"checked":""}/><span>✓</span></label>` : ""}
+          </article>`;
+        }).join("") : "Chưa có ảnh công việc."}
+      </div>
+    </section>`;
+  document.body.appendChild(el);
+  el.querySelectorAll("[data-work-photo-close]").forEach(btn=>btn.addEventListener("click",closeWorkPhotoManager));
+  el.addEventListener("click", async (event)=>{
+    if (event.target === el) { closeWorkPhotoManager(); return; }
+    const open=event.target.closest("[data-work-photo-index]");
+    if (open) { state.photoViewerPhotos=photos; openPhotoViewer(Number(open.dataset.workPhotoIndex)); return; }
+    if (event.target.closest("[data-work-photo-select-all]")) {
+      state.workPhotoManagerSelectedKeys=new Set(photos.map((p,i)=>getPhotoStableKey(p,i))); renderWorkPhotoManager(); return;
+    }
+    if (event.target.closest("[data-work-photo-clear]")) { state.workPhotoManagerSelectedKeys=new Set(); renderWorkPhotoManager(); return; }
+    const selectedPhotos=photos.filter((p,i)=>state.workPhotoManagerSelectedKeys.has(getPhotoStableKey(p,i)));
+    const downloadBtn=event.target.closest("[data-work-photo-download]");
+    if (downloadBtn) {
+      if (selectedPhotos.length===1) {
+        const blob=await getPhotoBlobForZip(selectedPhotos[0]); downloadBlobFile(blob,getSinglePhotoDownloadName(selectedPhotos[0]));
+      } else if (selectedPhotos.length>1) {
+        setButtonLoading(downloadBtn,true,"Đang tạo ZIP...");
+        try { const result=await createPhotoReportZipBlob({id:source.id,title:source.title,workOrderName:"Ảnh CV"},selectedPhotos); downloadBlobFile(result.zipBlob,result.fileName); }
+        finally { setButtonLoading(downloadBtn,false); }
+      }
+      return;
+    }
+    const shareBtn=event.target.closest("[data-work-photo-share]");
+    if (shareBtn) { await sharePhotoReportCollection({task:{id:`work-${source.id}`,title:source.title,workOrderName:"Ảnh CV"},photos:selectedPhotos,button:shareBtn,cacheScope:"work-selected",emptyMessage:"Vui lòng chọn ảnh CV để chia sẻ."}); return; }
+    const deleteBtn=event.target.closest("[data-work-photo-delete]");
+    if (deleteBtn) {
+      if (!selectedPhotos.length || !window.confirm(`Xóa vĩnh viễn ${selectedPhotos.length} ảnh CV đã chọn?`)) return;
+      setButtonLoading(deleteBtn,true,"Đang xóa...");
+      try {
+        await deleteWorkPhotoFiles(selectedPhotos);
+        const keys=new Set(selectedPhotos.map((p,i)=>getPhotoStableKey(p,i)));
+        const next=photos.filter((p,i)=>!state.workPhotoManagerSelectedKeys.has(getPhotoStableKey(p,i)));
+        await saveWorkPhotoManagerPhotos(source,next);
+        state.workPhotoManagerSelectedKeys=new Set();
+        toast(`Đã xóa ${selectedPhotos.length} ảnh CV.`,"success"); renderWorkPhotoManager();
+      } catch(error) { console.error(error); toast(error.message||"Không xóa được ảnh CV.","error"); setButtonLoading(deleteBtn,false); }
+    }
+  });
+  el.addEventListener("change",event=>{
+    const checkbox=event.target.closest("[data-work-photo-key]"); if(!checkbox)return;
+    const next=new Set(state.workPhotoManagerSelectedKeys); checkbox.checked?next.add(checkbox.dataset.workPhotoKey):next.delete(checkbox.dataset.workPhotoKey);
+    state.workPhotoManagerSelectedKeys=next; renderWorkPhotoManager();
+  });
+}
+
+function openWorkPhotoManager({ rowId = null, taskId = null } = {}) {
+  state.workPhotoManagerRowId = rowId || null;
+  state.workPhotoManagerTaskId = taskId || null;
+  state.workPhotoManagerSelectedKeys = new Set();
+  renderWorkPhotoManager();
+}
+
+async function openWorkPhotoUploadPicker(rowId, button) {
+  const row = els.taskRowsContainer.querySelector(`[data-row-id="${getSafeSelectorValue(rowId)}"]`);
+  if (!row) return;
+  const input=document.createElement("input"); input.type="file"; input.accept="image/*"; input.multiple=true; input.hidden=true; document.body.appendChild(input);
+  input.addEventListener("change",async()=>{
+    const files=Array.from(input.files||[]); input.remove();
+    const error=validateSelectedPhotoFiles(files); if(error){toast(error,"error");return;}
+    setButtonLoading(button,true,"Đang đăng...");
+    try {
+      const current=(taskRowWorkPhotos.get(rowId)||[]).slice();
+      for(let i=0;i<files.length;i+=1){
+        if(button) button.textContent=`Đang đăng ${i+1}/${files.length}...`;
+        const item=await optimizePhotoFileForUpload(files[i]); const file=item.file;
+        const id=makeId("work-photo"); const safe=sanitizeStorageFileName(file.name||item.originalName);
+        const path=`task-work-photos/${state.user.uid}/${rowId}/${Date.now()}-${id}-${safe}`; const ref=storageRef(storage,path);
+        await uploadBytes(ref,file,{contentType:file.type||"image/jpeg",customMetadata:{uploadedByUid:state.user.uid,kind:"work-instruction"}});
+        const url=await getDownloadURL(ref); const now=Timestamp.fromDate(new Date());
+        current.push({id,name:file.name||safe,originalName:item.originalName||file.name||safe,url,storagePath:path,contentType:file.type||"image/jpeg",size:Number(file.size||0),originalSize:Number(item.originalSize||file.size||0),optimized:Boolean(item.optimized),width:Number(item.width||0),height:Number(item.height||0),uploadedAt:now,uploadedByUid:state.user.uid,uploadedByName:state.profile?.name||state.user.email||"Admin"});
+      }
+      taskRowWorkPhotos.set(rowId,current); syncTaskRowWorkPhotoButtons(row); toast(`Đã đăng thành công ${files.length} ảnh CV.`,"success");
+    }catch(error){console.error(error);toast(error.message||"Không đăng được ảnh CV.","error");}
+    finally{setButtonLoading(button,false);}
+  });
+  input.click();
+}
+
+function renderWorkPhotoBox(task, mode) {
+  const count=getTaskWorkPhotos(task).length;
+  if(!count) return "";
+  return `<div class="work-photo-box"><div><strong>Ảnh công việc</strong><span>${count} ảnh hướng dẫn/mẫu</span></div><button class="btn success small" type="button" data-action="view-work-photos" data-task-id="${escapeHtml(task.id)}">Ảnh CV (${count})</button></div>`;
+}
 
 // =========================
 // Ảnh báo cáo công việc

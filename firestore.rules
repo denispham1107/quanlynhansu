@@ -162,6 +162,15 @@ service cloud.firestore {
         );
     }
 
+    match /appSettings/{settingId} {
+      // Cài đặt chung được tài khoản quản lý đọc realtime.
+      allow read: if isManagement();
+
+      // Không cho trình duyệt ghi trực tiếp. Việc lưu Cài đặt phải đi qua
+      // Cloud Function đã xác thực mật khẩu bí mật trong Secret Manager.
+      allow create, update, delete: if false;
+    }
+
     match /workOrders/{workOrderId} {
       // Admin đọc toàn bộ phiếu. Nhân viên cũng được đọc metadata phiếu
       // (tên phiếu, tổng số công việc) để tiêu đề phiếu hiển thị giống trang Admin.
@@ -268,7 +277,10 @@ service cloud.firestore {
           "requiredPhotoCount",
           "photos",
           "photoCount",
-          "lastPhotoUploadedAt"
+          "lastPhotoUploadedAt",
+          "workPhotos",
+          "workPhotoCount",
+          "lastWorkPhotoUploadedAt"
         ])
         && request.resource.data.id == taskId
         && request.resource.data.title is string
@@ -345,6 +357,11 @@ service cloud.firestore {
         && request.resource.data.photoCount is int
         && request.resource.data.photoCount == 0
         && request.resource.data.lastPhotoUploadedAt == null
+        && request.resource.data.workPhotos is list
+        && request.resource.data.workPhotos.size() <= 100
+        && request.resource.data.workPhotoCount is int
+        && request.resource.data.workPhotoCount == request.resource.data.workPhotos.size()
+        && (request.resource.data.lastWorkPhotoUploadedAt == null || request.resource.data.lastWorkPhotoUploadedAt is timestamp)
         && (request.resource.data.status == "draft" || hasPermission("dispatchWorkOrder"))
         && (
           (
@@ -385,6 +402,16 @@ service cloud.firestore {
             && request.resource.data.remainingMsAtPause == null
           )
         );
+
+      // Admin/Giám sát có quyền chỉnh Phiếu hoặc quản lý ảnh được cập nhật Ảnh CV.
+      allow update: if isManagement()
+        && (isAdmin() || hasPermission("editWorkOrder") || hasPermission("deleteReportPhotos") || hasPermission("managePhotoRequirements"))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["workPhotos", "workPhotoCount", "lastWorkPhotoUploadedAt"])
+        && request.resource.data.workPhotos is list
+        && request.resource.data.workPhotos.size() <= 100
+        && request.resource.data.workPhotoCount is int
+        && request.resource.data.workPhotoCount == request.resource.data.workPhotos.size()
+        && (request.resource.data.lastWorkPhotoUploadedAt == null || request.resource.data.lastWorkPhotoUploadedAt is timestamp);
 
       // Nhân viên được đăng hình báo cáo cho task đang làm của chính mình.
       // Ảnh thật lưu ở Firebase Storage; Firestore chỉ lưu metadata + số lượng.
@@ -588,17 +615,49 @@ service cloud.firestore {
           "differenceMinutes",
           "differencePercent",
           "queueStartAt",
-          "deadlineAt"
+          "deadlineAt",
+          "redoRequestHistory",
+          "redoRequestCount",
+          "lastRedoRequestedAt",
+          "lastRedoRequestedByUid",
+          "lastRedoRequestedByName"
         ])
-        && isValidTaskStatus(request.resource.data.status);
+        && isValidTaskStatus(request.resource.data.status)
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(["redoRequestHistory"])
+          || (
+            request.resource.data.redoRequestHistory is list
+            && request.resource.data.redoRequestHistory.size() <= 200
+            && request.resource.data.redoRequestCount is int
+            && request.resource.data.redoRequestCount >= 1
+            && request.resource.data.lastRedoRequestedAt is timestamp
+            && request.resource.data.lastRedoRequestedByUid == request.auth.uid
+            && request.resource.data.lastRedoRequestedByName is string
+          )
+        );
 
       // Chỉnh số lượng ảnh báo cáo bắt buộc.
       allow update: if hasPermission("managePhotoRequirements")
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["photoRequired", "requiredPhotoCount"])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "photoRequired",
+          "requiredPhotoCount",
+          "photoRequirementHistory",
+          "photoRequirementChangeCount",
+          "lastPhotoRequirementChangedAt",
+          "lastPhotoRequirementChangedByUid",
+          "lastPhotoRequirementChangedByName"
+        ])
         && request.resource.data.photoRequired is bool
         && request.resource.data.requiredPhotoCount is int
         && request.resource.data.requiredPhotoCount >= 0
-        && request.resource.data.requiredPhotoCount <= 100;
+        && request.resource.data.requiredPhotoCount <= 100
+        && request.resource.data.photoRequirementHistory is list
+        && request.resource.data.photoRequirementHistory.size() <= 200
+        && request.resource.data.photoRequirementChangeCount is int
+        && request.resource.data.photoRequirementChangeCount >= 1
+        && request.resource.data.lastPhotoRequirementChangedAt is timestamp
+        && request.resource.data.lastPhotoRequirementChangedByUid == request.auth.uid
+        && request.resource.data.lastPhotoRequirementChangedByName is string;
 
       // Xóa ảnh báo cáo: chỉ được cập nhật metadata ảnh, file thật do Storage Rules kiểm tra riêng.
       allow update: if hasPermission("deleteReportPhotos")

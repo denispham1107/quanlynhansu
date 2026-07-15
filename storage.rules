@@ -55,6 +55,17 @@ service firebase.storage {
         );
     }
 
+    match /task-work-photos/{ownerUid}/{rowId}/{fileName} {
+      // Ảnh CV chỉ dành cho tài khoản quản lý. Nhân viên không được đăng hoặc sửa.
+      allow read: if isManagement();
+      allow create: if isManagement()
+        && request.auth.uid == ownerUid
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow update: if false;
+      allow delete: if isManagement();
+    }
+
     match /task-photos/{taskId}/{fileName} {
       // Admin/Giám sát được xem toàn bộ ảnh báo cáo; nhân viên chỉ xem ảnh task của mình.
       allow read: if isManagement() || isTaskAssignee(taskId);

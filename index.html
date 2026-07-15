@@ -7496,6 +7496,25 @@
     }
 
 </style>
+
+  <style id="work-photo-feature-styles">
+    #taskModal .task-work-photo-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;padding:10px 12px;border:1px dashed #b8d9c4;border-radius:14px;background:#f4fff7}
+    #taskModal .task-work-photo-actions .task-work-photo-note{font-size:13px;color:#64748b}
+    .work-photo-box{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border:1px solid #bbefd0;border-radius:16px;background:#f2fff7;margin-top:10px}
+    .work-photo-box>div{display:flex;flex-direction:column;gap:3px}.work-photo-box span{font-size:13px;color:#64748b}
+    .work-photo-manager-backdrop{position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,.68);display:flex;align-items:center;justify-content:center;padding:20px}
+    .work-photo-manager-card{width:min(1180px,96vw);max-height:92vh;overflow:auto;background:#fff;border-radius:24px;box-shadow:0 30px 80px rgba(15,23,42,.35);padding:22px}
+    .work-photo-manager-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;border-bottom:1px solid #e2e8f0;padding-bottom:14px;margin-bottom:14px}
+    .work-photo-manager-head h3{margin:5px 0 3px;font-size:28px}.work-photo-manager-head p{margin:0;color:#64748b}.work-photo-manager-eyebrow{font-size:12px;font-weight:800;color:#16a34a;letter-spacing:.08em}
+    .work-photo-manager-toolbar{position:sticky;top:-22px;z-index:5;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:13px 0;background:#fff;border-bottom:1px solid #e2e8f0}
+    .work-photo-manager-toolbar>div{display:flex;gap:8px;flex-wrap:wrap}
+    .work-photo-manager-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;padding-top:16px}
+    .work-photo-manager-item{position:relative;border:2px solid #e2e8f0;border-radius:16px;overflow:hidden;background:#fff}.work-photo-manager-item.is-selected{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+    .work-photo-open{width:100%;border:0;background:none;padding:8px;text-align:left;cursor:pointer}.work-photo-open img{width:100%;height:170px;object-fit:cover;border-radius:11px;display:block}.work-photo-open strong,.work-photo-open span{display:block;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.work-photo-open span{font-size:12px;color:#64748b}
+    .work-photo-select{position:absolute;right:12px;top:12px;width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.72);display:grid;place-items:center;color:#fff;cursor:pointer}.work-photo-select input{position:absolute;opacity:0}.work-photo-select span{opacity:.35}.work-photo-select input:checked+span{opacity:1}
+    @media(max-width:700px){.work-photo-manager-backdrop{padding:0;align-items:flex-end}.work-photo-manager-card{width:100%;max-height:94dvh;border-radius:24px 24px 0 0;padding:16px}.work-photo-manager-head h3{font-size:22px}.work-photo-manager-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.work-photo-open img{height:145px}.work-photo-manager-toolbar{top:-16px}.work-photo-manager-toolbar>div{width:100%}.work-photo-manager-toolbar .btn{flex:1 1 auto}.task-work-photo-actions{align-items:stretch}.task-work-photo-actions .btn{flex:1}.task-work-photo-note{width:100%}}
+  </style>
+
 </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
