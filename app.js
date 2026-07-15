@@ -7329,6 +7329,7 @@ function renderTaskCard(task, mode) {
 
         ${renderPhotoReportBox(task, mode)}
         ${renderPhotoRequirementHistoryBox(task)}
+        ${renderRedoRequestHistoryBox(task)}
         ${renderHotelInfoBox(task)}
         ${renderTimeExtensionBox(task)}
         ${renderAssigneeHistoryBox(task)}
@@ -7675,6 +7676,36 @@ function renderPhotoRequirementHistoryBox(task) {
       <div class="extension-box-head">
         <strong>Đã điều chỉnh số ảnh ${count} lần</strong>
         <span>Lịch sử yêu cầu ảnh báo cáo</span>
+      </div>
+      ${rows ? `<ul class="extension-list">${rows}</ul>` : ""}
+    </div>
+  `;
+}
+
+function renderRedoRequestHistoryBox(task) {
+  const history = Array.isArray(task?.redoRequestHistory)
+    ? task.redoRequestHistory.filter((item) => item && typeof item === "object")
+    : [];
+  const count = Number(task?.redoRequestCount || history.length || 0);
+
+  if (!count && !history.length) return "";
+
+  const rows = history
+    .slice()
+    .sort((a, b) => (timestampToDate(b.requestedAt)?.getTime() || 0) - (timestampToDate(a.requestedAt)?.getTime() || 0))
+    .map((item, index) => `
+      <li>
+        <strong>Lần ${history.length - index}: Yêu cầu làm lại</strong>
+        <span>${formatDateTime(item.requestedAt)} • ${escapeHtml(item.requestedByName || "Admin")}</span>
+      </li>
+    `)
+    .join("");
+
+  return `
+    <div class="extension-box redo-history-box">
+      <div class="extension-box-head">
+        <strong>Đã yêu cầu làm lại ${count} lần</strong>
+        <span>Lịch sử yêu cầu làm lại</span>
       </div>
       ${rows ? `<ul class="extension-list">${rows}</ul>` : ""}
     </div>
@@ -10530,10 +10561,24 @@ async function requestRedo(taskId, button) {
 
   try {
     const task = state.tasks.find((item) => item.id === taskId);
+    const requestedAt = Timestamp.now();
+    const requestedByUid = state.user?.uid || "";
+    const requestedByName = state.profile?.name || state.user?.email || "Admin";
+    const historyRecord = {
+      requestedAt,
+      requestedByUid,
+      requestedByName,
+      previousStatus: task?.status || "submitted"
+    };
 
     await updateDoc(doc(db, "tasks", taskId), {
       status: "redo",
-      submittedAt: null
+      submittedAt: null,
+      redoRequestHistory: arrayUnion(historyRecord),
+      redoRequestCount: increment(1),
+      lastRedoRequestedAt: requestedAt,
+      lastRedoRequestedByUid: requestedByUid,
+      lastRedoRequestedByName: requestedByName
     });
 
     if (task) {
@@ -10549,7 +10594,7 @@ async function requestRedo(taskId, button) {
       ]);
     }
 
-    toast("Đã yêu cầu nhân viên làm lại.", "success");
+    toast("Đã yêu cầu nhân viên làm lại và lưu lịch sử.", "success");
   } catch (error) {
     console.error(error);
     toast("Không cập nhật được yêu cầu làm lại.", "error");
