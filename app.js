@@ -8333,8 +8333,8 @@ function renderWorkPhotoBox(task, mode) {
       <span>${count ? `${count} ảnh hướng dẫn/mẫu` : "Chưa có ảnh hướng dẫn/mẫu"}</span>
     </div>
     <div class="work-photo-box-actions">
-      ${canUploadMore ? `<button class="btn success small" type="button" data-action="upload-task-work-photos" data-task-id="${escapeHtml(task.id)}">+ Đăng thêm ảnh CV</button>` : ""}
-      ${count ? `<button class="btn ghost small" type="button" data-action="view-work-photos" data-task-id="${escapeHtml(task.id)}">Ảnh CV (${count})</button>` : ""}
+      ${canUploadMore ? `<button class="btn success small work-photo-upload-more-btn" type="button" data-action="upload-task-work-photos" data-task-id="${escapeHtml(task.id)}"><span class="work-photo-label-desktop">+ Đăng thêm ảnh CV</span><span class="work-photo-label-mobile">+ Đăng ảnh CV</span></button>` : ""}
+      ${count ? `<button class="btn ghost small work-photo-view-saved-btn" type="button" data-action="view-work-photos" data-task-id="${escapeHtml(task.id)}">Ảnh CV (${count})</button>` : ""}
     </div>
   </div>`;
 }
