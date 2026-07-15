@@ -7971,6 +7971,10 @@ document.addEventListener("click", async (event) => {
     openWorkPhotoManager({ taskId });
   }
 
+  if (action === "upload-task-work-photos") {
+    await openTaskWorkPhotoUploadPicker(taskId, button);
+  }
+
   if (action === "edit-photo-requirement") {
     if (event.__photoRequirementHandled) return;
     event.preventDefault();
@@ -8226,10 +8230,113 @@ async function openWorkPhotoUploadPicker(rowId, button) {
   input.click();
 }
 
+async function openTaskWorkPhotoUploadPicker(taskId, button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được phép đăng thêm Ảnh CV sau khi Phiếu đã được tạo.", "error");
+    return;
+  }
+
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) {
+    toast("Không tìm thấy công việc để đăng Ảnh CV.", "error");
+    return;
+  }
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.multiple = true;
+  input.hidden = true;
+  document.body.appendChild(input);
+
+  input.addEventListener("change", async () => {
+    const files = Array.from(input.files || []);
+    input.remove();
+    if (!files.length) return;
+
+    const error = validateSelectedPhotoFiles(files);
+    if (error) {
+      toast(error, "error");
+      return;
+    }
+
+    setButtonLoading(button, true, "Đang đăng...");
+    try {
+      const current = getTaskWorkPhotos(task).slice();
+      if (current.length + files.length > 100) {
+        throw new Error(`Mỗi công việc chỉ được lưu tối đa 100 Ảnh CV. Hiện đã có ${current.length} ảnh.`);
+      }
+
+      for (let index = 0; index < files.length; index += 1) {
+        if (button) button.textContent = `Đang đăng ${index + 1}/${files.length}...`;
+        const item = await optimizePhotoFileForUpload(files[index]);
+        const file = item.file;
+        const id = makeId("work-photo");
+        const safeName = sanitizeStorageFileName(file.name || item.originalName);
+        const path = `task-work-photos/${state.user.uid}/${taskId}/${Date.now()}-${id}-${safeName}`;
+        const ref = storageRef(storage, path);
+
+        await uploadBytes(ref, file, {
+          contentType: file.type || "image/jpeg",
+          customMetadata: {
+            uploadedByUid: state.user.uid,
+            kind: "work-instruction",
+            taskId
+          }
+        });
+
+        const url = await getDownloadURL(ref);
+        current.push({
+          id,
+          name: file.name || safeName,
+          originalName: item.originalName || file.name || safeName,
+          url,
+          storagePath: path,
+          contentType: file.type || "image/jpeg",
+          size: Number(file.size || 0),
+          originalSize: Number(item.originalSize || file.size || 0),
+          optimized: Boolean(item.optimized),
+          width: Number(item.width || 0),
+          height: Number(item.height || 0),
+          uploadedAt: Timestamp.fromDate(new Date()),
+          uploadedByUid: state.user.uid,
+          uploadedByName: state.profile?.name || state.user.email || "Admin"
+        });
+      }
+
+      await updateDoc(doc(db, "tasks", taskId), {
+        workPhotos: current,
+        workPhotoCount: current.length,
+        lastWorkPhotoUploadedAt: getLatestUploadedAtFromPhotos(current)
+      });
+
+      toast(`Đã đăng thêm thành công ${files.length} Ảnh CV.`, "success");
+    } catch (uploadError) {
+      console.error(uploadError);
+      toast(uploadError.message || "Không đăng thêm được Ảnh CV.", "error");
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }, { once: true });
+
+  input.click();
+}
+
 function renderWorkPhotoBox(task, mode) {
-  const count=getTaskWorkPhotos(task).length;
-  if(!count) return "";
-  return `<div class="work-photo-box"><div><strong>Ảnh công việc</strong><span>${count} ảnh hướng dẫn/mẫu</span></div><button class="btn success small" type="button" data-action="view-work-photos" data-task-id="${escapeHtml(task.id)}">Ảnh CV (${count})</button></div>`;
+  const count = getTaskWorkPhotos(task).length;
+  const canUploadMore = isAdminProfile();
+  if (!count && !canUploadMore) return "";
+
+  return `<div class="work-photo-box">
+    <div>
+      <strong>Ảnh công việc</strong>
+      <span>${count ? `${count} ảnh hướng dẫn/mẫu` : "Chưa có ảnh hướng dẫn/mẫu"}</span>
+    </div>
+    <div class="work-photo-box-actions">
+      ${canUploadMore ? `<button class="btn success small" type="button" data-action="upload-task-work-photos" data-task-id="${escapeHtml(task.id)}">+ Đăng thêm ảnh CV</button>` : ""}
+      ${count ? `<button class="btn ghost small" type="button" data-action="view-work-photos" data-task-id="${escapeHtml(task.id)}">Ảnh CV (${count})</button>` : ""}
+    </div>
+  </div>`;
 }
 
 // =========================

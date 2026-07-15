@@ -7513,7 +7513,26 @@
     .work-photo-open{width:100%;border:0;background:none;padding:8px;text-align:left;cursor:pointer}.work-photo-open img{width:100%;height:170px;object-fit:cover;border-radius:11px;display:block}.work-photo-open strong,.work-photo-open span{display:block;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.work-photo-open span{font-size:12px;color:#64748b}
     .work-photo-select{position:absolute;right:12px;top:12px;width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.72);display:grid;place-items:center;color:#fff;cursor:pointer}.work-photo-select input{position:absolute;opacity:0}.work-photo-select span{opacity:.35}.work-photo-select input:checked+span{opacity:1}
     @media(max-width:700px){.work-photo-manager-backdrop{padding:0;align-items:flex-end}.work-photo-manager-card{width:100%;max-height:94dvh;border-radius:24px 24px 0 0;padding:16px}.work-photo-manager-head h3{font-size:22px}.work-photo-manager-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.work-photo-open img{height:145px}.work-photo-manager-toolbar{top:-16px}.work-photo-manager-toolbar>div{width:100%}.work-photo-manager-toolbar .btn{flex:1 1 auto}.task-work-photo-actions{align-items:stretch}.task-work-photo-actions .btn{flex:1}.task-work-photo-note{width:100%}}
-  </style>
+  
+    .work-photo-box-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 640px) {
+      .work-photo-box-actions {
+        width: 100%;
+        justify-content: stretch;
+      }
+
+      .work-photo-box-actions .btn {
+        flex: 1 1 140px;
+      }
+    }
+</style>
 
 </head>
 <body>
