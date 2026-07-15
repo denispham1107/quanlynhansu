@@ -7270,6 +7270,20 @@ function renderTaskCard(task, mode) {
     `
     : "";
 
+  const mobileWorkPhotoCount = getTaskWorkPhotos(task).length;
+  const mobileWorkPhotoQuickAction = mobileWorkPhotoCount > 0
+    ? `
+      <button
+        class="task-mobile-photo-action task-mobile-work-photo-action"
+        data-action="view-work-photos"
+        data-task-id="${escapeHtml(task.id)}"
+        type="button"
+      >
+        Ảnh CV (${mobileWorkPhotoCount})
+      </button>
+    `
+    : "";
+
   const taskActions = renderTaskActions(task, {
     canEmployeeSubmit,
     canAdminReview,
@@ -7302,6 +7316,7 @@ function renderTaskCard(task, mode) {
           <span>Hạn lúc</span>
           <strong>${formatDateTime(task.deadlineAt)}</strong>
         </div>
+        ${mobileWorkPhotoQuickAction}
         ${mobilePhotoQuickAction}
       </div>
 
