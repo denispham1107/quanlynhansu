@@ -8594,7 +8594,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260716-calendar-import-v5-saved-config-mobile"></script>
+  <script type="module" src="app.js?v=20260716-calendar-import-v6-four-rounded-corners"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -8701,23 +8701,25 @@
     .google-calendar-import-actions .btn { min-height:50px; }
     @media(max-width:640px){
       .google-calendar-import-modal {
-        align-items:flex-end;
+        align-items:center;
         justify-content:center;
-        padding:0;
-        padding-top:max(8px,env(safe-area-inset-top));
+        box-sizing:border-box;
+        padding:max(10px,env(safe-area-inset-top)) 10px max(10px,env(safe-area-inset-bottom));
       }
       .google-calendar-import-card {
+        box-sizing:border-box;
         width:100%;
         max-width:none;
-        max-height:calc(100svh - max(8px,env(safe-area-inset-top)));
-        max-height:calc(100dvh - max(8px,env(safe-area-inset-top)));
+        max-height:calc(100svh - max(20px,env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+        max-height:calc(100dvh - max(20px,env(safe-area-inset-top) + env(safe-area-inset-bottom)));
         padding:18px 14px 0;
-        border-left:0;
-        border-right:0;
-        border-bottom:0;
-        border-radius:24px 24px 0 0;
+        border:1px solid #bbf7d0;
+        border-radius:24px;
+        overflow-x:hidden;
+        overflow-y:auto;
         overscroll-behavior:contain;
         -webkit-overflow-scrolling:touch;
+        clip-path:inset(0 round 24px);
       }
       .google-calendar-import-close { top:12px; right:12px; width:44px; height:44px; border-radius:14px; font-size:27px; }
       .google-calendar-import-eyebrow { padding:5px 10px; font-size:11px; }
@@ -8741,7 +8743,11 @@
         border-top:1px solid #e2e8f0;
         box-shadow:0 -10px 24px rgba(15,23,42,.08);
       }
-      .google-calendar-import-actions .btn { min-height:46px; }
+      .google-calendar-import-actions .btn {
+        min-height:46px;
+        border-radius:14px!important;
+        overflow:hidden;
+      }
     }
   </style>
 
