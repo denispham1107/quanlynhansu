@@ -8190,10 +8190,19 @@ function canAdminEndLunchBreak(task, mode) {
     && task.status === "lunch_break";
 }
 
+function isTaskOverdueForTimeExtension(task, nowMs = Date.now()) {
+  if (!task) return false;
+  if (task.status === "overdue") return true;
+
+  const deadline = timestampToDate(task.deadlineAt);
+  return Boolean(deadline && deadline.getTime() <= nowMs);
+}
+
 function canAdminExtendTaskTime(task, mode) {
   return mode === "admin"
     && hasPermission("extendTaskTime")
-    && ["doing", "hotel", "redo", "overdue"].includes(task.status);
+    && ["doing", "hotel", "redo"].includes(task.status)
+    && !isTaskOverdueForTimeExtension(task);
 }
 
 function canEmployeeUploadTaskPhotos(task, mode, displayStatus = null) {
@@ -10806,8 +10815,13 @@ function openExtendTimeModal(taskId) {
     return;
   }
 
+  if (isTaskOverdueForTimeExtension(task)) {
+    toast("Quá hạn thời gian không thể thêm giờ", "error");
+    return;
+  }
+
   if (!canAdminExtendTaskTime(task, "admin")) {
-    toast("Chỉ thêm giờ cho công việc đang làm, yêu cầu làm lại hoặc quá hạn.", "error");
+    toast("Chỉ có thể thêm giờ cho công việc đang làm hoặc đang yêu cầu làm lại.", "error");
     return;
   }
 
@@ -10989,8 +11003,12 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
 
       const task = { id: taskSnap.id, ...taskSnap.data() };
 
+      if (isTaskOverdueForTimeExtension(task)) {
+        throw new Error("Quá hạn thời gian không thể thêm giờ");
+      }
+
       if (!canAdminExtendTaskTime(task, "admin")) {
-        throw new Error("Chỉ thêm giờ cho công việc đang làm, yêu cầu làm lại hoặc quá hạn.");
+        throw new Error("Chỉ có thể thêm giờ cho công việc đang làm hoặc đang yêu cầu làm lại.");
       }
 
       const configuredMaxMinutes = getConfiguredMaxExtendMinutes();
