@@ -293,6 +293,9 @@ const els = {
   mobileLogoutBtn: $("#mobileLogoutBtn"),
   createEmployeeForm: $("#createEmployeeForm"),
   employeeList: $("#employeeList"),
+  employeeSearch: $("#employeeSearch"),
+  employeeRoleFilter: $("#employeeRoleFilter"),
+  employeeStats: $("#employeeStats"),
   createStaffAccountPanel: $("#createStaffAccountPanel"),
   staffAccountRole: $("#staffAccountRole"),
   createSupervisorPermissions: $("#createSupervisorPermissions"),
@@ -2430,15 +2433,40 @@ function handleSnapshotError(error) {
 function renderEmployees() {
   if (!els.employeeList) return;
 
-  if (!state.staffAccounts.length) {
+  const allAccounts = Array.isArray(state.staffAccounts) ? state.staffAccounts : [];
+  const employeeCount = allAccounts.filter((account) => account.role !== "supervisor").length;
+  const supervisorCount = allAccounts.filter((account) => account.role === "supervisor").length;
+
+  if (els.employeeStats) {
+    els.employeeStats.innerHTML = `
+      <span class="employee-stat-pill">Tổng <strong>${allAccounts.length}</strong></span>
+      <span class="employee-stat-pill">Nhân viên <strong>${employeeCount}</strong></span>
+      <span class="employee-stat-pill is-supervisor">Giám sát <strong>${supervisorCount}</strong></span>
+    `;
+  }
+
+  if (!allAccounts.length) {
     els.employeeList.innerHTML = "Chưa có tài khoản nhân viên hoặc giám sát.";
     els.employeeList.classList.add("empty");
     return;
   }
 
+  const keyword = normalizeSearchText(els.employeeSearch?.value || "");
+  const roleFilter = els.employeeRoleFilter?.value || "all";
+  const visibleAccounts = allAccounts.filter((account) => {
+    const roleMatches = roleFilter === "all" || account.role === roleFilter;
+    const searchHaystack = normalizeSearchText(`${account.name || ""} ${account.email || ""}`);
+    return roleMatches && (!keyword || searchHaystack.includes(keyword));
+  });
+
   els.employeeList.classList.remove("empty");
 
-  els.employeeList.innerHTML = state.staffAccounts
+  if (!visibleAccounts.length) {
+    els.employeeList.innerHTML = '<div class="employee-list-no-results">Không tìm thấy tài khoản phù hợp.</div>';
+    return;
+  }
+
+  els.employeeList.innerHTML = visibleAccounts
     .map((account) => {
       const isDeleting = state.deletingEmployeeUid === account.uid;
       const accountLabel = account.name || account.email || "tài khoản này";
@@ -2452,11 +2480,11 @@ function renderEmployees() {
         <div class="employee-item" data-employee-uid="${escapeHtml(account.uid)}">
           <div class="avatar">${escapeHtml(initials(account.name))}</div>
           <div class="employee-item-info">
-            <strong>${escapeHtml(account.name || "Chưa đặt tên")}</strong>
-            <span>${escapeHtml(account.email || "")}</span>
+            <strong title="${escapeHtml(account.name || "Chưa đặt tên")}">${escapeHtml(account.name || "Chưa đặt tên")}</strong>
+            <span title="${escapeHtml(account.email || "")}">${escapeHtml(account.email || "")}</span>
             <div class="staff-account-meta">
               <span class="staff-role-badge ${isSupervisor ? "is-supervisor" : ""}">${isSupervisor ? "Giám sát" : "Nhân viên"}</span>
-              ${isSupervisor ? `<span class="staff-permission-count">Đã cấp ${grantedCount}/${SUPERVISOR_PERMISSION_KEYS.length} quyền</span>` : ""}
+              ${isSupervisor ? `<span class="staff-permission-count">${grantedCount}/${SUPERVISOR_PERMISSION_KEYS.length} quyền</span>` : ""}
             </div>
           </div>
           <div class="staff-account-actions">
@@ -2466,6 +2494,8 @@ function renderEmployees() {
                 class="btn ghost small staff-permission-btn"
                 data-action="edit-supervisor-permissions"
                 data-supervisor-uid="${escapeHtml(account.uid)}"
+                aria-label="Phân quyền cho ${escapeHtml(accountLabel)}"
+                title="Phân quyền"
               >Phân quyền</button>
             ` : ""}
             ${canDeleteAccount ? `
@@ -2485,7 +2515,6 @@ function renderEmployees() {
     })
     .join("");
 }
-
 
 function getHotelReportTimeStatusText(report, totalActualMinutes) {
   const endPetCount = Number(report?.endPetCount || 0);
@@ -2672,6 +2701,9 @@ async function deleteEmployeeData(employeeUid) {
     renderEmployees();
   }
 }
+
+els.employeeSearch?.addEventListener("input", renderEmployees);
+els.employeeRoleFilter?.addEventListener("change", renderEmployees);
 
 els.employeeList?.addEventListener("click", (event) => {
   const permissionButton = event.target.closest('[data-action="edit-supervisor-permissions"]');

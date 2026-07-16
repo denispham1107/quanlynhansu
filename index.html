@@ -8052,11 +8052,24 @@
         </section>
 
         <section class="panel">
-          <div class="panel-header">
+          <div class="panel-header employee-list-panel-header">
             <div>
               <h3>Danh sách tài khoản</h3>
-              <p class="muted">Nhân viên xuất hiện trong form giao việc. Giám sát được xem toàn bộ Phiếu công việc và chỉ thao tác theo quyền Admin cấp.</p>
+              <p class="muted">Nhân viên xuất hiện trong form giao việc. Giám sát chỉ thao tác theo quyền Admin cấp.</p>
             </div>
+            <div id="employeeStats" class="employee-account-stats" aria-live="polite"></div>
+          </div>
+          <div class="employee-list-toolbar" role="search">
+            <label class="employee-search-field">
+              <span class="sr-only">Tìm tài khoản</span>
+              <span class="employee-search-icon" aria-hidden="true">⌕</span>
+              <input id="employeeSearch" type="search" placeholder="Tìm tên hoặc email..." autocomplete="off" />
+            </label>
+            <select id="employeeRoleFilter" aria-label="Lọc loại tài khoản">
+              <option value="all">Tất cả tài khoản</option>
+              <option value="employee">Nhân viên</option>
+              <option value="supervisor">Giám sát</option>
+            </select>
           </div>
           <div id="employeeList" class="employee-list empty-box">Chưa có nhân viên.</div>
         </section>
@@ -8759,7 +8772,105 @@
         overflow:hidden;
       }
     }
-  </style>
+  
+
+    /* Danh sách nhân viên compact: giảm chiều cao, hạn chế xuống dòng */
+    #employeeManagerView .hero-panel { padding: 22px 26px; }
+    #employeeManagerView .hero-panel h2 { font-size: clamp(1.75rem, 3vw, 2.45rem); line-height: 1.1; margin-bottom: 6px; }
+    #employeeManagerView .hero-panel .muted { line-height: 1.35; }
+    #employeeManagerView .employee-manager-grid {
+      grid-template-columns: minmax(330px, 0.85fr) minmax(520px, 1.35fr);
+      gap: 14px;
+    }
+    #employeeManagerView .panel { padding: 18px; }
+    #employeeManagerView .panel-header { margin-bottom: 12px; }
+    #employeeManagerView .panel-header h3 { margin-bottom: 3px; font-size: 1.22rem; }
+    #employeeManagerView .panel-header p { font-size: 0.88rem; line-height: 1.35; }
+
+    #createEmployeeForm {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 10px 12px;
+    }
+    #createEmployeeForm > label { gap: 5px; font-size: 0.86rem; }
+    #createEmployeeForm input,
+    #createEmployeeForm select { min-height: 44px; padding: 10px 12px; }
+    #createEmployeeForm .supervisor-permission-editor,
+    #createEmployeeForm #createEmployeeBtn { grid-column: 1 / -1; }
+    #createEmployeeForm #createEmployeeBtn { min-height: 44px; }
+
+    .employee-list-panel-header { align-items: flex-start; gap: 12px; }
+    .employee-account-stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+    .employee-stat-pill {
+      display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 5px 9px;
+      border: 1px solid #dbe7f7; border-radius: 999px; background: #f8fbff;
+      color: #334155; font-size: 0.76rem; font-weight: 800; white-space: nowrap;
+    }
+    .employee-stat-pill strong { color: #0f172a; }
+    .employee-stat-pill.is-supervisor { background: #ecfdf5; border-color: #bbf7d0; color: #166534; }
+
+    .employee-list-toolbar {
+      display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 9px; margin-bottom: 10px;
+    }
+    .employee-search-field { position: relative; min-width: 0; }
+    .employee-search-field input, .employee-list-toolbar select {
+      width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #cfe0f7;
+      border-radius: 13px; background: #fff; font: inherit; font-size: 0.9rem; outline: none;
+    }
+    .employee-search-field input { padding-left: 36px; }
+    .employee-search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #64748b; pointer-events: none; }
+    .employee-search-field input:focus, .employee-list-toolbar select:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(96,165,250,.15); }
+
+    #employeeManagerView .employee-list { gap: 7px; padding: 9px; border-radius: 15px; }
+    #employeeManagerView .employee-item {
+      grid-template-columns: 38px minmax(120px, .8fr) minmax(180px, 1.25fr) auto auto;
+      gap: 10px; min-height: 58px; padding: 8px 10px; border-radius: 13px; background: #fbfdff;
+    }
+    #employeeManagerView .employee-item .avatar { width: 38px; height: 38px; border-radius: 11px; font-size: 0.82rem; }
+    #employeeManagerView .employee-item-info { display: contents; }
+    #employeeManagerView .employee-item-info strong { font-size: 0.94rem; color: #17233b; }
+    #employeeManagerView .employee-item-info > span { font-size: 0.82rem; color: #52627a; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #employeeManagerView .staff-account-meta { margin: 0; flex-wrap: nowrap; min-width: 0; }
+    #employeeManagerView .staff-role-badge { min-height: 22px; padding: 2px 8px; font-size: 0.69rem; }
+    #employeeManagerView .staff-permission-count { display: none; }
+    #employeeManagerView .staff-account-actions { margin-left: 0; gap: 6px; flex-direction: row; }
+    #employeeManagerView .staff-permission-btn { min-height: 34px; padding: 7px 10px; font-size: 0.78rem; }
+    #employeeManagerView .employee-delete-btn { width: 34px; height: 34px; border-width: 2px; border-radius: 10px; font-size: 22px; }
+    .employee-list-no-results { padding: 24px 12px; text-align: center; color: #64748b; }
+
+    @media (max-width: 1100px) {
+      #employeeManagerView .employee-manager-grid { grid-template-columns: 1fr; }
+      #employeeManagerView .employee-item { grid-template-columns: 38px minmax(120px,.7fr) minmax(180px,1fr) auto auto; }
+    }
+    @media (max-width: 700px) {
+      #employeeManagerView .hero-panel { padding: 17px; }
+      #employeeManagerView .panel { padding: 13px; }
+      #createEmployeeForm { grid-template-columns: 1fr; gap: 9px; }
+      #createEmployeeForm .supervisor-permission-editor, #createEmployeeForm #createEmployeeBtn { grid-column: auto; }
+      .employee-list-panel-header { flex-direction: column; }
+      .employee-account-stats { justify-content: flex-start; }
+      .employee-list-toolbar { grid-template-columns: 1fr 132px; }
+      #employeeManagerView .employee-list { padding: 7px; gap: 6px; }
+      #employeeManagerView .employee-item {
+        grid-template-columns: 36px minmax(0,1fr) auto;
+        grid-template-areas: 'avatar name actions' 'avatar email actions' 'avatar meta actions';
+        gap: 2px 9px; min-height: 64px; padding: 8px;
+      }
+      #employeeManagerView .employee-item .avatar { grid-area: avatar; width: 36px; height: 36px; align-self: center; }
+      #employeeManagerView .employee-item-info { display: contents; }
+      #employeeManagerView .employee-item-info strong { grid-area: name; font-size: 0.91rem; }
+      #employeeManagerView .employee-item-info > span { grid-area: email; font-size: 0.76rem; }
+      #employeeManagerView .staff-account-meta { grid-area: meta; }
+      #employeeManagerView .staff-account-actions { grid-area: actions; align-self: center; flex-direction: row; }
+      #employeeManagerView .staff-permission-btn { width: 34px; min-width: 34px; padding: 0; font-size: 0; }
+      #employeeManagerView .staff-permission-btn::before { content: '⚙'; font-size: 16px; }
+      #employeeManagerView .employee-delete-btn { width: 34px; height: 34px; }
+    }
+    @media (max-width: 420px) {
+      .employee-list-toolbar { grid-template-columns: 1fr; }
+      #employeeManagerView .employee-item { grid-template-columns: 34px minmax(0,1fr) auto; }
+    }
+</style>
 
 </body>
 </html>
