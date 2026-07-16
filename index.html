@@ -7460,6 +7460,14 @@
         align-items: center;
         gap: 8px;
       }
+
+      .task-panel-header-actions .calendar-import-header-btn {
+        display:inline-flex!important;
+        align-items:center;
+        justify-content:center;
+        min-height:40px;
+        padding:0 16px;
+      }
     }
 
     @media (max-width: 768px) {
@@ -7746,7 +7754,6 @@
             </div>
             <input id="importDataInput" class="hidden" type="file" accept="application/json,.json" />
           </div>
-          <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn large calendar-import-desktop-only hidden" type="button">📅 Nạp lịch</button>
         </div>
       </section>
 
@@ -7803,6 +7810,7 @@
             >⋮</button>
             <div id="mobileTaskPanelMenu" class="mobile-task-panel-menu" aria-hidden="true">
               <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
+              <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn calendar-import-header-btn small calendar-import-desktop-only hidden" type="button">📅 Nạp lịch</button>
               <button id="openWorkOrderSettingsBtn" class="btn settings-action-btn small hidden" type="button" aria-haspopup="dialog" aria-controls="workOrderSettingsModal">
                 <span aria-hidden="true">⚙</span> Cài đặt
               </button>
@@ -8566,7 +8574,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260716-calendar-import-v2"></script>
+  <script type="module" src="app.js?v=20260716-calendar-import-v3-position"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -8620,7 +8628,22 @@
   </div>
 
   <style>
-    .calendar-import-btn { background:#ecfdf5!important; color:#047857!important; border-color:#86efac!important; }
+    .calendar-import-btn {
+      background:#f97316!important;
+      color:#ffffff!important;
+      border-color:#f97316!important;
+      box-shadow:0 10px 24px rgba(249,115,22,.22)!important;
+    }
+    .calendar-import-btn:hover {
+      background:#ea580c!important;
+      border-color:#ea580c!important;
+      color:#ffffff!important;
+    }
+    .calendar-import-btn:focus-visible {
+      outline:3px solid rgba(249,115,22,.25)!important;
+      outline-offset:2px;
+    }
+    .calendar-import-header-btn { white-space:nowrap; }
     .calendar-import-mobile-only { display:none!important; }
     .calendar-import-desktop-only { display:inline-flex!important; align-items:center; justify-content:center; }
     .calendar-import-desktop-only.hidden,
