@@ -8669,8 +8669,13 @@
     .calendar-import-desktop-only.hidden,
     .calendar-import-mobile-only.hidden { display:none!important; }
     @media(max-width:768px){
-      .calendar-import-desktop-only { display:none!important; }
-      .calendar-import-mobile-only:not(.hidden) { display:flex!important; }
+      /* Menu 3 chấm chỉ được hiển thị đúng các nút đang được phép.
+         Tăng độ ưu tiên để không bị quy tắc `.mobile-task-panel-menu .btn`
+         ép hiện lại các nút có class hidden hoặc nút dành cho desktop. */
+      .mobile-task-panel-menu .btn.hidden { display:none!important; }
+      .mobile-task-panel-menu .calendar-import-desktop-only { display:none!important; }
+      .mobile-task-panel-menu .calendar-import-mobile-only.hidden { display:none!important; }
+      .mobile-task-panel-menu .calendar-import-mobile-only:not(.hidden) { display:flex!important; }
     }
     .google-calendar-import-modal { position:fixed!important; inset:0!important; z-index:50000!important; display:flex; align-items:center; justify-content:center; padding:20px; pointer-events:auto; isolation:isolate; }
     body.google-calendar-import-open { overflow:hidden!important; touch-action:none; }
