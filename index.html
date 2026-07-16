@@ -1246,9 +1246,117 @@
     }
 
 
-    /* Trang riêng xem Ảnh báo cáo: không còn hiển thị dạng popup đè lên trang chủ */
+    /* Trang riêng xem Ảnh báo cáo: header compact, rõ nhóm thao tác */
     .photo-report-page .hero-panel {
-      align-items: flex-start;
+      align-items: center;
+    }
+
+    .photo-report-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      padding: 24px 28px;
+      border: 1px solid #dbeafe;
+      border-radius: 24px;
+      background: #ffffff;
+      box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+    }
+
+    .photo-report-hero-main {
+      min-width: 0;
+    }
+
+    .photo-report-hero .eyebrow {
+      margin-bottom: 8px;
+    }
+
+    .photo-report-hero h2 {
+      margin: 0;
+      color: #0f172a;
+      font-size: clamp(28px, 3vw, 42px);
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+    }
+
+    .photo-report-task-name {
+      margin: 10px 0 0;
+      color: #334155;
+      font-size: 17px;
+      font-weight: 800;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .photo-report-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .photo-report-meta-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 6px 11px;
+      border: 1px solid #dbeafe;
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #475569;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .photo-report-meta-chip.is-success {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+      color: #15803d;
+    }
+
+    .photo-report-meta-chip.is-warning {
+      border-color: #fed7aa;
+      background: #fff7ed;
+      color: #c2410c;
+    }
+
+    .photo-report-meta-chip.is-neutral {
+      border-color: #e2e8f0;
+      background: #f8fafc;
+      color: #475569;
+    }
+
+    .photo-report-action-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 18px;
+      background: #f8fafc;
+    }
+
+    .photo-report-action-bar .btn {
+      min-height: 44px;
+      padding: 10px 16px;
+      border-radius: 13px;
+      box-shadow: none;
+      white-space: nowrap;
+    }
+
+    .photo-report-back-btn {
+      border-color: #cbd5e1 !important;
+      background: #ffffff !important;
+      color: #334155 !important;
+    }
+
+    .photo-report-back-btn:hover,
+    .photo-report-back-btn:focus-visible {
+      border-color: #94a3b8 !important;
+      background: #f1f5f9 !important;
     }
 
     .photo-report-page-card {
@@ -1363,9 +1471,10 @@
     }
 
     .download-photo-zip-btn {
-      background: linear-gradient(135deg, rgba(16, 185, 129, 0.96), rgba(37, 99, 235, 0.96)) !important;
+      border-color: #2563eb !important;
+      background: #2563eb !important;
       color: #ffffff !important;
-      box-shadow: 0 14px 28px rgba(16, 185, 129, 0.20);
+      box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
     }
 
     .download-photo-zip-btn:hover,
@@ -1387,9 +1496,10 @@
     }
 
     .share-photo-report-btn {
-      background: linear-gradient(135deg, rgba(124, 58, 237, 0.94), rgba(14, 165, 233, 0.94)) !important;
+      border-color: #7c3aed !important;
+      background: #7c3aed !important;
       color: #ffffff !important;
-      box-shadow: 0 14px 28px rgba(124, 58, 237, 0.18);
+      box-shadow: 0 10px 22px rgba(124, 58, 237, 0.16);
     }
 
     .share-photo-report-btn:hover,
@@ -1412,6 +1522,53 @@
     }
 
     @media (max-width: 768px) {
+      .photo-report-hero {
+        grid-template-columns: 1fr;
+        gap: 16px;
+        padding: 18px 16px;
+        border-radius: 20px;
+      }
+
+      .photo-report-hero h2 {
+        font-size: 30px;
+      }
+
+      .photo-report-task-name {
+        margin-top: 8px;
+        font-size: 16px;
+      }
+
+      .photo-report-meta-row {
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .photo-report-meta-chip {
+        min-height: 30px;
+        padding: 5px 9px;
+        font-size: 12px;
+      }
+
+      .photo-report-action-bar {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+        gap: 8px;
+        padding: 8px;
+      }
+
+      .photo-report-action-bar .btn {
+        width: 100%;
+        min-width: 0;
+        min-height: 44px;
+        padding: 9px 10px;
+        font-size: 14px;
+      }
+
+      .photo-report-back-btn {
+        grid-column: 1 / -1;
+      }
+
       .photo-report-page-card {
         padding: 16px;
         border-radius: 22px;
@@ -8326,17 +8483,20 @@
 
     <!-- PHOTO REPORT PAGE -->
     <main id="photoReportView" class="page photo-report-page hidden">
-      <section class="hero-panel">
-        <div>
+      <section class="hero-panel photo-report-hero">
+        <div class="photo-report-hero-main">
           <p class="eyebrow">Ảnh báo cáo</p>
-          <h2 id="photoReportModalTitle">Hình ảnh nhân viên đã đăng</h2>
-          <p id="photoReportTaskTitle" class="muted">Công việc</p>
-          <p id="photoReportSummary" class="small-note">Đã đăng 0 hình</p>
+          <h2 id="photoReportModalTitle">Ảnh báo cáo</h2>
+          <p id="photoReportTaskTitle" class="photo-report-task-name">Công việc</p>
+          <div id="photoReportSummary" class="photo-report-meta-row" aria-live="polite">
+            <span class="photo-report-meta-chip">📸 Đã đăng 0 ảnh</span>
+          </div>
         </div>
-        <div class="hero-actions">
-          <button id="downloadPhotoZipBtn" class="btn primary large download-photo-zip-btn hidden" type="button">⬇ Tải</button>
-          <button id="sharePhotoReportBtn" class="btn primary large share-photo-report-btn hidden" type="button">↗ Chia sẻ</button>
-          <button id="backFromPhotoReportBtn" class="btn ghost large" type="button">← Quay lại</button>
+
+        <div class="hero-actions photo-report-action-bar" aria-label="Thao tác ảnh báo cáo">
+          <button id="downloadPhotoZipBtn" class="btn large download-photo-zip-btn hidden" type="button">⬇ Tải ZIP</button>
+          <button id="sharePhotoReportBtn" class="btn large share-photo-report-btn hidden" type="button">↗ Chia sẻ</button>
+          <button id="backFromPhotoReportBtn" class="btn ghost large photo-report-back-btn" type="button">← Quay lại</button>
         </div>
       </section>
 

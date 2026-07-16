@@ -10220,11 +10220,25 @@ function renderPhotoReportPageContent(task) {
   }
 
   if (els.photoReportSummary) {
-    const required = taskRequiresPhotos(task)
-      ? `Bắt buộc ${getTaskRequiredPhotoCount(task)} hình`
-      : "Không bắt buộc đăng hình";
     const employeeName = task.assignedToName || getEmployeeDisplayNameByUid(task.assignedToUid, "Nhân viên");
-    els.photoReportSummary.textContent = `${employeeName} • ${required} • Đã đăng ${photos.length} hình`;
+    const requiredCount = getTaskRequiredPhotoCount(task);
+    const requiresPhotos = taskRequiresPhotos(task);
+    const hasEnoughPhotos = !requiresPhotos || photos.length >= requiredCount;
+    const requirementText = requiresPhotos
+      ? `${photos.length}/${requiredCount} ảnh`
+      : "Không bắt buộc";
+    const statusText = requiresPhotos
+      ? (hasEnoughPhotos ? "Đã đủ ảnh" : "Còn thiếu ảnh")
+      : "Ảnh tự chọn";
+    const statusClass = requiresPhotos
+      ? (hasEnoughPhotos ? "is-success" : "is-warning")
+      : "is-neutral";
+
+    els.photoReportSummary.innerHTML = `
+      <span class="photo-report-meta-chip">👤 ${escapeHtml(employeeName)}</span>
+      <span class="photo-report-meta-chip">📸 ${photos.length} ảnh đã đăng</span>
+      <span class="photo-report-meta-chip ${statusClass}">${escapeHtml(statusText)} · ${escapeHtml(requirementText)}</span>
+    `;
   }
 
   if (els.photoReportGrid) {
