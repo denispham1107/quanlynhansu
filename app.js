@@ -5177,7 +5177,7 @@ function syncMobileSheetBodyLock() {
 }
 
 function hasVisibleTaskPanelMenuAction() {
-  return [els.deleteAllWorkOrdersBtn, els.openWorkOrderSettingsBtn]
+  return [els.deleteAllWorkOrdersBtn, els.openWorkOrderSettingsBtn, els.openGoogleCalendarImportMobileBtn]
     .some((button) => button && !button.classList.contains("hidden"));
 }
 
@@ -11533,7 +11533,7 @@ function openGoogleCalendarImportModal() {
 
 els.openGoogleCalendarImportBtn?.addEventListener("click", openGoogleCalendarImportModal);
 els.openGoogleCalendarImportMobileBtn?.addEventListener("click", () => {
-  closeMobileDataMenu();
+  setMobileTaskPanelMenuOpen(false);
   openGoogleCalendarImportModal();
 });
 els.googleCalendarRangeMode?.addEventListener("change", syncGoogleCalendarRangeUI);
