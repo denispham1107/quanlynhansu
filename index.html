@@ -8594,7 +8594,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260716-calendar-import-v4-mobile-fix"></script>
+  <script type="module" src="app.js?v=20260716-calendar-import-v5-saved-config-mobile"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -8608,13 +8608,14 @@
       <form id="googleCalendarImportForm" autocomplete="off">
         <label class="google-calendar-field">
           <span>Calendar ID</span>
-          <input id="googleCalendarIdInput" type="text" inputmode="email" autocomplete="off" spellcheck="false" placeholder="Ví dụ: ...@group.calendar.google.com" required />
+          <input id="googleCalendarIdInput" type="text" inputmode="email" autocomplete="off" spellcheck="false" placeholder="Ví dụ: ...@group.calendar.google.com" />
         </label>
 
         <label class="google-calendar-field">
           <span>Google Calendar API Key</span>
-          <input id="googleCalendarApiKeyInput" type="password" autocomplete="new-password" spellcheck="false" placeholder="Nhập API Key" required />
-          <small>Thông tin chỉ được gửi tạm thời qua kết nối bảo mật đến Cloud Function và không được lưu trên trình duyệt hoặc Firestore.</small>
+          <input id="googleCalendarApiKeyInput" type="password" autocomplete="new-password" spellcheck="false" placeholder="Nhập API Key" />
+          <small>API Key được lưu mã hóa phía máy chủ. Sau lần đầu, có thể để trống ô này nếu không thay đổi.</small>
+          <span id="googleCalendarSavedStatus" class="google-calendar-saved-status">Đang kiểm tra cấu hình đã lưu...</span>
         </label>
 
         <label class="google-calendar-field">
@@ -8691,16 +8692,56 @@
     .google-calendar-field input,.google-calendar-field select { box-sizing:border-box; width:100%; min-width:0; height:52px; border:1px solid #cfe0f7; border-radius:16px; padding:0 15px; background:#fff; font:inherit; font-size:16px; outline:none; }
     .google-calendar-field input:focus,.google-calendar-field select:focus { border-color:#22c55e; box-shadow:0 0 0 4px rgba(34,197,94,.12); }
     .google-calendar-field small { color:#64748b; font-size:13px; line-height:1.45; font-weight:500; }
+    .google-calendar-saved-status { display:flex; align-items:center; min-height:34px; padding:8px 11px; border:1px solid #dbeafe; border-radius:11px; background:#f8fafc; color:#64748b; font-size:12px; line-height:1.35; font-weight:750; }
+    .google-calendar-saved-status.is-saved { border-color:#86efac; background:#f0fdf4; color:#166534; }
+
     .google-calendar-date-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .google-calendar-import-info { display:grid; gap:6px; padding:14px 16px; border:1px dashed #86efac; border-radius:16px; background:#f0fdf4; color:#166534; font-size:13px; line-height:1.45; }
     .google-calendar-import-actions { display:grid; grid-template-columns:minmax(120px,.65fr) minmax(170px,1fr); gap:12px; margin-top:4px; }
     .google-calendar-import-actions .btn { min-height:50px; }
     @media(max-width:640px){
-      .google-calendar-import-modal { padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left)); align-items:center; }
-      .google-calendar-import-card { max-height:calc(100dvh - 20px); padding:22px 16px 18px; border-radius:24px; }
-      .google-calendar-import-card h2 { font-size:26px; }
-      .google-calendar-date-grid { grid-template-columns:1fr; }
-      .google-calendar-import-actions { grid-template-columns:1fr 1.35fr; position:sticky; bottom:-18px; z-index:2; margin:4px -16px -18px; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); background:rgba(255,255,255,.96); border-top:1px solid #e2e8f0; }
+      .google-calendar-import-modal {
+        align-items:flex-end;
+        justify-content:center;
+        padding:0;
+        padding-top:max(8px,env(safe-area-inset-top));
+      }
+      .google-calendar-import-card {
+        width:100%;
+        max-width:none;
+        max-height:calc(100svh - max(8px,env(safe-area-inset-top)));
+        max-height:calc(100dvh - max(8px,env(safe-area-inset-top)));
+        padding:18px 14px 0;
+        border-left:0;
+        border-right:0;
+        border-bottom:0;
+        border-radius:24px 24px 0 0;
+        overscroll-behavior:contain;
+        -webkit-overflow-scrolling:touch;
+      }
+      .google-calendar-import-close { top:12px; right:12px; width:44px; height:44px; border-radius:14px; font-size:27px; }
+      .google-calendar-import-eyebrow { padding:5px 10px; font-size:11px; }
+      .google-calendar-import-card h2 { margin:11px 52px 5px 0; font-size:23px; line-height:1.12; }
+      .google-calendar-import-note { margin-bottom:13px; font-size:13px; line-height:1.38; }
+      #googleCalendarImportForm { gap:11px; }
+      .google-calendar-field { gap:5px; font-size:14px; }
+      .google-calendar-field input,.google-calendar-field select { height:48px; border-radius:14px; padding:0 13px; font-size:16px; }
+      .google-calendar-field small { font-size:11.5px; line-height:1.35; }
+      .google-calendar-saved-status { min-height:30px; padding:7px 9px; font-size:11.5px; }
+      .google-calendar-date-grid { grid-template-columns:1fr; gap:9px; }
+      .google-calendar-import-info { gap:4px; padding:11px 12px; border-radius:14px; font-size:11.5px; line-height:1.35; }
+      .google-calendar-import-actions {
+        grid-template-columns:.75fr 1.25fr;
+        position:sticky;
+        bottom:0;
+        z-index:3;
+        margin:2px -14px 0;
+        padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+        background:rgba(255,255,255,.98);
+        border-top:1px solid #e2e8f0;
+        box-shadow:0 -10px 24px rgba(15,23,42,.08);
+      }
+      .google-calendar-import-actions .btn { min-height:46px; }
     }
   </style>
 
