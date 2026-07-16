@@ -7742,6 +7742,7 @@
             <div id="mobileDataMenu" class="mobile-data-menu" aria-hidden="true">
               <button id="exportDataBtn" class="btn ghost large" type="button">Xuất dữ liệu</button>
               <button id="importDataBtn" class="btn ghost large" type="button">Nhập dữ liệu</button>
+              <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn large hidden" type="button">📅 Nạp lịch</button>
             </div>
             <input id="importDataInput" class="hidden" type="file" accept="application/json,.json" />
           </div>
@@ -8565,5 +8566,85 @@
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module" src="app.js"></script>
+
+
+  <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
+    <div class="google-calendar-import-backdrop" data-close-google-calendar-import></div>
+    <section class="google-calendar-import-card">
+      <button class="google-calendar-import-close" type="button" data-close-google-calendar-import aria-label="Đóng">×</button>
+      <span class="google-calendar-import-eyebrow">GOOGLE CALENDAR</span>
+      <h2 id="googleCalendarImportTitle">Nạp lịch thành Phiếu công việc</h2>
+      <p class="google-calendar-import-note">Mỗi sự kiện sẽ tạo hoặc cập nhật một Phiếu nháp. Ngày và giờ sự kiện được đưa vào Tên Phiếu; tựa đề sự kiện được đưa vào Mô tả công việc.</p>
+
+      <form id="googleCalendarImportForm" autocomplete="off">
+        <label class="google-calendar-field">
+          <span>Calendar ID</span>
+          <input id="googleCalendarIdInput" type="text" inputmode="email" autocomplete="off" spellcheck="false" placeholder="Ví dụ: ...@group.calendar.google.com" required />
+        </label>
+
+        <label class="google-calendar-field">
+          <span>Google Calendar API Key</span>
+          <input id="googleCalendarApiKeyInput" type="password" autocomplete="new-password" spellcheck="false" placeholder="Nhập API Key" required />
+          <small>Thông tin chỉ được gửi tạm thời qua kết nối bảo mật đến Cloud Function và không được lưu trên trình duyệt hoặc Firestore.</small>
+        </label>
+
+        <label class="google-calendar-field">
+          <span>Khoảng thời gian cần nạp</span>
+          <select id="googleCalendarRangeMode">
+            <option value="today">Hôm nay</option>
+            <option value="week">Tuần này</option>
+            <option value="month" selected>Tháng này</option>
+            <option value="custom">Khoảng ngày</option>
+          </select>
+        </label>
+
+        <div id="googleCalendarCustomRange" class="google-calendar-date-grid hidden">
+          <label class="google-calendar-field"><span>Từ ngày</span><input id="googleCalendarFromDate" type="date" /></label>
+          <label class="google-calendar-field"><span>Đến ngày</span><input id="googleCalendarToDate" type="date" /></label>
+        </div>
+
+        <div class="google-calendar-import-info">
+          <strong>Quy tắc nhập lịch</strong>
+          <span>• Không tự tính thời gian quy định; công việc nhập mới dùng mặc định 30 phút và có thể sửa trước khi giao.</span>
+          <span>• Không tạo trùng sự kiện đã nạp.</span>
+          <span>• Sự kiện bị xóa trên Google Calendar không làm mất Phiếu mà được đánh dấu “Khách hủy -Đã xóa trên Google lịch”.</span>
+        </div>
+
+        <div class="google-calendar-import-actions">
+          <button type="button" class="btn ghost" data-close-google-calendar-import>Hủy</button>
+          <button id="syncGoogleCalendarBtn" type="submit" class="btn primary">Xuất lịch</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <style>
+    .calendar-import-btn { background:#ecfdf5!important; color:#047857!important; border-color:#86efac!important; }
+    .google-calendar-import-modal { position:fixed; inset:0; z-index:12000; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .google-calendar-import-modal.hidden { display:none!important; }
+    .google-calendar-import-backdrop { position:absolute; inset:0; background:rgba(15,23,42,.56); backdrop-filter:blur(7px); }
+    .google-calendar-import-card { position:relative; width:min(620px,100%); max-height:min(820px,calc(100dvh - 32px)); overflow:auto; border:1px solid #bbf7d0; border-radius:28px; padding:28px; background:#fff; box-shadow:0 28px 90px rgba(15,23,42,.32); }
+    .google-calendar-import-close { position:absolute; top:16px; right:16px; width:48px; height:48px; border:0; border-radius:16px; background:#eef2f7; font-size:30px; cursor:pointer; }
+    .google-calendar-import-eyebrow { display:inline-flex; padding:7px 12px; border:1px solid #86efac; border-radius:999px; background:#ecfdf5; color:#047857; font-size:12px; font-weight:900; letter-spacing:.06em; }
+    .google-calendar-import-card h2 { margin:15px 58px 8px 0; font-size:clamp(25px,4vw,34px); line-height:1.12; color:#0f172a; }
+    .google-calendar-import-note { margin:0 0 20px; color:#64748b; line-height:1.5; }
+    #googleCalendarImportForm { display:grid; gap:15px; }
+    .google-calendar-field { display:grid; gap:7px; min-width:0; color:#0f172a; font-weight:850; }
+    .google-calendar-field input,.google-calendar-field select { box-sizing:border-box; width:100%; min-width:0; height:52px; border:1px solid #cfe0f7; border-radius:16px; padding:0 15px; background:#fff; font:inherit; font-size:16px; outline:none; }
+    .google-calendar-field input:focus,.google-calendar-field select:focus { border-color:#22c55e; box-shadow:0 0 0 4px rgba(34,197,94,.12); }
+    .google-calendar-field small { color:#64748b; font-size:13px; line-height:1.45; font-weight:500; }
+    .google-calendar-date-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .google-calendar-import-info { display:grid; gap:6px; padding:14px 16px; border:1px dashed #86efac; border-radius:16px; background:#f0fdf4; color:#166534; font-size:13px; line-height:1.45; }
+    .google-calendar-import-actions { display:grid; grid-template-columns:minmax(120px,.65fr) minmax(170px,1fr); gap:12px; margin-top:4px; }
+    .google-calendar-import-actions .btn { min-height:50px; }
+    @media(max-width:640px){
+      .google-calendar-import-modal { padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left)); align-items:center; }
+      .google-calendar-import-card { max-height:calc(100dvh - 20px); padding:22px 16px 18px; border-radius:24px; }
+      .google-calendar-import-card h2 { font-size:26px; }
+      .google-calendar-date-grid { grid-template-columns:1fr; }
+      .google-calendar-import-actions { grid-template-columns:1fr 1.35fr; position:sticky; bottom:-18px; z-index:2; margin:4px -16px -18px; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); background:rgba(255,255,255,.96); border-top:1px solid #e2e8f0; }
+    }
+  </style>
+
 </body>
 </html>

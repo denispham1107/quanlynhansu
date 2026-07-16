@@ -59,6 +59,10 @@ const saveWorkOrderControlSettingsCallable = httpsCallable(
   functions,
   "saveWorkOrderControlSettings"
 );
+const importGoogleCalendarEventsCallable = httpsCallable(
+  functions,
+  "importGoogleCalendarEvents"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -304,6 +308,16 @@ const els = {
   exportDataBtn: $("#exportDataBtn"),
   importDataBtn: $("#importDataBtn"),
   importDataInput: $("#importDataInput"),
+  openGoogleCalendarImportBtn: $("#openGoogleCalendarImportBtn"),
+  googleCalendarImportModal: $("#googleCalendarImportModal"),
+  googleCalendarImportForm: $("#googleCalendarImportForm"),
+  googleCalendarIdInput: $("#googleCalendarIdInput"),
+  googleCalendarApiKeyInput: $("#googleCalendarApiKeyInput"),
+  googleCalendarRangeMode: $("#googleCalendarRangeMode"),
+  googleCalendarFromDate: $("#googleCalendarFromDate"),
+  googleCalendarToDate: $("#googleCalendarToDate"),
+  googleCalendarCustomRange: $("#googleCalendarCustomRange"),
+  syncGoogleCalendarBtn: $("#syncGoogleCalendarBtn"),
   mobileDataActionsGroup: $("#mobileDataActionsGroup"),
   mobileDataMenuBtn: $("#mobileDataMenuBtn"),
   mobileDataMenu: $("#mobileDataMenu"),
@@ -2125,6 +2139,7 @@ function applyManagementPermissionUI() {
   els.openEmployeeManagerPageBtn?.classList.toggle("hidden", !canAccessEmployees);
   els.exportDataBtn?.classList.toggle("hidden", !canExport);
   els.importDataBtn?.classList.toggle("hidden", !canImport);
+  els.openGoogleCalendarImportBtn?.classList.toggle("hidden", !isAdmin);
 
   const deletionLocked = isWorkOrderDeletionLocked();
   els.deleteAllWorkOrdersBtn?.classList.toggle(
@@ -11439,3 +11454,146 @@ function getFriendlyFirebaseError(error) {
 
   return messages[code] || error.message || "Có lỗi xảy ra.";
 }
+
+
+// =========================
+// Nạp sự kiện Google Calendar thành Phiếu công việc nháp
+// Calendar ID và API Key chỉ tồn tại tạm thời trong ô nhập để gửi qua HTTPS Callable.
+// Không lưu vào localStorage, sessionStorage, Firestore hoặc mã nguồn.
+// =========================
+function getLocalIsoDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addLocalDays(date, days) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function getGoogleCalendarSuggestedRange(mode) {
+  const now = new Date();
+  if (mode === "today") {
+    const day = getLocalIsoDate(now);
+    return { from: day, to: day };
+  }
+  if (mode === "week") {
+    const day = now.getDay() || 7;
+    const monday = addLocalDays(now, 1 - day);
+    return { from: getLocalIsoDate(monday), to: getLocalIsoDate(addLocalDays(monday, 6)) };
+  }
+  if (mode === "month") {
+    return {
+      from: getLocalIsoDate(new Date(now.getFullYear(), now.getMonth(), 1)),
+      to: getLocalIsoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0))
+    };
+  }
+  return {
+    from: els.googleCalendarFromDate?.value || getLocalIsoDate(now),
+    to: els.googleCalendarToDate?.value || getLocalIsoDate(now)
+  };
+}
+
+function syncGoogleCalendarRangeUI() {
+  const mode = els.googleCalendarRangeMode?.value || "month";
+  const isCustom = mode === "custom";
+  els.googleCalendarCustomRange?.classList.toggle("hidden", !isCustom);
+  if (!isCustom) {
+    const range = getGoogleCalendarSuggestedRange(mode);
+    if (els.googleCalendarFromDate) els.googleCalendarFromDate.value = range.from;
+    if (els.googleCalendarToDate) els.googleCalendarToDate.value = range.to;
+  }
+}
+
+function clearGoogleCalendarCredentials() {
+  if (els.googleCalendarIdInput) els.googleCalendarIdInput.value = "";
+  if (els.googleCalendarApiKeyInput) els.googleCalendarApiKeyInput.value = "";
+}
+
+function closeGoogleCalendarImportModal() {
+  els.googleCalendarImportModal?.classList.add("hidden");
+  clearGoogleCalendarCredentials();
+}
+
+function openGoogleCalendarImportModal() {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được phép Nạp lịch Google Calendar.", "error");
+    return;
+  }
+  if (els.googleCalendarRangeMode) els.googleCalendarRangeMode.value = "month";
+  syncGoogleCalendarRangeUI();
+  els.googleCalendarImportModal?.classList.remove("hidden");
+  window.setTimeout(() => els.googleCalendarIdInput?.focus(), 80);
+}
+
+els.openGoogleCalendarImportBtn?.addEventListener("click", openGoogleCalendarImportModal);
+els.googleCalendarRangeMode?.addEventListener("change", syncGoogleCalendarRangeUI);
+els.googleCalendarImportModal?.addEventListener("click", (event) => {
+  if (event.target.matches("[data-close-google-calendar-import], .google-calendar-import-backdrop")) {
+    closeGoogleCalendarImportModal();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.googleCalendarImportModal?.classList.contains("hidden")) {
+    closeGoogleCalendarImportModal();
+  }
+});
+
+els.googleCalendarImportForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được phép Nạp lịch Google Calendar.", "error");
+    return;
+  }
+
+  const calendarId = String(els.googleCalendarIdInput?.value || "").trim();
+  const apiKey = String(els.googleCalendarApiKeyInput?.value || "").trim();
+  const mode = els.googleCalendarRangeMode?.value || "month";
+  const range = getGoogleCalendarSuggestedRange(mode);
+
+  if (!calendarId) {
+    toast("Vui lòng nhập Calendar ID.", "error");
+    els.googleCalendarIdInput?.focus();
+    return;
+  }
+  if (!apiKey) {
+    toast("Vui lòng nhập Google Calendar API Key.", "error");
+    els.googleCalendarApiKeyInput?.focus();
+    return;
+  }
+  if (!range.from || !range.to || range.from > range.to) {
+    toast("Khoảng ngày nạp lịch không hợp lệ.", "error");
+    return;
+  }
+
+  setButtonLoading(els.syncGoogleCalendarBtn, true, "Đang nạp lịch...");
+  try {
+    const response = await importGoogleCalendarEventsCallable({
+      calendarId,
+      apiKey,
+      fromDate: range.from,
+      toDate: range.to,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Ho_Chi_Minh"
+    });
+    const result = response?.data || {};
+    closeGoogleCalendarImportModal();
+    toast(
+      `Nạp lịch hoàn tất: ${Number(result.created || 0)} Phiếu mới, ${Number(result.updated || 0)} Phiếu cập nhật, ${Number(result.cancelled || 0)} Phiếu được đánh dấu khách hủy, ${Number(result.skipped || 0)} sự kiện bỏ qua.`,
+      "success",
+      8500
+    );
+  } catch (error) {
+    console.error("Google Calendar import failed:", error);
+    const message = String(error?.message || "Không thể nạp Google Calendar.")
+      .replace(/^FirebaseError:\s*/i, "");
+    toast(message, "error", 9000);
+  } finally {
+    // Xóa khóa khỏi ô nhập ngay sau khi yêu cầu kết thúc, dù thành công hay thất bại.
+    if (els.googleCalendarApiKeyInput) els.googleCalendarApiKeyInput.value = "";
+    setButtonLoading(els.syncGoogleCalendarBtn, false);
+  }
+});
