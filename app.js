@@ -11517,6 +11517,7 @@ function clearGoogleCalendarCredentials() {
 
 function closeGoogleCalendarImportModal() {
   els.googleCalendarImportModal?.classList.add("hidden");
+  document.body.classList.remove("google-calendar-import-open");
   clearGoogleCalendarCredentials();
 }
 
@@ -11525,16 +11526,36 @@ function openGoogleCalendarImportModal() {
     toast("Chỉ Admin được phép Nạp lịch Google Calendar.", "error");
     return;
   }
+
+  const modal = els.googleCalendarImportModal;
+  if (!modal) {
+    toast("Không tìm thấy cửa sổ Nạp lịch. Vui lòng tải lại trang.", "error");
+    return;
+  }
+
+  // Đưa modal trực tiếp vào body để tránh bị che/chặn bởi menu, transform,
+  // overflow hoặc stacking context trên Safari iOS và Chrome Android.
+  if (modal.parentNode !== document.body) document.body.appendChild(modal);
+
   if (els.googleCalendarRangeMode) els.googleCalendarRangeMode.value = "month";
   syncGoogleCalendarRangeUI();
-  els.googleCalendarImportModal?.classList.remove("hidden");
-  window.setTimeout(() => els.googleCalendarIdInput?.focus(), 80);
+  setMobileTaskPanelMenuOpen(false);
+  modal.classList.remove("hidden");
+  document.body.classList.add("google-calendar-import-open");
+  window.setTimeout(() => els.googleCalendarIdInput?.focus({ preventScroll: true }), 120);
 }
 
-els.openGoogleCalendarImportBtn?.addEventListener("click", openGoogleCalendarImportModal);
-els.openGoogleCalendarImportMobileBtn?.addEventListener("click", () => {
-  setMobileTaskPanelMenuOpen(false);
+els.openGoogleCalendarImportBtn?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
   openGoogleCalendarImportModal();
+});
+els.openGoogleCalendarImportMobileBtn?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  setMobileTaskPanelMenuOpen(false);
+  // Chờ menu hoàn tất ẩn trước khi mở modal, tránh Safari iOS giữ lớp bấm cũ.
+  window.setTimeout(openGoogleCalendarImportModal, 0);
 });
 els.googleCalendarRangeMode?.addEventListener("change", syncGoogleCalendarRangeUI);
 els.googleCalendarImportModal?.addEventListener("click", (event) => {

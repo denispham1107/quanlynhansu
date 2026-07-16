@@ -4426,28 +4426,48 @@
 
       .mobile-task-panel-menu {
         position: absolute;
-        top: calc(100% + 7px);
+        top: calc(100% + 8px);
         right: 0;
-        z-index: 80;
+        z-index: 800;
         display: none;
-        min-width: 230px;
-        padding: 8px;
-        border: 1px solid #fecaca;
-        border-radius: 15px;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        width: min(280px, calc(100vw - 32px));
+        min-width: 0;
+        padding: 10px;
+        overflow: hidden;
+        border: 1px solid #dbe7f7;
+        border-radius: 18px;
         background: #ffffff;
-        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+        box-shadow: 0 20px 48px rgba(15, 23, 42, 0.22);
       }
 
       .mobile-task-panel-menu.is-open {
-        display: block;
+        display: grid;
       }
 
       .mobile-task-panel-menu .btn {
+        position: static !important;
+        inset: auto !important;
+        display: flex !important;
         width: 100% !important;
-        min-height: 44px !important;
+        min-width: 0 !important;
+        min-height: 48px !important;
+        margin: 0 !important;
+        padding: 10px 16px !important;
+        align-items: center !important;
         justify-content: flex-start !important;
-        border-radius: 11px !important;
-        font-size: 13px !important;
+        gap: 9px !important;
+        border-radius: 13px !important;
+        font-size: 15px !important;
+        line-height: 1.2 !important;
+        transform: none !important;
+        white-space: nowrap !important;
+      }
+
+      .mobile-task-panel-menu .settings-action-btn,
+      .mobile-task-panel-menu .calendar-import-btn {
+        margin: 0 !important;
       }
 
       .mobile-employee-status-toggle {
@@ -7476,7 +7496,7 @@
       }
 
       .mobile-task-panel-menu .settings-action-btn {
-        margin-top: 6px;
+        margin: 0 !important;
       }
 
       .work-order-settings-modal:not(.hidden) {
@@ -8574,7 +8594,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260716-calendar-import-v3-position"></script>
+  <script type="module" src="app.js?v=20260716-calendar-import-v4-mobile-fix"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -8652,10 +8672,11 @@
       .calendar-import-desktop-only { display:none!important; }
       .calendar-import-mobile-only:not(.hidden) { display:flex!important; }
     }
-    .google-calendar-import-modal { position:fixed; inset:0; z-index:12000; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .google-calendar-import-modal { position:fixed!important; inset:0!important; z-index:50000!important; display:flex; align-items:center; justify-content:center; padding:20px; pointer-events:auto; isolation:isolate; }
+    body.google-calendar-import-open { overflow:hidden!important; touch-action:none; }
     .google-calendar-import-modal.hidden { display:none!important; }
-    .google-calendar-import-backdrop { position:absolute; inset:0; background:rgba(15,23,42,.56); backdrop-filter:blur(7px); }
-    .google-calendar-import-card { position:relative; width:min(620px,100%); max-height:min(820px,calc(100dvh - 32px)); overflow:auto; border:1px solid #bbf7d0; border-radius:28px; padding:28px; background:#fff; box-shadow:0 28px 90px rgba(15,23,42,.32); }
+    .google-calendar-import-backdrop { position:absolute; inset:0; z-index:0; background:rgba(15,23,42,.56); backdrop-filter:blur(7px); }
+    .google-calendar-import-card { position:relative; z-index:1; width:min(620px,100%); max-height:min(820px,calc(100dvh - 32px)); overflow:auto; border:1px solid #bbf7d0; border-radius:28px; padding:28px; background:#fff; box-shadow:0 28px 90px rgba(15,23,42,.32); }
     .google-calendar-import-close { position:absolute; top:16px; right:16px; width:48px; height:48px; border:0; border-radius:16px; background:#eef2f7; font-size:30px; cursor:pointer; }
     .google-calendar-import-eyebrow { display:inline-flex; padding:7px 12px; border:1px solid #86efac; border-radius:999px; background:#ecfdf5; color:#047857; font-size:12px; font-weight:900; letter-spacing:.06em; }
     .google-calendar-import-card h2 { margin:15px 58px 8px 0; font-size:clamp(25px,4vw,34px); line-height:1.12; color:#0f172a; }
