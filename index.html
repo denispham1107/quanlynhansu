@@ -8601,6 +8601,7 @@
     <div class="google-calendar-import-backdrop" data-close-google-calendar-import></div>
     <section class="google-calendar-import-card">
       <button class="google-calendar-import-close" type="button" data-close-google-calendar-import aria-label="Đóng">×</button>
+      <div class="google-calendar-import-scroll">
       <span class="google-calendar-import-eyebrow">GOOGLE CALENDAR</span>
       <h2 id="googleCalendarImportTitle">Nạp lịch thành Phiếu công việc</h2>
       <p class="google-calendar-import-note">Mỗi sự kiện sẽ tạo hoặc cập nhật một Phiếu nháp. Ngày và giờ sự kiện được đưa vào Tên Phiếu; tựa đề sự kiện được đưa vào Mô tả công việc.</p>
@@ -8645,6 +8646,7 @@
           <button id="syncGoogleCalendarBtn" type="submit" class="btn primary">Xuất lịch</button>
         </div>
       </form>
+      </div>
     </section>
   </div>
 
@@ -8682,7 +8684,12 @@
     body.google-calendar-import-open { overflow:hidden!important; touch-action:none; }
     .google-calendar-import-modal.hidden { display:none!important; }
     .google-calendar-import-backdrop { position:absolute; inset:0; z-index:0; background:rgba(15,23,42,.56); backdrop-filter:blur(7px); }
-    .google-calendar-import-card { position:relative; z-index:1; width:min(620px,100%); max-height:min(820px,calc(100dvh - 32px)); overflow:auto; border:1px solid #bbf7d0; border-radius:28px; padding:28px; background:#fff; box-shadow:0 28px 90px rgba(15,23,42,.32); }
+    .google-calendar-import-card { position:relative; z-index:1; box-sizing:border-box; width:min(620px,100%); height:min(820px,calc(100dvh - 32px)); max-height:calc(100dvh - 32px); overflow:hidden; border:1px solid #bbf7d0; border-radius:28px; padding:0; background:#fff; box-shadow:0 28px 90px rgba(15,23,42,.32); }
+    .google-calendar-import-scroll { box-sizing:border-box; width:100%; height:100%; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:28px 22px 28px 28px; border-radius:inherit; -webkit-overflow-scrolling:touch; }
+    .google-calendar-import-scroll::-webkit-scrollbar { width:10px; }
+    .google-calendar-import-scroll::-webkit-scrollbar-track { margin:18px 4px; background:transparent; }
+    .google-calendar-import-scroll::-webkit-scrollbar-thumb { border:3px solid transparent; border-radius:999px; background:#94a3b8; background-clip:padding-box; }
+    .google-calendar-import-scroll { scrollbar-width:thin; scrollbar-color:#94a3b8 transparent; }
     .google-calendar-import-close { position:absolute; top:16px; right:16px; width:48px; height:48px; border:0; border-radius:16px; background:#eef2f7; font-size:30px; cursor:pointer; }
     .google-calendar-import-eyebrow { display:inline-flex; padding:7px 12px; border:1px solid #86efac; border-radius:999px; background:#ecfdf5; color:#047857; font-size:12px; font-weight:900; letter-spacing:.06em; }
     .google-calendar-import-card h2 { margin:15px 58px 8px 0; font-size:clamp(25px,4vw,34px); line-height:1.12; color:#0f172a; }
@@ -8710,16 +8717,19 @@
         box-sizing:border-box;
         width:100%;
         max-width:none;
-        max-height:calc(100svh - max(20px,env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+        height:calc(100svh - max(20px,env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+        height:calc(100dvh - max(20px,env(safe-area-inset-top) + env(safe-area-inset-bottom)));
         max-height:calc(100dvh - max(20px,env(safe-area-inset-top) + env(safe-area-inset-bottom)));
-        padding:18px 14px 0;
+        padding:0;
         border:1px solid #bbf7d0;
         border-radius:24px;
-        overflow-x:hidden;
-        overflow-y:auto;
-        overscroll-behavior:contain;
-        -webkit-overflow-scrolling:touch;
+        overflow:hidden;
         clip-path:inset(0 round 24px);
+      }
+      .google-calendar-import-scroll {
+        height:100%;
+        padding:18px 14px 0;
+        scrollbar-gutter:auto;
       }
       .google-calendar-import-close { top:12px; right:12px; width:44px; height:44px; border-radius:14px; font-size:27px; }
       .google-calendar-import-eyebrow { padding:5px 10px; font-size:11px; }
