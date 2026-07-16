@@ -309,6 +309,7 @@ const els = {
   importDataBtn: $("#importDataBtn"),
   importDataInput: $("#importDataInput"),
   openGoogleCalendarImportBtn: $("#openGoogleCalendarImportBtn"),
+  openGoogleCalendarImportMobileBtn: $("#openGoogleCalendarImportMobileBtn"),
   googleCalendarImportModal: $("#googleCalendarImportModal"),
   googleCalendarImportForm: $("#googleCalendarImportForm"),
   googleCalendarIdInput: $("#googleCalendarIdInput"),
@@ -2140,6 +2141,7 @@ function applyManagementPermissionUI() {
   els.exportDataBtn?.classList.toggle("hidden", !canExport);
   els.importDataBtn?.classList.toggle("hidden", !canImport);
   els.openGoogleCalendarImportBtn?.classList.toggle("hidden", !isAdmin);
+  els.openGoogleCalendarImportMobileBtn?.classList.toggle("hidden", !isAdmin);
 
   const deletionLocked = isWorkOrderDeletionLocked();
   els.deleteAllWorkOrdersBtn?.classList.toggle(
@@ -11530,6 +11532,10 @@ function openGoogleCalendarImportModal() {
 }
 
 els.openGoogleCalendarImportBtn?.addEventListener("click", openGoogleCalendarImportModal);
+els.openGoogleCalendarImportMobileBtn?.addEventListener("click", () => {
+  closeMobileDataMenu();
+  openGoogleCalendarImportModal();
+});
 els.googleCalendarRangeMode?.addEventListener("change", syncGoogleCalendarRangeUI);
 els.googleCalendarImportModal?.addEventListener("click", (event) => {
   if (event.target.matches("[data-close-google-calendar-import], .google-calendar-import-backdrop")) {

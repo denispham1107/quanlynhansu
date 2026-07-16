@@ -3544,7 +3544,7 @@
 
       .management-dashboard-actions {
         display: grid !important;
-        grid-template-columns: repeat(4, minmax(135px, auto)) !important;
+        grid-template-columns: repeat(5, minmax(135px, auto)) !important;
         align-items: center !important;
         gap: 10px !important;
         width: auto !important;
@@ -7742,10 +7742,11 @@
             <div id="mobileDataMenu" class="mobile-data-menu" aria-hidden="true">
               <button id="exportDataBtn" class="btn ghost large" type="button">Xuất dữ liệu</button>
               <button id="importDataBtn" class="btn ghost large" type="button">Nhập dữ liệu</button>
-              <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn large hidden" type="button">📅 Nạp lịch</button>
+              <button id="openGoogleCalendarImportMobileBtn" class="btn calendar-import-btn large calendar-import-mobile-only hidden" type="button">📅 Nạp lịch</button>
             </div>
             <input id="importDataInput" class="hidden" type="file" accept="application/json,.json" />
           </div>
+          <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn large calendar-import-desktop-only hidden" type="button">📅 Nạp lịch</button>
         </div>
       </section>
 
@@ -8565,7 +8566,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=20260716-calendar-import-v2"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -8620,6 +8621,14 @@
 
   <style>
     .calendar-import-btn { background:#ecfdf5!important; color:#047857!important; border-color:#86efac!important; }
+    .calendar-import-mobile-only { display:none!important; }
+    .calendar-import-desktop-only { display:inline-flex!important; align-items:center; justify-content:center; }
+    .calendar-import-desktop-only.hidden,
+    .calendar-import-mobile-only.hidden { display:none!important; }
+    @media(max-width:768px){
+      .calendar-import-desktop-only { display:none!important; }
+      .calendar-import-mobile-only:not(.hidden) { display:flex!important; }
+    }
     .google-calendar-import-modal { position:fixed; inset:0; z-index:12000; display:flex; align-items:center; justify-content:center; padding:20px; }
     .google-calendar-import-modal.hidden { display:none!important; }
     .google-calendar-import-backdrop { position:absolute; inset:0; background:rgba(15,23,42,.56); backdrop-filter:blur(7px); }
