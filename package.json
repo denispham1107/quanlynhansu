@@ -1,0 +1,555 @@
+"use strict";
+
+const crypto = require("node:crypto");
+const { initializeApp } = require("firebase-admin/app");
+const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
+
+initializeApp();
+
+const db = getFirestore();
+const workOrderSettingsPassword = defineSecret("WORK_ORDER_SETTINGS_PASSWORD");
+
+const REGION = "asia-southeast1";
+const SESSION_TTL_MS = 10 * 60 * 1000;
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILED_ATTEMPTS = 5;
+const BLOCK_DURATION_MS = 5 * 60 * 1000;
+const ALLOWED_EXTEND_LIMITS = new Set([20, 30, 45]);
+
+function assertAuthenticated(request) {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "Bạn cần đăng nhập để thực hiện thao tác này.");
+  }
+  return request.auth.uid;
+}
+
+async function assertAdmin(uid) {
+  const userSnap = await db.doc(`users/${uid}`).get();
+  if (!userSnap.exists || userSnap.data()?.role !== "admin") {
+    throw new HttpsError("permission-denied", "Chỉ Admin được truy cập Cài đặt.");
+  }
+  return userSnap.data();
+}
+
+function safeStringEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left), "utf8");
+  const rightBuffer = Buffer.from(String(right), "utf8");
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function base64UrlEncode(value) {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function base64UrlDecode(value) {
+  return Buffer.from(value, "base64url").toString("utf8");
+}
+
+function signSessionPayload(encodedPayload, secret) {
+  return crypto
+    .createHmac("sha256", `work-order-settings-session:${secret}`)
+    .update(encodedPayload)
+    .digest("base64url");
+}
+
+function issueAuthorizationToken(uid, secret) {
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  const payload = {
+    uid,
+    exp: expiresAt,
+    nonce: crypto.randomBytes(18).toString("base64url")
+  };
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = signSessionPayload(encodedPayload, secret);
+  return {
+    authorizationToken: `${encodedPayload}.${signature}`,
+    expiresAt
+  };
+}
+
+function verifyAuthorizationToken(token, uid, secret) {
+  if (typeof token !== "string" || token.length < 40 || token.length > 2048) {
+    throw new HttpsError("unauthenticated", "Phiên xác thực Cài đặt không hợp lệ.");
+  }
+
+  const parts = token.split(".");
+  if (parts.length !== 2) {
+    throw new HttpsError("unauthenticated", "Phiên xác thực Cài đặt không hợp lệ.");
+  }
+
+  const [encodedPayload, receivedSignature] = parts;
+  const expectedSignature = signSessionPayload(encodedPayload, secret);
+  if (!safeStringEqual(receivedSignature, expectedSignature)) {
+    throw new HttpsError("unauthenticated", "Phiên xác thực Cài đặt không hợp lệ.");
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(base64UrlDecode(encodedPayload));
+  } catch (_) {
+    throw new HttpsError("unauthenticated", "Phiên xác thực Cài đặt không hợp lệ.");
+  }
+
+  if (payload?.uid !== uid || !Number.isFinite(payload?.exp) || payload.exp <= Date.now()) {
+    throw new HttpsError("unauthenticated", "Phiên xác thực Cài đặt đã hết hạn.");
+  }
+
+  return payload;
+}
+
+function rateLimitRef(uid) {
+  const safeUid = crypto.createHash("sha256").update(uid).digest("hex");
+  return db.doc(`securityRateLimits/workOrderSettings_${safeUid}`);
+}
+
+async function assertNotBlocked(uid) {
+  const snap = await rateLimitRef(uid).get();
+  const blockedUntil = snap.data()?.blockedUntil;
+  if (blockedUntil instanceof Timestamp && blockedUntil.toMillis() > Date.now()) {
+    throw new HttpsError("resource-exhausted", "Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau.");
+  }
+}
+
+async function recordFailedAttempt(uid) {
+  const ref = rateLimitRef(uid);
+  const nowMs = Date.now();
+
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const data = snap.exists ? snap.data() : {};
+    const lastAttemptMs = data.lastAttemptAt instanceof Timestamp
+      ? data.lastAttemptAt.toMillis()
+      : 0;
+    const previousCount = nowMs - lastAttemptMs <= ATTEMPT_WINDOW_MS
+      ? Number(data.failedAttempts || 0)
+      : 0;
+    const failedAttempts = previousCount + 1;
+    const shouldBlock = failedAttempts >= MAX_FAILED_ATTEMPTS;
+
+    transaction.set(ref, {
+      failedAttempts: shouldBlock ? 0 : failedAttempts,
+      lastAttemptAt: Timestamp.fromMillis(nowMs),
+      blockedUntil: shouldBlock
+        ? Timestamp.fromMillis(nowMs + BLOCK_DURATION_MS)
+        : null,
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+  });
+}
+
+async function clearFailedAttempts(uid) {
+  await rateLimitRef(uid).set({
+    failedAttempts: 0,
+    blockedUntil: null,
+    lastAttemptAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp()
+  }, { merge: true });
+}
+
+exports.verifyWorkOrderSettingsPassword = onCall({
+  region: REGION,
+  secrets: [workOrderSettingsPassword],
+  timeoutSeconds: 30,
+  memory: "256MiB",
+  maxInstances: 10
+}, async (request) => {
+  const uid = assertAuthenticated(request);
+  await assertAdmin(uid);
+  await assertNotBlocked(uid);
+
+  const password = request.data?.password;
+  if (typeof password !== "string" || password.length < 1 || password.length > 128) {
+    throw new HttpsError("invalid-argument", "Mật khẩu không hợp lệ.");
+  }
+
+  const expectedPassword = workOrderSettingsPassword.value();
+  if (!expectedPassword) {
+    throw new HttpsError("failed-precondition", "Chưa cấu hình mật khẩu Cài đặt trên máy chủ.");
+  }
+
+  if (!safeStringEqual(password, expectedPassword)) {
+    await recordFailedAttempt(uid);
+    throw new HttpsError("permission-denied", "Mật khẩu không đúng.");
+  }
+
+  await clearFailedAttempts(uid);
+  const session = issueAuthorizationToken(uid, expectedPassword);
+
+  return {
+    authorized: true,
+    authorizationToken: session.authorizationToken,
+    expiresAt: session.expiresAt
+  };
+});
+
+exports.saveWorkOrderControlSettings = onCall({
+  region: REGION,
+  secrets: [workOrderSettingsPassword],
+  timeoutSeconds: 30,
+  memory: "256MiB",
+  maxInstances: 10
+}, async (request) => {
+  const uid = assertAuthenticated(request);
+  const adminProfile = await assertAdmin(uid);
+  const expectedPassword = workOrderSettingsPassword.value();
+
+  if (!expectedPassword) {
+    throw new HttpsError("failed-precondition", "Chưa cấu hình mật khẩu Cài đặt trên máy chủ.");
+  }
+
+  verifyAuthorizationToken(request.data?.authorizationToken, uid, expectedPassword);
+
+  const rawMaxExtendMinutes = request.data?.maxExtendMinutes;
+  const maxExtendMinutes = rawMaxExtendMinutes === null || rawMaxExtendMinutes === undefined
+    ? null
+    : Number(rawMaxExtendMinutes);
+  const preventWorkOrderDeletion = request.data?.preventWorkOrderDeletion;
+
+  if (maxExtendMinutes !== null && !ALLOWED_EXTEND_LIMITS.has(maxExtendMinutes)) {
+    throw new HttpsError("invalid-argument", "Giới hạn thêm giờ chỉ được là 20, 30 hoặc 45 phút.");
+  }
+  if (typeof preventWorkOrderDeletion !== "boolean") {
+    throw new HttpsError("invalid-argument", "Giá trị khóa xóa Phiếu không hợp lệ.");
+  }
+
+  const settings = {
+    maxExtendMinutes,
+    preventWorkOrderDeletion,
+    updatedAt: FieldValue.serverTimestamp(),
+    updatedByUid: uid,
+    updatedByName: String(adminProfile?.name || request.auth.token?.email || "Admin").slice(0, 120)
+  };
+
+  await db.doc("appSettings/workOrderControls").set(settings, { merge: true });
+
+  return {
+    saved: true,
+    settings: {
+      maxExtendMinutes,
+      preventWorkOrderDeletion
+    }
+  };
+});
+
+
+// =========================
+// Google Calendar -> Phiếu công việc nháp
+// API Key và Calendar ID chỉ được dùng trong vòng đời của request; không ghi log và không lưu nguyên văn.
+// =========================
+const GOOGLE_CALENDAR_CANCELLED_LABEL = "Khách hủy -Đã xóa trên Google lịch";
+const GOOGLE_CALENDAR_DEFAULT_DEADLINE_MINUTES = 30;
+const MAX_CALENDAR_RANGE_DAYS = 366;
+
+function normalizeDateOnly(value, fieldName) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    throw new HttpsError("invalid-argument", `${fieldName} không hợp lệ.`);
+  }
+  const date = new Date(`${text}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    throw new HttpsError("invalid-argument", `${fieldName} không hợp lệ.`);
+  }
+  return text;
+}
+
+function dateOnlyToUtcBoundary(value, endExclusive = false) {
+  const [year, month, day] = value.split("-").map(Number);
+  const base = Date.UTC(year, month - 1, day, 0, 0, 0, 0) - 7 * 60 * 60 * 1000;
+  return new Date(base + (endExclusive ? 24 * 60 * 60 * 1000 : 0));
+}
+
+function safeTimeZone(value) {
+  const candidate = String(value || "Asia/Ho_Chi_Minh").slice(0, 80);
+  try {
+    new Intl.DateTimeFormat("vi-VN", { timeZone: candidate }).format(new Date());
+    return candidate;
+  } catch (_) {
+    return "Asia/Ho_Chi_Minh";
+  }
+}
+
+function getEventStartDate(event) {
+  const dateTime = event?.start?.dateTime;
+  if (dateTime) {
+    const parsed = new Date(dateTime);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const dateOnly = event?.start?.date;
+  if (dateOnly && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    return new Date(`${dateOnly}T00:00:00.000Z`);
+  }
+  return null;
+}
+
+function getEventTaskDate(event, timeZone) {
+  if (event?.start?.date && /^\d{4}-\d{2}-\d{2}$/.test(event.start.date)) return event.start.date;
+  const start = getEventStartDate(event);
+  if (!start) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(start).reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function formatCalendarWorkOrderName(event, timeZone) {
+  if (event?.start?.date && !event?.start?.dateTime) {
+    const [year, month, day] = event.start.date.split("-");
+    return `${day}/${month}/${year} • Cả ngày`;
+  }
+  const start = getEventStartDate(event);
+  if (!start) return "Sự kiện Google Calendar";
+  return new Intl.DateTimeFormat("vi-VN", {
+    timeZone,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(start).replace(",", "");
+}
+
+function getCalendarEventKey(event) {
+  const originalStart = event?.originalStartTime?.dateTime || event?.originalStartTime?.date || "";
+  return `${String(event?.id || "")}|${originalStart}`;
+}
+
+function getCalendarDocumentSuffix(calendarId, event) {
+  return crypto.createHash("sha256")
+    .update(`${calendarId}\n${getCalendarEventKey(event)}`)
+    .digest("hex")
+    .slice(0, 40);
+}
+
+function buildGoogleCalendarUrl({ calendarId, apiKey, timeMin, timeMax, pageToken }) {
+  const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
+  url.searchParams.set("key", apiKey);
+  url.searchParams.set("timeMin", timeMin.toISOString());
+  url.searchParams.set("timeMax", timeMax.toISOString());
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("showDeleted", "true");
+  url.searchParams.set("maxResults", "2500");
+  url.searchParams.set("orderBy", "startTime");
+  if (pageToken) url.searchParams.set("pageToken", pageToken);
+  return url;
+}
+
+async function fetchGoogleCalendarEvents(params) {
+  const items = [];
+  let pageToken = "";
+  do {
+    const response = await fetch(buildGoogleCalendarUrl({ ...params, pageToken }), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(45000)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const googleMessage = payload?.error?.message || "Google Calendar từ chối yêu cầu.";
+      const status = response.status === 404 ? "not-found" : response.status === 403 ? "permission-denied" : "failed-precondition";
+      throw new HttpsError(status, googleMessage);
+    }
+    if (Array.isArray(payload.items)) items.push(...payload.items);
+    pageToken = String(payload.nextPageToken || "");
+  } while (pageToken && items.length < 10000);
+  return items.slice(0, 10000);
+}
+
+exports.importGoogleCalendarEvents = onCall({
+  region: REGION,
+  timeoutSeconds: 300,
+  memory: "512MiB",
+  maxInstances: 5
+}, async (request) => {
+  const uid = assertAuthenticated(request);
+  const adminProfile = await assertAdmin(uid);
+
+  const calendarId = String(request.data?.calendarId || "").trim();
+  const apiKey = String(request.data?.apiKey || "").trim();
+  const fromDate = normalizeDateOnly(request.data?.fromDate, "Từ ngày");
+  const toDate = normalizeDateOnly(request.data?.toDate, "Đến ngày");
+  const timeZone = safeTimeZone(request.data?.timeZone);
+
+  if (!calendarId || calendarId.length > 500) {
+    throw new HttpsError("invalid-argument", "Calendar ID không hợp lệ.");
+  }
+  if (!apiKey || apiKey.length > 500) {
+    throw new HttpsError("invalid-argument", "Google Calendar API Key không hợp lệ.");
+  }
+
+  const timeMin = dateOnlyToUtcBoundary(fromDate, false);
+  const timeMax = dateOnlyToUtcBoundary(toDate, true);
+  const rangeDays = Math.ceil((timeMax.getTime() - timeMin.getTime()) / 86400000);
+  if (rangeDays < 1 || rangeDays > MAX_CALENDAR_RANGE_DAYS) {
+    throw new HttpsError("invalid-argument", `Chỉ được nạp tối đa ${MAX_CALENDAR_RANGE_DAYS} ngày mỗi lần.`);
+  }
+
+  const events = await fetchGoogleCalendarEvents({ calendarId, apiKey, timeMin, timeMax });
+  const usableEvents = events.filter((event) => event?.id);
+  const entries = usableEvents.map((event) => {
+    const suffix = getCalendarDocumentSuffix(calendarId, event);
+    return {
+      event,
+      workOrderRef: db.doc(`workOrders/gcal_${suffix}`),
+      taskRef: db.doc(`tasks/gcal_task_${suffix}`)
+    };
+  });
+
+  const snapshots = entries.length
+    ? await db.getAll(...entries.flatMap((entry) => [entry.workOrderRef, entry.taskRef]))
+    : [];
+
+  const existing = new Map();
+  snapshots.forEach((snapshot) => existing.set(snapshot.ref.path, snapshot));
+
+  let created = 0;
+  let updated = 0;
+  let cancelled = 0;
+  let skipped = 0;
+  let operationCount = 0;
+  let batch = db.batch();
+
+  async function commitIfNeeded(force = false) {
+    if (operationCount >= 400 || (force && operationCount > 0)) {
+      await batch.commit();
+      batch = db.batch();
+      operationCount = 0;
+    }
+  }
+
+  const calendarIdHash = crypto.createHash("sha256").update(calendarId).digest("hex");
+  const actorName = String(adminProfile?.name || request.auth.token?.email || "Admin").slice(0, 120);
+
+  for (const entry of entries) {
+    const event = entry.event;
+    const workOrderSnap = existing.get(entry.workOrderRef.path);
+    const taskSnap = existing.get(entry.taskRef.path);
+    const wasImported = Boolean(workOrderSnap?.exists || taskSnap?.exists);
+    const isCancelled = event.status === "cancelled";
+
+    if (isCancelled && !wasImported) {
+      skipped += 1;
+      continue;
+    }
+
+    const baseName = formatCalendarWorkOrderName(event, timeZone);
+    const summary = String(event.summary || "(Sự kiện không có tựa đề)").trim().slice(0, 1000);
+    const workOrderName = isCancelled ? `${GOOGLE_CALENDAR_CANCELLED_LABEL} • ${baseName}` : baseName;
+    const taskDescription = isCancelled ? `${GOOGLE_CALENDAR_CANCELLED_LABEL}\n${summary}` : summary;
+    const taskDate = getEventTaskDate(event, timeZone);
+    const eventStart = getEventStartDate(event);
+    const eventEnd = event?.end?.dateTime ? new Date(event.end.dateTime) : null;
+    const updatedAt = event?.updated ? new Date(event.updated) : null;
+    const googleMetadata = {
+      source: "google_calendar",
+      googleCalendarEventId: String(event.id),
+      googleCalendarEventKey: getCalendarEventKey(event),
+      googleCalendarIdHash: calendarIdHash,
+      googleCalendarStatus: isCancelled ? "cancelled" : "confirmed",
+      googleCalendarCancellationMessage: isCancelled ? GOOGLE_CALENDAR_CANCELLED_LABEL : null,
+      googleCalendarSummary: summary,
+      googleCalendarEventUpdatedAt: updatedAt && !Number.isNaN(updatedAt.getTime()) ? Timestamp.fromDate(updatedAt) : null,
+      googleCalendarEventStartAt: eventStart ? Timestamp.fromDate(eventStart) : null,
+      googleCalendarEventEndAt: eventEnd && !Number.isNaN(eventEnd.getTime()) ? Timestamp.fromDate(eventEnd) : null,
+      googleCalendarLastSyncedAt: FieldValue.serverTimestamp(),
+      googleCalendarLastSyncedByUid: uid,
+      googleCalendarLastSyncedByName: actorName
+    };
+
+    if (!wasImported) {
+      batch.set(entry.workOrderRef, {
+        id: entry.workOrderRef.id,
+        name: workOrderName,
+        createdByUid: uid,
+        createdByName: actorName,
+        createdAt: FieldValue.serverTimestamp(),
+        taskCount: 1,
+        status: "draft",
+        ...googleMetadata
+      });
+      operationCount += 1;
+
+      batch.set(entry.taskRef, {
+        id: entry.taskRef.id,
+        title: "",
+        description: taskDescription,
+        taskDate,
+        assignedToUid: "",
+        assignedToName: "",
+        assignedByUid: uid,
+        assignedByName: actorName,
+        workOrderId: entry.workOrderRef.id,
+        workOrderName,
+        workOrderTaskCount: 1,
+        rowIndex: 0,
+        createdAt: FieldValue.serverTimestamp(),
+        deadlineMinutes: GOOGLE_CALENDAR_DEFAULT_DEADLINE_MINUTES,
+        isLunchBreak: false,
+        isHotel: false,
+        hotelPetCount: 0,
+        hotelAllowedMinutes: 0,
+        deadlineAt: null,
+        dispatchedAt: null,
+        queueStartAt: null,
+        pauseStartedAt: null,
+        remainingMsAtPause: null,
+        accumulatedWorkedMs: 0,
+        submittedAt: null,
+        approvedAt: null,
+        status: "draft",
+        actualMinutes: null,
+        resultType: null,
+        differenceMinutes: null,
+        differencePercent: null,
+        workPhotos: [],
+        workPhotoCount: 0,
+        lastWorkPhotoUploadedAt: null,
+        photoRequired: true,
+        requiredPhotoCount: 1,
+        photos: [],
+        photoCount: 0,
+        lastPhotoUploadedAt: null,
+        importedDefaultDeadlineMinutes: GOOGLE_CALENDAR_DEFAULT_DEADLINE_MINUTES,
+        ...googleMetadata
+      });
+      operationCount += 1;
+      created += 1;
+    } else {
+      batch.set(entry.workOrderRef, {
+        name: workOrderName,
+        taskCount: 1,
+        ...googleMetadata
+      }, { merge: true });
+      operationCount += 1;
+
+      batch.set(entry.taskRef, {
+        description: taskDescription,
+        taskDate,
+        workOrderName,
+        ...googleMetadata
+      }, { merge: true });
+      operationCount += 1;
+      if (isCancelled) cancelled += 1;
+      else updated += 1;
+    }
+
+    await commitIfNeeded(false);
+  }
+
+  await commitIfNeeded(true);
+
+  return {
+    read: events.length,
+    created,
+    updated,
+    cancelled,
+    skipped,
+    defaultDeadlineMinutes: GOOGLE_CALENDAR_DEFAULT_DEADLINE_MINUTES
+  };
+});
