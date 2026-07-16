@@ -63,6 +63,10 @@ const importGoogleCalendarEventsCallable = httpsCallable(
   functions,
   "importGoogleCalendarEvents"
 );
+const getGoogleCalendarImportSettingsCallable = httpsCallable(
+  functions,
+  "getGoogleCalendarImportSettings"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -318,6 +322,7 @@ const els = {
   googleCalendarFromDate: $("#googleCalendarFromDate"),
   googleCalendarToDate: $("#googleCalendarToDate"),
   googleCalendarCustomRange: $("#googleCalendarCustomRange"),
+  googleCalendarSavedStatus: $("#googleCalendarSavedStatus"),
   syncGoogleCalendarBtn: $("#syncGoogleCalendarBtn"),
   mobileDataActionsGroup: $("#mobileDataActionsGroup"),
   mobileDataMenuBtn: $("#mobileDataMenuBtn"),
@@ -11478,8 +11483,8 @@ function getFriendlyFirebaseError(error) {
 
 // =========================
 // Nạp sự kiện Google Calendar thành Phiếu công việc nháp
-// Calendar ID và API Key chỉ tồn tại tạm thời trong ô nhập để gửi qua HTTPS Callable.
-// Không lưu vào localStorage, sessionStorage, Firestore hoặc mã nguồn.
+// Calendar ID và API Key được lưu phía máy chủ qua Cloud Function.
+// API Key không được trả ngược về frontend; khi đã lưu, Admin có thể để trống ô API Key.
 // =========================
 function getLocalIsoDate(date = new Date()) {
   const year = date.getFullYear();
@@ -11528,15 +11533,45 @@ function syncGoogleCalendarRangeUI() {
   }
 }
 
-function clearGoogleCalendarCredentials() {
-  if (els.googleCalendarIdInput) els.googleCalendarIdInput.value = "";
-  if (els.googleCalendarApiKeyInput) els.googleCalendarApiKeyInput.value = "";
+function setGoogleCalendarSavedStatus({ hasApiKey = false, calendarId = "" } = {}) {
+  const status = els.googleCalendarSavedStatus;
+  if (!status) return;
+  if (calendarId || hasApiKey) {
+    status.textContent = hasApiKey
+      ? "Đã lưu Calendar ID và API Key. Chỉ nhập lại khi muốn thay đổi."
+      : "Đã lưu Calendar ID. Hãy nhập API Key để hoàn tất cấu hình.";
+    status.classList.add("is-saved");
+  } else {
+    status.textContent = "Chưa có cấu hình đã lưu.";
+    status.classList.remove("is-saved");
+  }
+}
+
+async function loadGoogleCalendarImportSettings() {
+  setGoogleCalendarSavedStatus();
+  try {
+    const response = await getGoogleCalendarImportSettingsCallable({});
+    const settings = response?.data || {};
+    if (els.googleCalendarIdInput) {
+      els.googleCalendarIdInput.value = String(settings.calendarId || "");
+    }
+    if (els.googleCalendarApiKeyInput) {
+      els.googleCalendarApiKeyInput.value = "";
+      els.googleCalendarApiKeyInput.placeholder = settings.hasApiKey
+        ? "Đã lưu API Key — để trống nếu không thay đổi"
+        : "Nhập API Key";
+    }
+    setGoogleCalendarSavedStatus(settings);
+  } catch (error) {
+    console.error("Không thể tải cấu hình Google Calendar:", error);
+    setGoogleCalendarSavedStatus();
+  }
 }
 
 function closeGoogleCalendarImportModal() {
   els.googleCalendarImportModal?.classList.add("hidden");
   document.body.classList.remove("google-calendar-import-open");
-  clearGoogleCalendarCredentials();
+  if (els.googleCalendarApiKeyInput) els.googleCalendarApiKeyInput.value = "";
 }
 
 function openGoogleCalendarImportModal() {
@@ -11560,7 +11595,9 @@ function openGoogleCalendarImportModal() {
   setMobileTaskPanelMenuOpen(false);
   modal.classList.remove("hidden");
   document.body.classList.add("google-calendar-import-open");
-  window.setTimeout(() => els.googleCalendarIdInput?.focus({ preventScroll: true }), 120);
+  loadGoogleCalendarImportSettings().finally(() => {
+    window.setTimeout(() => els.googleCalendarIdInput?.focus({ preventScroll: true }), 120);
+  });
 }
 
 els.openGoogleCalendarImportBtn?.addEventListener("click", (event) => {
@@ -11600,16 +11637,8 @@ els.googleCalendarImportForm?.addEventListener("submit", async (event) => {
   const mode = els.googleCalendarRangeMode?.value || "month";
   const range = getGoogleCalendarSuggestedRange(mode);
 
-  if (!calendarId) {
-    toast("Vui lòng nhập Calendar ID.", "error");
-    els.googleCalendarIdInput?.focus();
-    return;
-  }
-  if (!apiKey) {
-    toast("Vui lòng nhập Google Calendar API Key.", "error");
-    els.googleCalendarApiKeyInput?.focus();
-    return;
-  }
+  // Có thể để trống khi Cloud Function đã lưu cấu hình từ lần trước.
+  // Nếu nhập giá trị mới, Cloud Function sẽ cập nhật cấu hình mới nhất trong Firestore.
   if (!range.from || !range.to || range.from > range.to) {
     toast("Khoảng ngày nạp lịch không hợp lệ.", "error");
     return;
@@ -11637,7 +11666,7 @@ els.googleCalendarImportForm?.addEventListener("submit", async (event) => {
       .replace(/^FirebaseError:\s*/i, "");
     toast(message, "error", 9000);
   } finally {
-    // Xóa khóa khỏi ô nhập ngay sau khi yêu cầu kết thúc, dù thành công hay thất bại.
+    // Không giữ API Key trong DOM sau khi yêu cầu kết thúc.
     if (els.googleCalendarApiKeyInput) els.googleCalendarApiKeyInput.value = "";
     setButtonLoading(els.syncGoogleCalendarBtn, false);
   }
