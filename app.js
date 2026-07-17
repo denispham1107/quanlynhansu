@@ -232,7 +232,7 @@ function getRoleDisplayName(role) {
 // Cài đặt chung cho Phiếu công việc
 // =========================
 const WORK_ORDER_CONTROL_SETTINGS_DOC_ID = "workOrderControls";
-const WORK_ORDER_EXTENSION_LIMIT_OPTIONS = [20, 30, 45];
+const WORK_ORDER_EXTENSION_LIMIT_OPTIONS = [10, 20, 30];
 
 function normalizeWorkOrderControlSettings(value = {}) {
   const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -5871,7 +5871,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
   );
 
   if (limitEnabled && !WORK_ORDER_EXTENSION_LIMIT_OPTIONS.includes(selectedLimit)) {
-    toast("Vui lòng chọn giới hạn 20, 30 hoặc 45 phút.", "error");
+    toast("Vui lòng chọn giới hạn 10, 20 hoặc 30 phút.", "error");
     return;
   }
 
