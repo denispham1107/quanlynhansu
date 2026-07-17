@@ -2430,6 +2430,154 @@ function handleSnapshotError(error) {
   toast("Không đọc được dữ liệu realtime. Kiểm tra Firestore Rules hoặc index.", "error");
 }
 
+
+const EMPLOYMENT_STATUS_WORKING = "working";
+const EMPLOYMENT_STATUS_OFF = "off";
+
+function normalizeEmploymentStatus(account) {
+  return account?.employmentStatus === EMPLOYMENT_STATUS_OFF
+    ? EMPLOYMENT_STATUS_OFF
+    : EMPLOYMENT_STATUS_WORKING;
+}
+
+function isEmployeeWorking(employee) {
+  return normalizeEmploymentStatus(employee) === EMPLOYMENT_STATUS_WORKING;
+}
+
+function getAssignableEmployees() {
+  return state.employees.filter(isEmployeeWorking);
+}
+
+function getEmploymentStatusLabel(account) {
+  return normalizeEmploymentStatus(account) === EMPLOYMENT_STATUS_OFF ? "Xin off" : "Đang làm";
+}
+
+function ensureEmploymentStatusModal() {
+  let modal = document.getElementById("employeeEmploymentStatusModal");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "employeeEmploymentStatusModal";
+  modal.className = "employment-status-modal hidden";
+  modal.setAttribute("aria-hidden", "true");
+  modal.innerHTML = `
+    <div class="employment-status-backdrop" data-action="close-employment-status"></div>
+    <section class="employment-status-dialog" role="dialog" aria-modal="true" aria-labelledby="employmentStatusTitle">
+      <button class="employment-status-close" type="button" data-action="close-employment-status" aria-label="Đóng">×</button>
+      <p class="eyebrow">TRẠNG THÁI NHÂN VIÊN</p>
+      <h3 id="employmentStatusTitle">Cập nhật trạng thái</h3>
+      <p id="employmentStatusEmployeeInfo" class="muted"></p>
+      <div class="employment-status-options">
+        <label class="employment-status-option is-working">
+          <input type="radio" name="employeeEmploymentStatus" value="working" />
+          <span><strong>Đang làm</strong><small>Có thể nhận công việc mới bình thường.</small></span>
+        </label>
+        <label class="employment-status-option is-off">
+          <input type="radio" name="employeeEmploymentStatus" value="off" />
+          <span><strong>Xin off</strong><small>Không xuất hiện trong các danh sách giao hoặc đổi người.</small></span>
+        </label>
+      </div>
+      <label class="employment-status-note-field">
+        Ghi chú <span>(không bắt buộc)</span>
+        <textarea id="employmentStatusNote" rows="3" placeholder="Ví dụ: Xin nghỉ việc gia đình"></textarea>
+      </label>
+      <div class="employment-status-actions">
+        <button class="btn ghost" type="button" data-action="close-employment-status">Hủy</button>
+        <button id="saveEmploymentStatusBtn" class="btn primary" type="button">Lưu trạng thái</button>
+      </div>
+    </section>
+  `;
+  document.body.appendChild(modal);
+
+  modal.addEventListener("click", (event) => {
+    if (event.target.closest('[data-action="close-employment-status"]')) {
+      closeEmploymentStatusModal();
+    }
+  });
+  modal.querySelector("#saveEmploymentStatusBtn")?.addEventListener("click", saveEmploymentStatus);
+  return modal;
+}
+
+function openEmploymentStatusModal(employeeUid) {
+  if (!isAdminProfile()) return;
+  const employee = state.employees.find((item) => item.uid === employeeUid);
+  if (!employee) return;
+
+  const modal = ensureEmploymentStatusModal();
+  modal.dataset.employeeUid = employee.uid;
+  modal.querySelector("#employmentStatusEmployeeInfo").textContent = `${employee.name || "Chưa đặt tên"} • ${employee.email || ""}`;
+  const status = normalizeEmploymentStatus(employee);
+  const radio = modal.querySelector(`input[name="employeeEmploymentStatus"][value="${status}"]`);
+  if (radio) radio.checked = true;
+  modal.querySelector("#employmentStatusNote").value = employee.employmentStatusNote || "";
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function closeEmploymentStatusModal() {
+  const modal = document.getElementById("employeeEmploymentStatusModal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  delete modal.dataset.employeeUid;
+  document.body.classList.remove("modal-open");
+}
+
+async function saveEmploymentStatus() {
+  const modal = document.getElementById("employeeEmploymentStatusModal");
+  const employeeUid = modal?.dataset.employeeUid;
+  const employee = state.employees.find((item) => item.uid === employeeUid);
+  const selected = modal?.querySelector('input[name="employeeEmploymentStatus"]:checked')?.value;
+  if (!modal || !employee || ![EMPLOYMENT_STATUS_WORKING, EMPLOYMENT_STATUS_OFF].includes(selected)) return;
+
+  const button = modal.querySelector("#saveEmploymentStatusBtn");
+  const previousStatus = normalizeEmploymentStatus(employee);
+  const note = modal.querySelector("#employmentStatusNote")?.value.trim() || "";
+
+  try {
+    setButtonLoading(button, true);
+    await updateDoc(doc(db, "users", employee.uid), {
+      employmentStatus: selected,
+      employmentStatusNote: note,
+      employmentStatusUpdatedAt: serverTimestamp(),
+      employmentStatusUpdatedBy: state.user.uid,
+      employmentStatusUpdatedByName: state.profile?.name || state.profile?.email || "Admin",
+      employmentStatusHistory: arrayUnion({
+        from: previousStatus,
+        to: selected,
+        note,
+        changedAt: Timestamp.now(),
+        changedByUid: state.user.uid,
+        changedByName: state.profile?.name || state.profile?.email || "Admin"
+      })
+    });
+    closeEmploymentStatusModal();
+    toast(`Đã chuyển ${employee.name || employee.email} sang trạng thái ${selected === EMPLOYMENT_STATUS_OFF ? "Xin off" : "Đang làm"}.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không cập nhật được trạng thái nhân viên.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+function renderEmployeeEmploymentStatusBanner() {
+  if (!els.employeeView || !state.profile || state.profile.role !== "employee") return;
+  let banner = document.getElementById("employeeEmploymentStatusBanner");
+  if (!banner) {
+    banner = document.createElement("section");
+    banner.id = "employeeEmploymentStatusBanner";
+    const hero = els.employeeView.querySelector(".employee-hero");
+    hero?.insertAdjacentElement("afterend", banner);
+  }
+  const isOff = normalizeEmploymentStatus(state.profile) === EMPLOYMENT_STATUS_OFF;
+  banner.className = `employee-employment-status-banner ${isOff ? "is-off" : "is-working"}`;
+  banner.innerHTML = isOff
+    ? `<strong>Trạng thái làm việc: Xin off</strong><span>Bạn hiện không nhận công việc mới. Các công việc đã được giao trước đó vẫn được giữ nguyên.</span>`
+    : `<strong>Trạng thái làm việc: Đang làm</strong><span>Bạn có thể nhận công việc mới bình thường.</span>`;
+}
+
 function renderEmployees() {
   if (!els.employeeList) return;
 
@@ -2477,13 +2625,14 @@ function renderEmployees() {
       const grantedCount = isSupervisor ? getGrantedSupervisorPermissionCount(account) : 0;
 
       return `
-        <div class="employee-item" data-employee-uid="${escapeHtml(account.uid)}">
+        <div class="employee-item ${account.role === "employee" && isAdminProfile() ? "is-status-clickable" : ""}" data-employee-uid="${escapeHtml(account.uid)}">
           <div class="avatar">${escapeHtml(initials(account.name))}</div>
           <div class="employee-item-info">
             <strong title="${escapeHtml(account.name || "Chưa đặt tên")}">${escapeHtml(account.name || "Chưa đặt tên")}</strong>
             <span title="${escapeHtml(account.email || "")}">${escapeHtml(account.email || "")}</span>
             <div class="staff-account-meta">
               <span class="staff-role-badge ${isSupervisor ? "is-supervisor" : ""}">${isSupervisor ? "Giám sát" : "Nhân viên"}</span>
+              ${!isSupervisor ? `<span class="employment-status-badge ${normalizeEmploymentStatus(account) === EMPLOYMENT_STATUS_OFF ? "is-off" : "is-working"}">${getEmploymentStatusLabel(account)}</span>` : ""}
               ${isSupervisor ? `<span class="staff-permission-count">${grantedCount}/${SUPERVISOR_PERMISSION_KEYS.length} quyền</span>` : ""}
             </div>
           </div>
@@ -2713,12 +2862,20 @@ els.employeeList?.addEventListener("click", (event) => {
   }
 
   const deleteButton = event.target.closest('[data-action="delete-employee"]');
-  if (!deleteButton || deleteButton.disabled) return;
-  deleteEmployeeData(deleteButton.dataset.employeeUid);
+  if (deleteButton) {
+    if (!deleteButton.disabled) deleteEmployeeData(deleteButton.dataset.employeeUid);
+    return;
+  }
+
+  const row = event.target.closest('.employee-item[data-employee-uid]');
+  if (row && isAdminProfile()) {
+    const account = state.employees.find((item) => item.uid === row.dataset.employeeUid);
+    if (account) openEmploymentStatusModal(account.uid);
+  }
 });
 
 function employeeOptionsHtml() {
-  return state.employees
+  return getAssignableEmployees()
     .map((employee) => (
       `<option value="${escapeHtml(employee.uid)}">${escapeHtml(employee.name)} - ${escapeHtml(employee.email)}</option>`
     ))
@@ -6305,6 +6462,18 @@ function setupEmployeeDashboard() {
   els.employeeManagerView?.classList.add("hidden");
   els.photoReportView?.classList.add("hidden");
   els.employeeView.classList.remove("hidden");
+  renderEmployeeEmploymentStatusBanner();
+
+  const unsubOwnProfile = onSnapshot(
+    doc(db, "users", state.user.uid),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        state.profile = { id: snapshot.id, ...snapshot.data() };
+        renderEmployeeEmploymentStatusBanner();
+      }
+    },
+    handleSnapshotError
+  );
 
   // Chỉ query task của chính nhân viên đang đăng nhập.
   // Sort thực hiện ở client để tránh yêu cầu tạo composite index.
@@ -6348,7 +6517,7 @@ function setupEmployeeDashboard() {
     }
   );
 
-  state.unsubs.push(unsubTasks, unsubEmployeeWorkOrders);
+  state.unsubs.push(unsubOwnProfile, unsubTasks, unsubEmployeeWorkOrders);
 }
 
 // =========================
@@ -6845,6 +7014,13 @@ function getEmployeeStatusGroupConfig(type) {
       longLabel: "Tổng số bạn nhân viên đang nghỉ trưa:",
       shortLabel: "Nghỉ trưa",
       detailTitle: "Nhân viên đang nghỉ trưa"
+    },
+    off: {
+      cardClass: "is-off",
+      icon: "◷",
+      longLabel: "Tổng số bạn nhân viên đang Xin off:",
+      shortLabel: "Xin off",
+      detailTitle: "Nhân viên đang Xin off"
     }
   };
 
@@ -6876,8 +7052,9 @@ function updateMobileEmployeeStatusOverview() {
   const assignedCount = groups.assigned?.length || 0;
   const hotelCount = groups.hotel?.length || 0;
   const lunchCount = groups.lunch?.length || 0;
+  const offCount = groups.off?.length || 0;
 
-  els.adminMobileEmployeeStatusOverview.textContent = `Chưa ${freeCount} • Đã ${assignedCount} • Hotel ${hotelCount} • Nghỉ ${lunchCount}`;
+  els.adminMobileEmployeeStatusOverview.textContent = `Chưa ${freeCount} • Đã ${assignedCount} • Hotel ${hotelCount} • Nghỉ ${lunchCount} • Off ${offCount}`;
 }
 
 function applyMobileEmployeeStatusExpanded() {
@@ -6890,7 +7067,9 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   const summaryEl = els.adminEmployeeStatusSummary;
   if (!summaryEl) return;
 
-  const employees = [...state.employees].sort((a, b) => getEmployeeSummaryName(a).localeCompare(getEmployeeSummaryName(b), "vi"));
+  const allEmployees = [...state.employees].sort((a, b) => getEmployeeSummaryName(a).localeCompare(getEmployeeSummaryName(b), "vi"));
+  const offEmployees = allEmployees.filter((employee) => !isEmployeeWorking(employee));
+  const employees = allEmployees.filter(isEmployeeWorking);
   const busyEmployeeUids = new Set();
   const hotelEmployeeUids = new Set();
   const lunchEmployeeUids = new Set();
@@ -6922,7 +7101,8 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
     free: freeEmployees,
     assigned: assignedEmployees,
     hotel: hotelEmployees,
-    lunch: lunchEmployees
+    lunch: lunchEmployees,
+    off: offEmployees
   };
 
   summaryEl.classList.remove("hidden");
@@ -6930,7 +7110,8 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
     renderEmployeeStatusCard("free", freeEmployees),
     renderEmployeeStatusCard("assigned", assignedEmployees),
     renderEmployeeStatusCard("hotel", hotelEmployees),
-    renderEmployeeStatusCard("lunch", lunchEmployees)
+    renderEmployeeStatusCard("lunch", lunchEmployees),
+    renderEmployeeStatusCard("off", offEmployees)
   ].join("");
 
   updateMobileEmployeeStatusOverview();
