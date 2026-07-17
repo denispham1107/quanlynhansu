@@ -8971,11 +8971,18 @@
 
     .employee-list-toolbar {
       display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-bottom: 10px; align-items: stretch;
+      width: 100%; min-width: 0;
     }
-    .employee-search-field { position: relative; min-width: 0; }
+    .employee-list-toolbar > * { min-width: 0; max-width: 100%; }
+    .employee-search-field { position: relative; display: block; min-width: 0; margin: 0; }
+    .employee-search-field .sr-only {
+      position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important;
+      margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important; border: 0 !important;
+    }
     .employee-search-field input, .employee-list-toolbar select {
       box-sizing: border-box; width: 100%; height: 42px; min-height: 42px; padding: 9px 12px; border: 1px solid #cfe0f7;
-      border-radius: 13px; background: #fff; font: inherit; font-size: 0.9rem; outline: none;
+      border-radius: 13px; background: #fff; font: inherit; font-size: 0.9rem; outline: none; min-width: 0; max-width: 100%;
     }
     .employee-search-field input { padding-left: 36px; }
     .employee-search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #64748b; pointer-events: none; }
