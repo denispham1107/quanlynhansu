@@ -2449,7 +2449,7 @@ function getAssignableEmployees() {
 }
 
 function getEmploymentStatusLabel(account) {
-  return normalizeEmploymentStatus(account) === EMPLOYMENT_STATUS_OFF ? "Xin off" : "Đang làm";
+  return normalizeEmploymentStatus(account) === EMPLOYMENT_STATUS_OFF ? "Đang Off" : "Đang làm";
 }
 
 function ensureEmploymentStatusModal() {
@@ -2474,7 +2474,7 @@ function ensureEmploymentStatusModal() {
         </label>
         <label class="employment-status-option is-off">
           <input type="radio" name="employeeEmploymentStatus" value="off" />
-          <span><strong>Xin off</strong><small>Không xuất hiện trong các danh sách giao hoặc đổi người.</small></span>
+          <span><strong>Đang Off</strong><small>Không xuất hiện trong các danh sách giao hoặc đổi người.</small></span>
         </label>
       </div>
       <label class="employment-status-note-field">
@@ -2553,7 +2553,7 @@ async function saveEmploymentStatus() {
       })
     });
     closeEmploymentStatusModal();
-    toast(`Đã chuyển ${employee.name || employee.email} sang trạng thái ${selected === EMPLOYMENT_STATUS_OFF ? "Xin off" : "Đang làm"}.`, "success");
+    toast(`Đã chuyển ${employee.name || employee.email} sang trạng thái ${selected === EMPLOYMENT_STATUS_OFF ? "Đang Off" : "Đang làm"}.`, "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không cập nhật được trạng thái nhân viên.", "error");
@@ -2574,7 +2574,7 @@ function renderEmployeeEmploymentStatusBanner() {
   const isOff = normalizeEmploymentStatus(state.profile) === EMPLOYMENT_STATUS_OFF;
   banner.className = `employee-employment-status-banner ${isOff ? "is-off" : "is-working"}`;
   banner.innerHTML = isOff
-    ? `<strong>Trạng thái làm việc: Xin off</strong><span>Bạn hiện không nhận công việc mới. Các công việc đã được giao trước đó vẫn được giữ nguyên.</span>`
+    ? `<strong>Trạng thái làm việc: Đang Off</strong><span>Bạn hiện không nhận công việc mới. Các công việc đã được giao trước đó vẫn được giữ nguyên.</span>`
     : `<strong>Trạng thái làm việc: Đang làm</strong><span>Bạn có thể nhận công việc mới bình thường.</span>`;
 }
 
@@ -7018,9 +7018,9 @@ function getEmployeeStatusGroupConfig(type) {
     off: {
       cardClass: "is-off",
       icon: "◷",
-      longLabel: "Tổng số bạn nhân viên đang Xin off:",
-      shortLabel: "Xin off",
-      detailTitle: "Nhân viên đang Xin off"
+      longLabel: "Tổng số bạn nhân viên Đang Off:",
+      shortLabel: "Đang Off",
+      detailTitle: "Nhân viên Đang Off"
     }
   };
 
