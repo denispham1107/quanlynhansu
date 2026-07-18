@@ -7018,6 +7018,11 @@ function isTaskBlockingEmployeeForSummary(task) {
   // trong phần tổng kết nhân viên, vì task đó chưa bắt đầu chiếm thời gian làm thực tế.
   if (isActiveHotelTaskForEmployeeSummary(task)) return true;
 
+  // Công việc Ship đang hoạt động cũng đồng nghĩa nhân viên đã được giao việc.
+  // Giữ nguyên quy tắc: Ship chưa bắt đầu (queued), chờ duyệt, hoàn thành hoặc quá hạn
+  // không được tính là "Đang ship" theo ô thống kê chuyên biệt.
+  if (isActiveShipTaskForEmployeeSummary(task)) return true;
+
   return [
     "doing",
     "near_due",

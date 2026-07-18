@@ -7715,10 +7715,10 @@
     }
 
 
-    /* Desktop: 5 ô trạng thái nằm trên cùng một hàng, kích thước đồng đều. */
+    /* Desktop: 6 ô trạng thái nằm trên cùng một hàng, kích thước đồng đều. */
     @media (min-width: 1181px) {
       #adminView .employee-status-summary {
-        grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+        grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
         align-items: stretch !important;
       }
       #adminView .employee-status-card {
@@ -9163,7 +9163,7 @@
     .employee-employment-status-banner.is-off { background:#fff7ed; border-color:#fdba74; color:#c2410c; }
 
     @media (min-width: 1100px) {
-      #adminView .employee-status-summary { grid-template-columns:repeat(5,minmax(0,1fr)); }
+      #adminView .employee-status-summary { grid-template-columns:repeat(6,minmax(0,1fr)); }
     }
     @media (max-width: 700px) {
       .employment-status-dialog { padding:20px 16px calc(18px + env(safe-area-inset-bottom)); border-radius:22px; }
