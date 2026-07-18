@@ -1007,6 +1007,10 @@ function isHotelTask(task) {
   return Boolean(task?.isHotel);
 }
 
+function isShipTask(task) {
+  return Boolean(task?.isShip);
+}
+
 function isActiveLunchBreakTask(task) {
   return isLunchBreakTask(task)
     && Boolean(task?.assignedToUid)
@@ -1182,6 +1186,7 @@ function statusLabel(status) {
     queued: "Đang chờ đến lượt",
     lunch_break: "Nghỉ trưa",
     hotel: "Hotel",
+    ship: "Đang ship",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
@@ -1220,6 +1225,7 @@ function getDisplayStatus(task) {
   const remainingMs = deadline.getTime() - Date.now();
 
   if (remainingMs <= 0) return "overdue";
+  if (isShipTask(task)) return "ship";
 
   const totalMs = Math.max(1, Number(task.deadlineMinutes || 1) * 60 * 1000);
   const nearThreshold = Math.min(15 * 60 * 1000, totalMs * 0.2);
@@ -1236,6 +1242,7 @@ function taskCardClass(displayStatus) {
     queued: "is-queued",
     lunch_break: "is-lunch-break",
     hotel: "is-hotel",
+    ship: "is-ship",
     doing: "",
     near_due: "is-near-due",
     overdue: "is-overdue",
@@ -3021,6 +3028,7 @@ function getAdminSearchStatusPriority(taskOrStatus) {
     waiting_assignee: 3,
     queued: 4,
     doing: 4,
+    ship: 4,
     lunch_break: 4,
     hotel: 4,
     near_due: 5,
@@ -4153,6 +4161,10 @@ function createTaskRowElement(prefill = null) {
     if (prefill.isHotel) {
       wrapper.querySelector(".row-hotel").checked = true;
     }
+
+    if (prefill.isShip) {
+      wrapper.querySelector(".row-ship").checked = true;
+    }
   }
 
   if (!taskRowWorkPhotos.has(rowId)) taskRowWorkPhotos.set(rowId, []);
@@ -4585,6 +4597,7 @@ function openEditWorkOrderModal(workOrderId) {
         assignedToUid: task.assignedToUid,
         isLunchBreak: Boolean(task.isLunchBreak),
         isHotel: Boolean(task.isHotel),
+        isShip: Boolean(task.isShip),
         hotelPetCount: Number(task.hotelPetCount || 0),
         workPhotos: Array.isArray(task.workPhotos) ? task.workPhotos : [],
         hours: Math.floor(deadlineMinutes / 60),
@@ -4621,6 +4634,7 @@ function readTaskRowsData() {
     const assignedToUid = row.querySelector(".row-assignee").value;
     const isLunchBreak = Boolean(row.querySelector(".row-lunch-break")?.checked);
     const isHotel = Boolean(row.querySelector(".row-hotel")?.checked);
+    const isShip = Boolean(row.querySelector(".row-ship")?.checked);
     const hotelPetCount = 0;
     const hotelAllowedMinutes = 0;
     const hours = Number(row.querySelector(".row-hours").value || 0);
@@ -4646,6 +4660,7 @@ function readTaskRowsData() {
       deadlineMinutes,
       isLunchBreak,
       isHotel,
+      isShip,
       hotelPetCount,
       hotelAllowedMinutes
     };
@@ -4903,6 +4918,7 @@ async function persistWorkOrder(dispatch, button) {
         deadlineMinutes,
         isLunchBreak: Boolean(row.isLunchBreak),
         isHotel: Boolean(row.isHotel),
+        isShip: Boolean(row.isShip),
         hotelPetCount: row.isHotel ? Number(row.hotelPetCount || 0) : 0,
         hotelAllowedMinutes: row.isHotel ? Number(row.hotelAllowedMinutes || 0) : 0,
         deadlineAt: null,
@@ -5044,6 +5060,7 @@ async function dispatchWorkOrder(workOrderId, button) {
     deadlineMinutes: Number(task.deadlineMinutes || 0),
     isLunchBreak: Boolean(task.isLunchBreak),
     isHotel: Boolean(task.isHotel),
+    isShip: Boolean(task.isShip),
     hotelPetCount: Number(task.hotelPetCount || 0),
     hotelAllowedMinutes: Number(task.hotelAllowedMinutes || 0)
   })));
@@ -6543,6 +6560,7 @@ function getAdminBaseFilteredTasks(computedTasks) {
 function getCompletedTaskGroup(task) {
   if (isLunchBreakTask(task)) return "lunch_break";
   if (isHotelTask(task)) return "hotel";
+  if (isShipTask(task)) return "ship";
   return "normal";
 }
 
@@ -6566,7 +6584,8 @@ function getCompletedTypeFilterLabel(value) {
   const labels = {
     normal: "Công việc bình thường",
     lunch_break: "Đã nghỉ trưa",
-    hotel: "Hotel đã làm"
+    hotel: "Hotel đã làm",
+    ship: "Đã ship"
   };
 
   return labels[value] || "";
@@ -6577,9 +6596,15 @@ function getCompletedReportTitle(filterValue) {
     return "Báo cáo tổng kết các task Công việc bình thường đã hoàn thành";
   }
 
-  return filterValue === "lunch_break"
-    ? "Báo cáo tổng thời gian các task Nghỉ trưa đã hoàn thành"
-    : "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
+  if (filterValue === "lunch_break") {
+    return "Báo cáo tổng thời gian các task Nghỉ trưa đã hoàn thành";
+  }
+
+  if (filterValue === "ship") {
+    return "Báo cáo tổng thời gian các task Ship đã hoàn thành";
+  }
+
+  return "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
 }
 
 function hasTaskTimeExtensions(task) {
@@ -6846,7 +6871,7 @@ function renderCompletedTypeReport(tasks, scope = "admin") {
 
   const shouldShowReport =
     statusFilter === "completed" &&
-    ["normal", "lunch_break", "hotel"].includes(completedTypeFilter);
+    ["normal", "lunch_break", "hotel", "ship"].includes(completedTypeFilter);
 
   if (!shouldShowReport) {
     reportEl.classList.add("hidden");
@@ -6936,6 +6961,11 @@ function taskMatchesStatusFilter(task, statusFilter) {
 
   if (statusFilter === "hotel") {
     return isActiveHotelTaskForEmployeeSummary(task);
+  }
+
+  if (statusFilter === "ship") {
+    const displayStatus = task.displayStatus || getDisplayStatus(task);
+    return isShipTask(task) && !["draft", "waiting_assignee", "queued", "submitted", "completed", "overdue"].includes(displayStatus);
   }
 
   return task.displayStatus === statusFilter || task.status === statusFilter;
@@ -7168,6 +7198,7 @@ function getAdminWorkOrderSearchStatusScopeLabel() {
     waiting_assignee: "Chờ chọn người",
     lunch_break: "Nghỉ trưa",
     hotel: "Hotel",
+    ship: "Đang ship",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",

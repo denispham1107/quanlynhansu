@@ -2299,12 +2299,21 @@
       color: #1d4ed8;
     }
 
+    .status-ship {
+      background: #ffedd5;
+      color: #c2410c;
+    }
+
     .task-card.is-lunch-break {
       border-left-color: #14b8a6;
     }
 
     .task-card.is-hotel {
       border-left-color: #2563eb;
+    }
+
+    .task-card.is-ship {
+      border-left-color: #f97316;
     }
 
     @media (max-width: 640px) {
@@ -8046,6 +8055,7 @@
               <option value="waiting_assignee">Chờ chọn người</option>
               <option value="lunch_break">Nghỉ trưa</option>
               <option value="hotel">Hotel</option>
+              <option value="ship">Đang ship</option>
               <option value="doing">Đang làm</option>
               <option value="near_due">Gần hết giờ</option>
               <option value="overdue">Quá hạn</option>
@@ -8060,6 +8070,7 @@
               <option value="normal">Công việc bình thường</option>
               <option value="lunch_break">Đã nghỉ trưa</option>
               <option value="hotel">Hotel đã làm</option>
+              <option value="ship">Đã ship</option>
             </select>
 
             <span class="mobile-filter-field-label">Nhân viên</span>
@@ -8301,6 +8312,7 @@
                 <option value="waiting_assignee">Chờ chọn người</option>
                 <option value="lunch_break">Nghỉ trưa</option>
                 <option value="hotel">Hotel</option>
+                <option value="ship">Đang ship</option>
                 <option value="doing">Đang làm</option>
                 <option value="near_due">Gần hết giờ</option>
                 <option value="overdue">Quá hạn</option>
@@ -8315,6 +8327,7 @@
                 <option value="normal">Công việc bình thường</option>
                 <option value="lunch_break">Đã nghỉ trưa</option>
                 <option value="hotel">Hotel đã làm</option>
+                <option value="ship">Đã ship</option>
               </select>
 
               <span class="mobile-filter-field-label">Thời gian</span>
