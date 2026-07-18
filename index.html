@@ -7452,6 +7452,11 @@
       background: linear-gradient(145deg, #f0fdf4, #f8fbff 62%);
     }
 
+    .work-order-setting-section.is-overdue-setting {
+      border-color: #fdba74;
+      background: linear-gradient(145deg, #fff7ed, #fffdf8 62%);
+    }
+
     .work-order-setting-section.is-danger-setting {
       border-color: #fecaca;
       background: linear-gradient(145deg, #fff7ed, #fffafa 62%);
@@ -8672,6 +8677,17 @@
           </div>
 
           <p class="work-order-setting-help">Khi tắt giới hạn, nút “Thêm giờ” có thể nhập số phút bất kỳ như trước.</p>
+        </section>
+
+        <section class="work-order-setting-section is-overdue-setting">
+          <label class="work-order-setting-toggle-row" for="allowOverdueTimeExtension">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Cho phép Thêm giờ cho cả công việc quá hạn</strong>
+              <span>Khi bật, tài khoản quản lý có quyền “Thêm giờ” vẫn có thể cộng thêm thời gian cho công việc đã quá hạn.</span>
+            </span>
+            <input id="allowOverdueTimeExtension" type="checkbox" />
+          </label>
+          <p class="work-order-setting-help">Khi tắt, công việc quá hạn tiếp tục bị chặn và báo “Quá hạn thời gian không thể thêm giờ”.</p>
         </section>
 
         <section class="work-order-setting-section is-danger-setting">

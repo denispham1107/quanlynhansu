@@ -157,7 +157,8 @@ const state = {
   desktopTaskViewMode: "compact",
   workOrderControlSettings: {
     maxExtendMinutes: null,
-    preventWorkOrderDeletion: false
+    preventWorkOrderDeletion: false,
+    allowOverdueTimeExtension: false
   },
   workOrderControlSettingsReady: false,
   workOrderSettingsAuthorizationToken: "",
@@ -240,7 +241,8 @@ function normalizeWorkOrderControlSettings(value = {}) {
 
   return {
     maxExtendMinutes: WORK_ORDER_EXTENSION_LIMIT_OPTIONS.includes(parsedMax) ? parsedMax : null,
-    preventWorkOrderDeletion: input.preventWorkOrderDeletion === true
+    preventWorkOrderDeletion: input.preventWorkOrderDeletion === true,
+    allowOverdueTimeExtension: input.allowOverdueTimeExtension === true
   };
 }
 
@@ -254,6 +256,10 @@ function getConfiguredMaxExtendMinutes() {
 
 function isWorkOrderDeletionLocked() {
   return getWorkOrderControlSettings().preventWorkOrderDeletion === true;
+}
+
+function isOverdueTimeExtensionAllowed() {
+  return getWorkOrderControlSettings().allowOverdueTimeExtension === true;
 }
 
 function getTaskExtensionTotalMinutes(task = {}) {
@@ -368,6 +374,7 @@ const els = {
   enableMaxExtendMinutes: $("#enableMaxExtendMinutes"),
   maxExtendMinutesOptions: $("#maxExtendMinutesOptions"),
   preventWorkOrderDeletion: $("#preventWorkOrderDeletion"),
+  allowOverdueTimeExtension: $("#allowOverdueTimeExtension"),
   saveWorkOrderSettingsBtn: $("#saveWorkOrderSettingsBtn"),
   extendTimeLimitNote: $("#extendTimeLimitNote"),
   destructiveConfirmModal: $("#destructiveConfirmModal"),
@@ -5750,6 +5757,9 @@ function openWorkOrderSettingsModal() {
   if (els.preventWorkOrderDeletion) {
     els.preventWorkOrderDeletion.checked = settings.preventWorkOrderDeletion;
   }
+  if (els.allowOverdueTimeExtension) {
+    els.allowOverdueTimeExtension.checked = settings.allowOverdueTimeExtension;
+  }
 
   const selectedValue = String(settings.maxExtendMinutes || 20);
   els.maxExtendMinutesOptions?.querySelectorAll('input[name="maxExtendMinutes"]').forEach((input) => {
@@ -5881,7 +5891,8 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
     const result = await saveWorkOrderControlSettingsCallable({
       authorizationToken: state.workOrderSettingsAuthorizationToken,
       maxExtendMinutes: limitEnabled ? selectedLimit : null,
-      preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true
+      preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true,
+      allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true
     });
 
     const savedSettings = normalizeWorkOrderControlSettings(result?.data?.settings || {});
@@ -8417,10 +8428,12 @@ function isTaskOverdueForTimeExtension(task, nowMs = Date.now()) {
 }
 
 function canAdminExtendTaskTime(task, mode) {
-  return mode === "admin"
-    && hasPermission("extendTaskTime")
-    && ["doing", "hotel", "redo"].includes(task.status)
-    && !isTaskOverdueForTimeExtension(task);
+  if (mode !== "admin" || !hasPermission("extendTaskTime") || !task) return false;
+
+  const isOverdue = isTaskOverdueForTimeExtension(task);
+  if (isOverdue && !isOverdueTimeExtensionAllowed()) return false;
+
+  return ["doing", "hotel", "redo", "overdue"].includes(task.status);
 }
 
 function canEmployeeUploadTaskPhotos(task, mode, displayStatus = null) {
@@ -11047,7 +11060,7 @@ function openExtendTimeModal(taskId) {
     return;
   }
 
-  if (isTaskOverdueForTimeExtension(task)) {
+  if (isTaskOverdueForTimeExtension(task) && !isOverdueTimeExtensionAllowed()) {
     toast("Quá hạn thời gian không thể thêm giờ", "error");
     return;
   }
@@ -11235,7 +11248,7 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
 
       const task = { id: taskSnap.id, ...taskSnap.data() };
 
-      if (isTaskOverdueForTimeExtension(task)) {
+      if (isTaskOverdueForTimeExtension(task) && !isOverdueTimeExtensionAllowed()) {
         throw new Error("Quá hạn thời gian không thể thêm giờ");
       }
 
