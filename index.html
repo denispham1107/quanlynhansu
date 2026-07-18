@@ -7926,6 +7926,101 @@
       }
     }
   </style>
+
+  <style id="employee-status-six-card-structural-fix">
+    /* Structural fix: summary is a full-width row, independent from header action width. */
+    #adminView .task-filter-row {
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) auto !important;
+      align-items: start !important;
+      column-gap: 16px !important;
+      row-gap: 12px !important;
+    }
+
+    #adminView .task-panel-title-block {
+      grid-column: 1 !important;
+      min-width: 0 !important;
+    }
+
+    #adminView .task-panel-header-actions {
+      grid-column: 2 !important;
+      min-width: 0 !important;
+    }
+
+    #adminView #adminEmployeeStatusSummary {
+      grid-column: 1 / -1 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 0 !important;
+      margin: 0 0 14px !important;
+      box-sizing: border-box !important;
+    }
+
+    @media (min-width: 1000px) {
+      #adminView #adminEmployeeStatusSummary {
+        display: grid !important;
+        grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+        grid-auto-flow: row !important;
+        gap: 10px !important;
+        align-items: stretch !important;
+      }
+
+      #adminView #adminEmployeeStatusSummary.hidden {
+        display: none !important;
+      }
+
+      #adminView #adminEmployeeStatusSummary > .employee-status-card {
+        grid-column: auto !important;
+        grid-row: auto !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        min-height: 132px !important;
+        height: 100% !important;
+        margin: 0 !important;
+        box-sizing: border-box !important;
+      }
+    }
+
+    @media (min-width: 600px) and (max-width: 999px) {
+      #adminView #adminEmployeeStatusSummary {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 10px !important;
+      }
+      #adminView #adminEmployeeStatusSummary.hidden { display: none !important; }
+      #adminView #adminEmployeeStatusSummary > .employee-status-card {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+      }
+    }
+
+    @media (max-width: 599px) {
+      #adminView .task-filter-row {
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        column-gap: 10px !important;
+        row-gap: 10px !important;
+      }
+      #adminView #adminEmployeeStatusSummary {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px !important;
+        overflow: hidden !important;
+      }
+      #adminView #adminEmployeeStatusSummary.hidden { display: none !important; }
+      #adminView #adminEmployeeStatusSummary > .employee-status-card {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+      }
+    }
+  </style>
 </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
@@ -8107,7 +8202,6 @@
               <span id="adminMobileEmployeeStatusChevron" class="mobile-employee-status-chevron" aria-hidden="true">⌃</span>
             </button>
 
-            <div id="adminEmployeeStatusSummary" class="employee-status-summary hidden"></div>
           </div>
           <div class="task-panel-header-actions">
             <div class="desktop-task-view-switch" role="group" aria-label="Chế độ hiển thị Phiếu công việc trên desktop">
@@ -8131,6 +8225,7 @@
               <button id="openGoogleCalendarImportMobileBtn" class="btn calendar-import-btn small calendar-import-mobile-only hidden" type="button">📅 Nạp lịch</button>
             </div>
           </div>
+          <div id="adminEmployeeStatusSummary" class="employee-status-summary hidden"></div>
         </div>
 
         <div class="task-filter-row-secondary mobile-filter-toolbar">
