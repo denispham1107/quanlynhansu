@@ -6992,6 +6992,23 @@ function isActiveHotelTaskForEmployeeSummary(task) {
   ].includes(displayStatus);
 }
 
+function isActiveShipTaskForEmployeeSummary(task) {
+  if (!task?.assignedToUid || !isShipTask(task)) return false;
+
+  const displayStatus = task.displayStatus || getDisplayStatus(task);
+
+  // Chỉ tính những công việc đang thực sự ở trạng thái "Đang ship".
+  // Không tính Phiếu chưa giao, đang chờ đến lượt, chờ duyệt, đã xong hoặc quá hạn.
+  return ![
+    "draft",
+    "waiting_assignee",
+    "queued",
+    "submitted",
+    "completed",
+    "overdue"
+  ].includes(displayStatus);
+}
+
 function isTaskBlockingEmployeeForSummary(task) {
   if (!task?.assignedToUid) return false;
 
@@ -7049,6 +7066,13 @@ function getEmployeeStatusGroupConfig(type) {
       shortLabel: "Hotel",
       detailTitle: "Nhân viên đang làm Hotel"
     },
+    ship: {
+      cardClass: "is-ship",
+      icon: "🚚",
+      longLabel: "Tổng số bạn nhân viên Đang ship:",
+      shortLabel: "Đang ship",
+      detailTitle: "Nhân viên đang ship"
+    },
     lunch: {
       cardClass: "is-lunch",
       icon: "☕",
@@ -7092,10 +7116,11 @@ function updateMobileEmployeeStatusOverview() {
   const freeCount = groups.free?.length || 0;
   const assignedCount = groups.assigned?.length || 0;
   const hotelCount = groups.hotel?.length || 0;
+  const shipCount = groups.ship?.length || 0;
   const lunchCount = groups.lunch?.length || 0;
   const offCount = groups.off?.length || 0;
 
-  els.adminMobileEmployeeStatusOverview.textContent = `Chưa ${freeCount} • Đã ${assignedCount} • Hotel ${hotelCount} • Nghỉ ${lunchCount} • Off ${offCount}`;
+  els.adminMobileEmployeeStatusOverview.textContent = `Chưa ${freeCount} • Đã ${assignedCount} • Hotel ${hotelCount} • Ship ${shipCount} • Nghỉ ${lunchCount} • Off ${offCount}`;
 }
 
 function applyMobileEmployeeStatusExpanded() {
@@ -7113,6 +7138,7 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   const employees = allEmployees.filter(isEmployeeWorking);
   const busyEmployeeUids = new Set();
   const hotelEmployeeUids = new Set();
+  const shipEmployeeUids = new Set();
   const lunchEmployeeUids = new Set();
 
   computedTasks.forEach((task) => {
@@ -7128,6 +7154,10 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
       hotelEmployeeUids.add(task.assignedToUid);
     }
 
+    if (isActiveShipTaskForEmployeeSummary(task)) {
+      shipEmployeeUids.add(task.assignedToUid);
+    }
+
     if (displayStatus === "lunch_break") {
       lunchEmployeeUids.add(task.assignedToUid);
     }
@@ -7136,12 +7166,14 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   const freeEmployees = employees.filter((employee) => !busyEmployeeUids.has(employee.uid));
   const assignedEmployees = employees.filter((employee) => busyEmployeeUids.has(employee.uid));
   const hotelEmployees = employees.filter((employee) => hotelEmployeeUids.has(employee.uid));
+  const shipEmployees = employees.filter((employee) => shipEmployeeUids.has(employee.uid));
   const lunchEmployees = employees.filter((employee) => lunchEmployeeUids.has(employee.uid));
 
   state.adminEmployeeStatusGroups = {
     free: freeEmployees,
     assigned: assignedEmployees,
     hotel: hotelEmployees,
+    ship: shipEmployees,
     lunch: lunchEmployees,
     off: offEmployees
   };
@@ -7151,6 +7183,7 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
     renderEmployeeStatusCard("free", freeEmployees),
     renderEmployeeStatusCard("assigned", assignedEmployees),
     renderEmployeeStatusCard("hotel", hotelEmployees),
+    renderEmployeeStatusCard("ship", shipEmployees),
     renderEmployeeStatusCard("lunch", lunchEmployees),
     renderEmployeeStatusCard("off", offEmployees)
   ].join("");

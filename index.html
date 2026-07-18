@@ -2410,6 +2410,16 @@
       color: #1d4ed8;
     }
 
+    .employee-status-card.is-ship {
+      border-color: #fed7aa;
+      background: linear-gradient(135deg, #fff7ed 0%, #ffffff 100%);
+    }
+
+    .employee-status-card.is-ship .employee-status-chip {
+      background: #ffedd5;
+      color: #c2410c;
+    }
+
     .employee-status-card.is-lunch {
       border-color: #99f6e4;
       background: linear-gradient(135deg, #f0fdfa 0%, #ffffff 100%);
@@ -7829,6 +7839,28 @@
     }
 
 </style>
+
+  <style id="employee-status-ship-summary-fix">
+    .employee-status-card.is-ship {
+      border-color: #fed7aa !important;
+      background: linear-gradient(135deg, #fff7ed 0%, #ffffff 100%) !important;
+    }
+    .employee-status-card.is-ship .employee-status-chip {
+      background: #ffedd5 !important;
+      color: #c2410c !important;
+    }
+    @media (min-width: 1181px) {
+      #adminView .employee-status-summary {
+        grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+        align-items: stretch !important;
+      }
+      #adminView .employee-status-card {
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 100% !important;
+      }
+    }
+  </style>
 
 </head>
 <body>
