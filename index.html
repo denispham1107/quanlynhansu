@@ -2201,6 +2201,7 @@
     }
 
     .lunch-break-line,
+    .spa-line,
     .hotel-line,
     .ship-line,
     .cleaning-line {
@@ -2213,6 +2214,12 @@
       border: 1px dashed #99f6e4;
       background: #f0fdfa;
       color: #0f766e;
+    }
+
+    .spa-line {
+      border: 1px dashed #c4b5fd;
+      background: #f5f3ff;
+      color: #6d28d9;
     }
 
     .hotel-line {
@@ -2310,6 +2317,10 @@
 
     .task-card.is-hotel {
       border-left-color: #2563eb;
+    }
+
+    .task-card.is-spa {
+      border-left-color: #7c3aed;
     }
 
     .task-card.is-ship {
@@ -5851,6 +5862,12 @@
       box-shadow: 0 7px 16px rgba(13, 148, 136, 0.12);
     }
 
+    #taskModal .spa-line:has(input:checked) {
+      border-color: #a78bfa !important;
+      background: #ede9fe !important;
+      box-shadow: 0 7px 16px rgba(124, 58, 237, 0.11);
+    }
+
     #taskModal .hotel-line:has(input:checked) {
       border-color: #60a5fa !important;
       background: #dbeafe !important;
@@ -8246,6 +8263,7 @@
               <option value="waiting_assignee">Chờ chọn người</option>
               <option value="lunch_break">Nghỉ trưa</option>
               <option value="hotel">Hotel</option>
+              <option value="spa">Đang spa</option>
               <option value="ship">Đang ship</option>
               <option value="doing">Đang làm</option>
               <option value="near_due">Gần hết giờ</option>
@@ -8261,6 +8279,7 @@
               <option value="normal">Công việc bình thường</option>
               <option value="lunch_break">Đã nghỉ trưa</option>
               <option value="hotel">Hotel đã làm</option>
+              <option value="spa">Đã làm spa</option>
               <option value="ship">Đã ship</option>
             </select>
 
@@ -8503,6 +8522,7 @@
                 <option value="waiting_assignee">Chờ chọn người</option>
                 <option value="lunch_break">Nghỉ trưa</option>
                 <option value="hotel">Hotel</option>
+                <option value="spa">Đang spa</option>
                 <option value="ship">Đang ship</option>
                 <option value="doing">Đang làm</option>
                 <option value="near_due">Gần hết giờ</option>
@@ -8518,6 +8538,7 @@
                 <option value="normal">Công việc bình thường</option>
                 <option value="lunch_break">Đã nghỉ trưa</option>
                 <option value="hotel">Hotel đã làm</option>
+                <option value="spa">Đã làm spa</option>
                 <option value="ship">Đã ship</option>
               </select>
 
