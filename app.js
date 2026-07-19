@@ -1480,7 +1480,7 @@ async function requestNotificationPermission() {
   }
 
   if (isIosDevice() && !isStandaloneWebApp()) {
-    toast("Trên iPhone/iPad, hãy thêm website vào Màn hình chính rồi mở từ biểu tượng Shop Task để bật thông báo nền.", "info");
+    toast("Trên iPhone/iPad, hãy thêm website vào Màn hình chính rồi mở từ biểu tượng Culao Task để bật thông báo nền.", "info");
     return;
   }
 
@@ -1494,11 +1494,11 @@ async function requestNotificationPermission() {
       await registerCurrentDeviceForPush({ showSuccessToast: true });
       await showSystemNotification({
         id: "permission-test",
-        title: "Shop Task đã bật thông báo nền",
+        title: "Culao Task đã bật thông báo nền",
         message: "Bạn sẽ nhận thông báo kể cả khi Web App không còn mở trên màn hình."
       });
     } else if (permission === "denied") {
-      toast("Bạn đã chặn thông báo. Hãy mở quyền Notifications của Shop Task trong cài đặt thiết bị.", "error");
+      toast("Bạn đã chặn thông báo. Hãy mở quyền Notifications của Culao Task trong cài đặt thiết bị.", "error");
     } else {
       toast("Bạn chưa cấp quyền thông báo.", "info");
     }
@@ -1514,7 +1514,7 @@ async function requestNotificationPermission() {
 async function showSystemNotification(notification) {
   if (!notificationSupported() || Notification.permission !== "granted") return;
 
-  const title = notification.title || "Shop Task";
+  const title = notification.title || "Culao Task";
   const options = {
     body: notification.message || "Bạn có thông báo mới.",
     icon: "./icon-192.png",

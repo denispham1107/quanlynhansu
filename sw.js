@@ -1,5 +1,5 @@
-/* Shop Task PWA + Web Push service worker */
-const CACHE_NAME = "shop-task-shell-v20260719-push-1";
+/* Culao Task PWA + Web Push service worker */
+const CACHE_NAME = "culao-task-shell-v20260719-brand-1";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -69,7 +69,7 @@ self.addEventListener("push", (event) => {
     ? payload.notification
     : {};
 
-  const title = data.title || notification.title || "Shop Task";
+  const title = data.title || notification.title || "Culao Task";
   const body = data.body || data.message || notification.body || "Bạn có thông báo mới.";
   const taskId = data.taskId || "";
   const notificationId = data.notificationId || "";
@@ -83,7 +83,7 @@ self.addEventListener("push", (event) => {
       body,
       icon: "./icon-192.png",
       badge: "./icon-192.png",
-      tag: notificationId || taskId || `shop-task-${Date.now()}`,
+      tag: notificationId || taskId || `culao-task-${Date.now()}`,
       renotify: false,
       data: {
         url,

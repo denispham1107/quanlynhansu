@@ -1,12 +1,15 @@
 {
-  "name": "Shop Task - Quản lý giao việc",
-  "short_name": "Shop Task",
+  "name": "Culao Task",
+  "short_name": "Culao Task",
   "description": "Quản lý giao việc và báo cáo công việc cho nhân viên.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "standalone"],
+  "display_override": [
+    "window-controls-overlay",
+    "standalone"
+  ],
   "background_color": "#eaf3ff",
   "theme_color": "#2563eb",
   "orientation": "any",
