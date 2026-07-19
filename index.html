@@ -3441,7 +3441,11 @@
       .topbar {
         position: sticky;
         top: 0;
-        z-index: 950;
+        /* Topbar tạo stacking context vì có backdrop-filter.
+           Phải cao hơn thanh Bộ lọc sticky để bảng Thông báo luôn phủ lên trên
+           trên iOS/Android, thay vì bị ô Tìm kiếm/Bộ lọc đè lên. */
+        z-index: 1100;
+        isolation: isolate;
         display: grid !important;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: center !important;
