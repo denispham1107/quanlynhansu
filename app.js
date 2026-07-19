@@ -7323,12 +7323,12 @@ function renderAdminTasks() {
 
   const stats = {
     draft: baseFiltered.filter((task) => task.displayStatus === "draft").length,
-    doing: baseFiltered.filter((task) => (
-      task.displayStatus === "doing" ||
-      task.displayStatus === "lunch_break" ||
-      task.displayStatus === "near_due" ||
-      task.displayStatus === "redo"
-    )).length,
+
+    // Ô Dashboard “Đang làm” hiển thị số NHÂN VIÊN đang được giao việc,
+    // dùng đúng cùng danh sách đã tính cho ô tổng kết “Đã được giao việc”.
+    // Mỗi nhân viên chỉ được tính một lần dù đang có nhiều công việc.
+    doing: state.adminEmployeeStatusGroups?.assigned?.length || 0,
+
     hotel: baseFiltered.filter((task) => isActiveHotelTaskForEmployeeSummary(task)).length,
     completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
