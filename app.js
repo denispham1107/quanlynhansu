@@ -1007,6 +1007,10 @@ function isHotelTask(task) {
   return Boolean(task?.isHotel);
 }
 
+function isSpaTask(task) {
+  return Boolean(task?.isSpa);
+}
+
 function isShipTask(task) {
   return Boolean(task?.isShip);
 }
@@ -1088,7 +1092,9 @@ function validateLunchBreakAssignment(task, employeeUid) {
 
 function getActiveTaskStatusFromFlags(value = {}) {
   if (value.isLunchBreak) return "lunch_break";
+  if (value.isSpa) return "spa";
   if (value.isHotel) return "hotel";
+  if (value.isShip) return "ship";
   return "doing";
 }
 
@@ -1186,6 +1192,7 @@ function statusLabel(status) {
     queued: "Đang chờ đến lượt",
     lunch_break: "Nghỉ trưa",
     hotel: "Hotel",
+    spa: "Đang spa",
     ship: "Đang ship",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
@@ -1205,6 +1212,7 @@ function getDisplayStatus(task) {
   if (task.status === "submitted") return "submitted";
   if (task.status === "lunch_break" || (task.isLunchBreak && task.status === "doing")) return "lunch_break";
   if (task.status === "hotel" || (task.isHotel && task.status === "doing")) return "hotel";
+  if (task.status === "spa" || (task.isSpa && task.status === "doing")) return "spa";
 
   // Công việc đã giao nhưng nhân viên chưa tới lượt (vẫn còn đang trong thời gian
   // quy định của (các) công việc được giao trước đó cho chính người này).
@@ -1225,6 +1233,7 @@ function getDisplayStatus(task) {
   const remainingMs = deadline.getTime() - Date.now();
 
   if (remainingMs <= 0) return "overdue";
+  if (isSpaTask(task)) return "spa";
   if (isShipTask(task)) return "ship";
 
   const totalMs = Math.max(1, Number(task.deadlineMinutes || 1) * 60 * 1000);
@@ -1242,6 +1251,7 @@ function taskCardClass(displayStatus) {
     queued: "is-queued",
     lunch_break: "is-lunch-break",
     hotel: "is-hotel",
+    spa: "is-spa",
     ship: "is-ship",
     doing: "",
     near_due: "is-near-due",
@@ -3028,6 +3038,7 @@ function getAdminSearchStatusPriority(taskOrStatus) {
     waiting_assignee: 3,
     queued: 4,
     doing: 4,
+    spa: 4,
     ship: 4,
     lunch_break: 4,
     hotel: 4,
@@ -4104,6 +4115,10 @@ function createTaskRowElement(prefill = null) {
           <input type="checkbox" class="row-lunch-break" />
           <span>Nghỉ trưa</span>
         </label>
+        <label class="checkbox-line spa-line">
+          <input type="checkbox" class="row-spa" />
+          <span>Spa</span>
+        </label>
         <label class="checkbox-line hotel-line">
           <input type="checkbox" class="row-hotel" />
           <span>Hotel</span>
@@ -4156,6 +4171,10 @@ function createTaskRowElement(prefill = null) {
 
     if (prefill.isLunchBreak) {
       wrapper.querySelector(".row-lunch-break").checked = true;
+    }
+
+    if (prefill.isSpa) {
+      wrapper.querySelector(".row-spa").checked = true;
     }
 
     if (prefill.isHotel) {
@@ -4270,6 +4289,7 @@ function syncLunchBreakRowControls(row, changedInput = null) {
   if (!row) return;
 
   const lunchCheckbox = row.querySelector(".row-lunch-break");
+  const spaCheckbox = row.querySelector(".row-spa");
   const hotelCheckbox = row.querySelector(".row-hotel");
   const shipCheckbox = row.querySelector(".row-ship");
   const cleaningCheckbox = row.querySelector(".row-cleaning");
@@ -4280,12 +4300,21 @@ function syncLunchBreakRowControls(row, changedInput = null) {
   const hotelNote = row.querySelector(".hotel-note");
 
   const lunchChanged = Boolean(changedInput?.matches?.(".row-lunch-break"));
+  const spaChanged = Boolean(changedInput?.matches?.(".row-spa"));
   const hotelChanged = Boolean(changedInput?.matches?.(".row-hotel"));
   const shipChanged = Boolean(changedInput?.matches?.(".row-ship"));
   const cleaningChanged = Boolean(changedInput?.matches?.(".row-cleaning"));
 
   // Các loại checkbox đặc biệt không được chọn cùng lúc để tránh tự điền nhầm tên phiếu/công việc.
   if (lunchChanged && lunchCheckbox?.checked) {
+    if (spaCheckbox) spaCheckbox.checked = false;
+    if (hotelCheckbox) hotelCheckbox.checked = false;
+    if (shipCheckbox) shipCheckbox.checked = false;
+    if (cleaningCheckbox) cleaningCheckbox.checked = false;
+  }
+
+  if (spaChanged && spaCheckbox?.checked) {
+    if (lunchCheckbox) lunchCheckbox.checked = false;
     if (hotelCheckbox) hotelCheckbox.checked = false;
     if (shipCheckbox) shipCheckbox.checked = false;
     if (cleaningCheckbox) cleaningCheckbox.checked = false;
@@ -4293,18 +4322,21 @@ function syncLunchBreakRowControls(row, changedInput = null) {
 
   if (hotelChanged && hotelCheckbox?.checked) {
     if (lunchCheckbox) lunchCheckbox.checked = false;
+    if (spaCheckbox) spaCheckbox.checked = false;
     if (shipCheckbox) shipCheckbox.checked = false;
     if (cleaningCheckbox) cleaningCheckbox.checked = false;
   }
 
   if (shipChanged && shipCheckbox?.checked) {
     if (lunchCheckbox) lunchCheckbox.checked = false;
+    if (spaCheckbox) spaCheckbox.checked = false;
     if (hotelCheckbox) hotelCheckbox.checked = false;
     if (cleaningCheckbox) cleaningCheckbox.checked = false;
   }
 
   if (cleaningChanged && cleaningCheckbox?.checked) {
     if (lunchCheckbox) lunchCheckbox.checked = false;
+    if (spaCheckbox) spaCheckbox.checked = false;
     if (hotelCheckbox) hotelCheckbox.checked = false;
     if (shipCheckbox) shipCheckbox.checked = false;
   }
@@ -4521,12 +4553,12 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   const row = event.target.closest(".task-row");
   if (!row) return;
 
-  if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning, .row-hours, .row-minutes")) {
+  if (event.target.matches(".row-lunch-break, .row-spa, .row-hotel, .row-ship, .row-cleaning, .row-hours, .row-minutes")) {
     syncLunchBreakRowControls(row, event.target);
     syncWorkTemplateDurationLock(row, { applyDuration: true });
     syncTaskRowSummary(row);
 
-    if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning")) {
+    if (event.target.matches(".row-lunch-break, .row-spa, .row-hotel, .row-ship, .row-cleaning")) {
       syncPhotoRequirementDefaultFromTaskTypes();
     }
   }
@@ -4596,6 +4628,7 @@ function openEditWorkOrderModal(workOrderId) {
         taskDate: task.taskDate,
         assignedToUid: task.assignedToUid,
         isLunchBreak: Boolean(task.isLunchBreak),
+        isSpa: Boolean(task.isSpa),
         isHotel: Boolean(task.isHotel),
         isShip: Boolean(task.isShip),
         hotelPetCount: Number(task.hotelPetCount || 0),
@@ -4633,8 +4666,10 @@ function readTaskRowsData() {
     const taskDate = row.querySelector(".row-date").value;
     const assignedToUid = row.querySelector(".row-assignee").value;
     const isLunchBreak = Boolean(row.querySelector(".row-lunch-break")?.checked);
+    const isSpa = Boolean(row.querySelector(".row-spa")?.checked);
     const isHotel = Boolean(row.querySelector(".row-hotel")?.checked);
     const isShip = Boolean(row.querySelector(".row-ship")?.checked);
+    const isCleaning = Boolean(row.querySelector(".row-cleaning")?.checked);
     const hotelPetCount = 0;
     const hotelAllowedMinutes = 0;
     const hours = Number(row.querySelector(".row-hours").value || 0);
@@ -4659,8 +4694,10 @@ function readTaskRowsData() {
       assignedEmployee,
       deadlineMinutes,
       isLunchBreak,
+      isSpa,
       isHotel,
       isShip,
+      isCleaning,
       hotelPetCount,
       hotelAllowedMinutes
     };
@@ -4677,7 +4714,8 @@ function validateTaskRows(rows) {
 
     if (!row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
     if (row.assignedToUid && !row.assignedEmployee) return `${rowLabel}: nhân viên được chọn không hợp lệ.`;
-    if (row.isLunchBreak && row.isHotel) return `${rowLabel}: chỉ được chọn Nghỉ trưa hoặc Hotel, không chọn cả hai.`;
+    const selectedSpecialTypes = [row.isLunchBreak, row.isSpa, row.isHotel, row.isShip, row.isCleaning].filter(Boolean).length;
+    if (selectedSpecialTypes > 1) return `${rowLabel}: chỉ được chọn một loại công việc đặc biệt.`;
     if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
     if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
   }
@@ -4917,6 +4955,7 @@ async function persistWorkOrder(dispatch, button) {
         createdAt: serverTimestamp(),
         deadlineMinutes,
         isLunchBreak: Boolean(row.isLunchBreak),
+        isSpa: Boolean(row.isSpa),
         isHotel: Boolean(row.isHotel),
         isShip: Boolean(row.isShip),
         hotelPetCount: row.isHotel ? Number(row.hotelPetCount || 0) : 0,
@@ -5059,6 +5098,7 @@ async function dispatchWorkOrder(workOrderId, button) {
     assignedEmployee: state.employees.find((employee) => employee.uid === task.assignedToUid),
     deadlineMinutes: Number(task.deadlineMinutes || 0),
     isLunchBreak: Boolean(task.isLunchBreak),
+    isSpa: Boolean(task.isSpa),
     isHotel: Boolean(task.isHotel),
     isShip: Boolean(task.isShip),
     hotelPetCount: Number(task.hotelPetCount || 0),
@@ -6559,6 +6599,7 @@ function getAdminBaseFilteredTasks(computedTasks) {
 
 function getCompletedTaskGroup(task) {
   if (isLunchBreakTask(task)) return "lunch_break";
+  if (isSpaTask(task)) return "spa";
   if (isHotelTask(task)) return "hotel";
   if (isShipTask(task)) return "ship";
   return "normal";
@@ -6585,6 +6626,7 @@ function getCompletedTypeFilterLabel(value) {
     normal: "Công việc bình thường",
     lunch_break: "Đã nghỉ trưa",
     hotel: "Hotel đã làm",
+    spa: "Đã làm spa",
     ship: "Đã ship"
   };
 
@@ -6602,6 +6644,10 @@ function getCompletedReportTitle(filterValue) {
 
   if (filterValue === "ship") {
     return "Báo cáo tổng thời gian các task Ship đã hoàn thành";
+  }
+
+  if (filterValue === "spa") {
+    return "Báo cáo tổng thời gian các task Spa đã hoàn thành";
   }
 
   return "Báo cáo tổng thời gian các task Hotel đã hoàn thành";
@@ -6871,7 +6917,7 @@ function renderCompletedTypeReport(tasks, scope = "admin") {
 
   const shouldShowReport =
     statusFilter === "completed" &&
-    ["normal", "lunch_break", "hotel", "ship"].includes(completedTypeFilter);
+    ["normal", "lunch_break", "hotel", "spa", "ship"].includes(completedTypeFilter);
 
   if (!shouldShowReport) {
     reportEl.classList.add("hidden");
@@ -6961,6 +7007,11 @@ function taskMatchesStatusFilter(task, statusFilter) {
 
   if (statusFilter === "hotel") {
     return isActiveHotelTaskForEmployeeSummary(task);
+  }
+
+  if (statusFilter === "spa") {
+    const displayStatus = task.displayStatus || getDisplayStatus(task);
+    return isSpaTask(task) && !["draft", "waiting_assignee", "queued", "submitted", "completed", "overdue"].includes(displayStatus);
   }
 
   if (statusFilter === "ship") {
@@ -7236,6 +7287,7 @@ function getAdminWorkOrderSearchStatusScopeLabel() {
     waiting_assignee: "Chờ chọn người",
     lunch_break: "Nghỉ trưa",
     hotel: "Hotel",
+    spa: "Đang spa",
     ship: "Đang ship",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
@@ -7323,12 +7375,10 @@ function renderAdminTasks() {
 
   const stats = {
     draft: baseFiltered.filter((task) => task.displayStatus === "draft").length,
-    doing: baseFiltered.filter((task) => (
-      task.displayStatus === "doing" ||
-      task.displayStatus === "lunch_break" ||
-      task.displayStatus === "near_due" ||
-      task.displayStatus === "redo"
-    )).length,
+    // Ô “Đang làm” trên Dashboard phải phản ánh số NHÂN VIÊN đang được giao việc,
+    // không phải số lượng công việc. Dùng đúng cùng nguồn dữ liệu với ô
+    // “Tổng số bạn nhân viên đã được giao việc” để hai nơi luôn đồng bộ.
+    doing: state.adminEmployeeStatusGroups?.assigned?.length || 0,
     hotel: baseFiltered.filter((task) => isActiveHotelTaskForEmployeeSummary(task)).length,
     completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
