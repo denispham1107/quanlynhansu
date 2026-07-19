@@ -41,6 +41,13 @@ import {
   getFunctions,
   httpsCallable
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js";
+import {
+  getMessaging,
+  getToken as getMessagingToken,
+  deleteToken as deleteMessagingToken,
+  isSupported as isMessagingSupported,
+  onMessage as onForegroundMessage
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
 
 // =========================
 // Firebase init
@@ -66,6 +73,14 @@ const importGoogleCalendarEventsCallable = httpsCallable(
 const getGoogleCalendarImportSettingsCallable = httpsCallable(
   functions,
   "getGoogleCalendarImportSettings"
+);
+const registerWebPushTokenCallable = httpsCallable(
+  functions,
+  "registerWebPushToken"
+);
+const unregisterWebPushTokenCallable = httpsCallable(
+  functions,
+  "unregisterWebPushToken"
 );
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
@@ -162,7 +177,13 @@ const state = {
   },
   workOrderControlSettingsReady: false,
   workOrderSettingsAuthorizationToken: "",
-  workOrderSettingsAuthorizationExpiresAt: 0
+  workOrderSettingsAuthorizationExpiresAt: 0,
+  pushServiceWorkerRegistration: null,
+  pushMessaging: null,
+  pushToken: "",
+  pushTokenOwnerUid: "",
+  pushForegroundUnsubscribe: null,
+  pendingPushTaskId: ""
 };
 
 
@@ -1262,21 +1283,77 @@ function initials(name = "NV") {
 }
 
 // =========================
-// PWA + Browser notifications
+// PWA + Web Push notifications
 // =========================
+const PUSH_TOKEN_STORAGE_KEY = "shopTaskWebPushToken";
+const PUSH_TOKEN_OWNER_STORAGE_KEY = "shopTaskWebPushTokenOwnerUid";
+let serviceWorkerRegistrationPromise = null;
+
 registerServiceWorker();
 updateNotificationPermissionButton();
 
 function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) return;
+  if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+  if (serviceWorkerRegistrationPromise) return serviceWorkerRegistrationPromise;
 
-  navigator.serviceWorker.register("./sw.js").catch((error) => {
-    console.warn("Không đăng ký được service worker:", error);
-  });
+  serviceWorkerRegistrationPromise = navigator.serviceWorker
+    .register("./sw.js", { scope: "./" })
+    .then(async (registration) => {
+      state.pushServiceWorkerRegistration = registration;
+
+      try {
+        await registration.update();
+      } catch (_) {
+        // Trình duyệt có thể giới hạn kiểm tra cập nhật Service Worker. Không ảnh hưởng đăng ký hiện tại.
+      }
+
+      return registration;
+    })
+    .catch((error) => {
+      serviceWorkerRegistrationPromise = null;
+      console.warn("Không đăng ký được service worker:", error);
+      return null;
+    });
+
+  return serviceWorkerRegistrationPromise;
 }
 
 function notificationSupported() {
-  return "Notification" in window;
+  return "Notification" in window && "serviceWorker" in navigator;
+}
+
+function isIosDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneWebApp() {
+  return window.matchMedia?.("(display-mode: standalone)")?.matches
+    || window.navigator.standalone === true;
+}
+
+function getConfiguredVapidKey() {
+  const value = firebaseConfig?.messagingVapidKey
+    || firebaseConfig?.vapidKey
+    || "";
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function getPushMessaging() {
+  if (state.pushMessaging) return state.pushMessaging;
+  if (!(await isMessagingSupported())) return null;
+
+  state.pushMessaging = getMessaging(app);
+
+  if (!state.pushForegroundUnsubscribe) {
+    state.pushForegroundUnsubscribe = onForegroundMessage(state.pushMessaging, (payload) => {
+      // Firestore listener hiện tại chịu trách nhiệm toast/thông báo khi app đang mở.
+      // Không tự bật thêm notification ở đây để tránh trùng lặp.
+      console.debug("Đã nhận FCM khi app đang mở:", payload?.messageId || payload);
+    });
+  }
+
+  return state.pushMessaging;
 }
 
 function updateNotificationPermissionButton() {
@@ -1293,10 +1370,13 @@ function updateNotificationPermissionButton() {
     desktopText = "Trình duyệt không hỗ trợ thông báo";
     mobileText = "🔕 Không hỗ trợ thông báo";
     disabled = true;
-  } else if (Notification.permission === "granted") {
-    desktopText = "Đã bật thông báo";
-    mobileText = "🔔 Đã bật thông báo";
+  } else if (Notification.permission === "granted" && state.pushToken) {
+    desktopText = "Đã bật thông báo nền";
+    mobileText = "🔔 Đã bật thông báo nền";
     statusClass = "is-enabled";
+  } else if (Notification.permission === "granted") {
+    desktopText = "Hoàn tất bật thông báo";
+    mobileText = "🔔 Hoàn tất bật thông báo";
   } else if (Notification.permission === "denied") {
     desktopText = "Thông báo đang bị chặn";
     mobileText = "🔕 Thông báo đang bị chặn";
@@ -1313,26 +1393,121 @@ function updateNotificationPermissionButton() {
   if (mobileButton) mobileButton.textContent = mobileText;
 }
 
+async function registerCurrentDeviceForPush({ showSuccessToast = false } = {}) {
+  if (!state.user || Notification.permission !== "granted") return false;
+
+  const registration = await registerServiceWorker();
+  if (!registration) {
+    throw new Error("Không đăng ký được Service Worker nhận thông báo nền.");
+  }
+
+  const messaging = await getPushMessaging();
+  if (!messaging) {
+    throw new Error("Thiết bị hoặc trình duyệt này chưa hỗ trợ Firebase Cloud Messaging.");
+  }
+
+  const tokenOptions = { serviceWorkerRegistration: registration };
+  const vapidKey = getConfiguredVapidKey();
+  if (vapidKey) tokenOptions.vapidKey = vapidKey;
+
+  const token = await getMessagingToken(messaging, tokenOptions);
+  if (!token) {
+    throw new Error("Không lấy được mã nhận thông báo của thiết bị.");
+  }
+
+  await registerWebPushTokenCallable({
+    token,
+    platform: isIosDevice() ? "ios-web" : "web",
+    standalone: isStandaloneWebApp(),
+    userAgent: navigator.userAgent.slice(0, 500)
+  });
+
+  state.pushToken = token;
+  state.pushTokenOwnerUid = state.user.uid;
+  localStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token);
+  localStorage.setItem(PUSH_TOKEN_OWNER_STORAGE_KEY, state.user.uid);
+  updateNotificationPermissionButton();
+
+  if (showSuccessToast) {
+    toast("Đã bật thông báo nền. Thiết bị có thể nhận thông báo khi Web App đã đóng.", "success");
+  }
+
+  return true;
+}
+
+async function unregisterCurrentDevicePushToken() {
+  const token = state.pushToken || localStorage.getItem(PUSH_TOKEN_STORAGE_KEY) || "";
+  if (!token || !state.user) return;
+
+  try {
+    await unregisterWebPushTokenCallable({ token });
+  } catch (error) {
+    console.warn("Không xóa được đăng ký push trên máy chủ:", error);
+  }
+
+  try {
+    const messaging = await getPushMessaging();
+    if (messaging) await deleteMessagingToken(messaging);
+  } catch (error) {
+    console.warn("Không xóa được token FCM trên thiết bị:", error);
+  }
+
+  state.pushToken = "";
+  state.pushTokenOwnerUid = "";
+  localStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+  localStorage.removeItem(PUSH_TOKEN_OWNER_STORAGE_KEY);
+  updateNotificationPermissionButton();
+}
+
+async function syncPushSubscriptionIfAllowed() {
+  if (!state.user || !notificationSupported() || Notification.permission !== "granted") {
+    updateNotificationPermissionButton();
+    return;
+  }
+
+  try {
+    await registerCurrentDeviceForPush();
+  } catch (error) {
+    console.warn("Chưa đồng bộ được thông báo nền:", error);
+    updateNotificationPermissionButton();
+  }
+}
+
 async function requestNotificationPermission() {
   if (!notificationSupported()) {
     toast("Trình duyệt này chưa hỗ trợ thông báo hệ thống.", "error");
     return;
   }
 
-  const permission = await Notification.requestPermission();
-  updateNotificationPermissionButton();
+  if (isIosDevice() && !isStandaloneWebApp()) {
+    toast("Trên iPhone/iPad, hãy thêm website vào Màn hình chính rồi mở từ biểu tượng Shop Task để bật thông báo nền.", "info");
+    return;
+  }
 
-  if (permission === "granted") {
-    toast("Đã bật thông báo trên thiết bị này.", "success");
-    await showSystemNotification({
-      id: "permission-test",
-      title: "Shop Task đã bật thông báo",
-      message: "Bạn sẽ nhận thông báo khi có việc mới hoặc khi công việc được xác nhận."
-    });
-  } else if (permission === "denied") {
-    toast("Bạn đã chặn thông báo. Hãy mở khóa trong cài đặt trình duyệt nếu muốn bật lại.", "error");
-  } else {
-    toast("Bạn chưa cấp quyền thông báo.", "info");
+  try {
+    const permission = Notification.permission === "granted"
+      ? "granted"
+      : await Notification.requestPermission();
+    updateNotificationPermissionButton();
+
+    if (permission === "granted") {
+      await registerCurrentDeviceForPush({ showSuccessToast: true });
+      await showSystemNotification({
+        id: "permission-test",
+        title: "Shop Task đã bật thông báo nền",
+        message: "Bạn sẽ nhận thông báo kể cả khi Web App không còn mở trên màn hình."
+      });
+    } else if (permission === "denied") {
+      toast("Bạn đã chặn thông báo. Hãy mở quyền Notifications của Shop Task trong cài đặt thiết bị.", "error");
+    } else {
+      toast("Bạn chưa cấp quyền thông báo.", "info");
+    }
+  } catch (error) {
+    console.error("PUSH REGISTRATION ERROR:", error);
+    const vapidHint = getConfiguredVapidKey()
+      ? ""
+      : " Nếu vẫn lỗi, hãy thêm Web Push VAPID public key vào firebaseConfig.messagingVapidKey.";
+    toast(`Không bật được thông báo nền: ${error?.message || String(error)}.${vapidHint}`, "error");
   }
 }
 
@@ -1346,14 +1521,14 @@ async function showSystemNotification(notification) {
     badge: "./icon-192.png",
     tag: notification.id || notification.taskId || `${Date.now()}`,
     data: {
-      url: "./",
+      url: notification.taskId ? `./?taskId=${encodeURIComponent(notification.taskId)}` : "./",
       taskId: notification.taskId || null
     }
   };
 
   try {
-    if ("serviceWorker" in navigator) {
-      const registration = await navigator.serviceWorker.ready;
+    const registration = await registerServiceWorker();
+    if (registration) {
       await registration.showNotification(title, options);
       return;
     }
@@ -1369,6 +1544,38 @@ async function showSystemNotification(notification) {
 }
 
 els.enableNotificationsBtn?.addEventListener("click", requestNotificationPermission);
+
+function queuePushTaskOpen(taskId) {
+  const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
+  if (!normalizedTaskId) return;
+  state.pendingPushTaskId = normalizedTaskId;
+
+  let attempts = 0;
+  const tryOpen = () => {
+    attempts += 1;
+    const task = state.tasks.find((item) => item.id === normalizedTaskId);
+    if (task) {
+      state.pendingPushTaskId = "";
+      showTaskInCurrentDashboard(task);
+      window.setTimeout(() => scrollToTaskCard(normalizedTaskId), 180);
+      return;
+    }
+    if (attempts < 20 && state.user) window.setTimeout(tryOpen, 500);
+  };
+
+  tryOpen();
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "SHOP_TASK_PUSH_OPEN") {
+      queuePushTaskOpen(event.data.taskId || "");
+    }
+  });
+}
+
+const initialPushTaskId = new URLSearchParams(window.location.search).get("taskId") || "";
+if (initialPushTaskId) state.pendingPushTaskId = initialPushTaskId;
 
 function setMobileTopbarMenuOpen(open) {
   const shouldOpen = Boolean(open);
@@ -1975,7 +2182,11 @@ els.loginForm.addEventListener("submit", async (event) => {
 });
 
 els.logoutBtn.addEventListener("click", async () => {
-  await signOut(auth);
+  try {
+    await unregisterCurrentDevicePushToken();
+  } finally {
+    await signOut(auth);
+  }
 });
 
 onAuthStateChanged(auth, async (user) => {
@@ -2001,6 +2212,8 @@ onAuthStateChanged(auth, async (user) => {
   state.workOrderControlSettingsReady = false;
   state.workOrderSettingsAuthorizationToken = "";
   state.workOrderSettingsAuthorizationExpiresAt = 0;
+  state.pushToken = localStorage.getItem(PUSH_TOKEN_STORAGE_KEY) || "";
+  state.pushTokenOwnerUid = localStorage.getItem(PUSH_TOKEN_OWNER_STORAGE_KEY) || "";
 
   if (!user) {
     showLogin();
@@ -2021,12 +2234,15 @@ onAuthStateChanged(auth, async (user) => {
 
     showApp();
     setupNotificationListener();
+    await syncPushSubscriptionIfAllowed();
 
     if (isManagementProfile()) {
       setupAdminDashboard();
     } else {
       setupEmployeeDashboard();
     }
+
+    if (state.pendingPushTaskId) queuePushTaskOpen(state.pendingPushTaskId);
   } catch (error) {
     console.error(error);
     toast("Không tải được hồ sơ người dùng. Kiểm tra Firestore Rules.", "error");
@@ -7323,12 +7539,12 @@ function renderAdminTasks() {
 
   const stats = {
     draft: baseFiltered.filter((task) => task.displayStatus === "draft").length,
-
-    // Ô Dashboard “Đang làm” hiển thị số NHÂN VIÊN đang được giao việc,
-    // dùng đúng cùng danh sách đã tính cho ô tổng kết “Đã được giao việc”.
-    // Mỗi nhân viên chỉ được tính một lần dù đang có nhiều công việc.
-    doing: state.adminEmployeeStatusGroups?.assigned?.length || 0,
-
+    doing: baseFiltered.filter((task) => (
+      task.displayStatus === "doing" ||
+      task.displayStatus === "lunch_break" ||
+      task.displayStatus === "near_due" ||
+      task.displayStatus === "redo"
+    )).length,
     hotel: baseFiltered.filter((task) => isActiveHotelTaskForEmployeeSummary(task)).length,
     completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
