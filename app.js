@@ -1518,7 +1518,7 @@ async function showSystemNotification(notification) {
   const options = {
     body: notification.message || "Bạn có thông báo mới.",
     icon: "./icon-192.png",
-    badge: "./icon-192.png",
+    badge: "./notification-badge.png",
     tag: notification.id || notification.taskId || `${Date.now()}`,
     data: {
       url: notification.taskId ? `./?taskId=${encodeURIComponent(notification.taskId)}` : "./",

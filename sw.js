@@ -1,12 +1,13 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260720-icons-2";
+const CACHE_NAME = "culao-task-shell-v20260720-notification-badge-1";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./app.js",
   "./manifest.webmanifest",
   "./icon-192.png",
-  "./icon-512.png"
+  "./icon-512.png",
+  "./notification-badge.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -82,7 +83,7 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(title, {
       body,
       icon: "./icon-192.png",
-      badge: "./icon-192.png",
+      badge: "./notification-badge.png",
       tag: notificationId || taskId || `culao-task-${Date.now()}`,
       renotify: false,
       data: {
