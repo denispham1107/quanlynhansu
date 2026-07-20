@@ -89,6 +89,7 @@ const ensureChatConversationCallable = httpsCallable(functions, "ensureChatConve
 const sendChatMessageCallable = httpsCallable(functions, "sendChatMessage");
 const markChatConversationReadCallable = httpsCallable(functions, "markChatConversationRead");
 const deleteChatConversationCallable = httpsCallable(functions, "deleteChatConversation");
+const syncChatConversationIndexCallable = httpsCallable(functions, "syncChatConversationIndex");
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -206,7 +207,9 @@ const state = {
   chatMobileReviewMode: false,
   chatOpenDesktopIds: [],
   chatReadRequestsInFlight: new Set(),
-  chatUsersLoading: false
+  chatUsersLoading: false,
+  chatConversationFallbackTimer: null,
+  chatConversationListenerWarningShown: false
 };
 
 
@@ -706,6 +709,27 @@ function timestampToDate(value) {
   if (!value) return null;
   if (typeof value.toDate === "function") return value.toDate();
   if (value instanceof Date) return value;
+
+  // Dữ liệu Chat có thể đến từ Firestore listener (Timestamp) hoặc từ
+  // Cloud Function dự phòng (milliseconds / ISO string). Chuẩn hóa tất cả
+  // về Date để giao diện sắp xếp và hiển thị thời gian nhất quán.
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value === "string") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value === "object" && Number.isFinite(Number(value.seconds))) {
+    const milliseconds = Number(value.seconds) * 1000
+      + Math.floor(Number(value.nanoseconds || 0) / 1e6);
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
   return null;
 }
 
@@ -2171,41 +2195,93 @@ async function loadChatUsers({ silent = false } = {}) {
   }
 }
 
-function setupChatConversationListener() {
+function applyChatConversationList(items = []) {
+  const conversations = (Array.isArray(items) ? items : [])
+    .filter((item) => item?.id)
+    .map((item) => ({ ...item, id: String(item.id) }))
+    .sort((a, b) => getChatTimestampMs(b.lastMessageAt || b.updatedAt) - getChatTimestampMs(a.lastMessageAt || a.updatedAt));
+
+  state.chatConversations = conversations;
+  state.chatConversationMap = new Map(conversations.map((item) => [item.id, item]));
+  updateChatUnreadBadge();
+  renderChatDirectory();
+  renderChatAdminConversations();
+  refreshAllChatViews();
+  markVisibleChatConversationsRead();
+
+  if (state.pendingPushConversationId) {
+    queuePushChatOpen(state.pendingPushConversationId, state.pendingPushChatPartnerUid);
+  }
+}
+
+function stopChatConversationFallbackPolling() {
+  if (!state.chatConversationFallbackTimer) return;
+  clearInterval(state.chatConversationFallbackTimer);
+  state.chatConversationFallbackTimer = null;
+}
+
+async function refreshChatConversationsViaCallable({ repairIndex = false, silent = true } = {}) {
   if (!state.user) return;
-  const conversationsRef = collection(db, "chatConversations");
+  const response = await syncChatConversationIndexCallable({
+    includeAll: isAdminProfile(),
+    repairIndex
+  });
+  applyChatConversationList(response.data?.conversations || []);
+  if (!silent) renderChatDirectory();
+}
+
+function startChatConversationFallbackPolling() {
+  if (!state.user || state.chatConversationFallbackTimer) return;
+
+  const refresh = async () => {
+    try {
+      await refreshChatConversationsViaCallable({ repairIndex: false, silent: true });
+    } catch (error) {
+      console.warn("Đồng bộ Chat dự phòng chưa thành công:", error);
+    }
+  };
+
+  refresh();
+  state.chatConversationFallbackTimer = window.setInterval(refresh, 12000);
+}
+
+async function setupChatConversationListener() {
+  if (!state.user) return;
+
+  // Cloud Function dùng Admin SDK để sửa/tạo chỉ mục Chat riêng của tài khoản.
+  // Cách này tương thích với cả các cuộc trò chuyện đã tạo trước bản cập nhật.
+  try {
+    await refreshChatConversationsViaCallable({ repairIndex: true, silent: true });
+  } catch (error) {
+    console.warn("Chưa đồng bộ được chỉ mục Chat ban đầu:", error);
+  }
+
   const conversationsQuery = isAdminProfile()
-    ? conversationsRef
-    : query(conversationsRef, where("participantIds", "array-contains", state.user.uid));
+    ? collection(db, "chatConversations")
+    : collection(db, "chatUserConversations", state.user.uid, "conversations");
 
   const unsubscribe = onSnapshot(
     conversationsQuery,
     (snapshot) => {
-      const conversations = snapshot.docs
-        .map((item) => ({ id: item.id, ...item.data() }))
-        .sort((a, b) => getChatTimestampMs(b.lastMessageAt || b.updatedAt) - getChatTimestampMs(a.lastMessageAt || a.updatedAt));
-
-      state.chatConversations = conversations;
-      state.chatConversationMap = new Map(conversations.map((item) => [item.id, item]));
-      updateChatUnreadBadge();
-      renderChatDirectory();
-      renderChatAdminConversations();
-      refreshAllChatViews();
-      markVisibleChatConversationsRead();
-
-      if (state.pendingPushConversationId) {
-        queuePushChatOpen(state.pendingPushConversationId, state.pendingPushChatPartnerUid);
-      }
+      stopChatConversationFallbackPolling();
+      applyChatConversationList(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
     },
     (error) => {
-      console.error("Không đồng bộ được danh sách cuộc trò chuyện:", error);
-      const errorCode = String(error?.code || "");
-      if (errorCode === "permission-denied") {
-        toast("Không đồng bộ được danh sách Chat do quyền truy cập. Hãy tải lại trang sau khi cập nhật Firestore Rules.", "error");
-      } else if (["unavailable", "deadline-exceeded", "cancelled"].includes(errorCode) || navigator.onLine === false) {
-        toast("Kết nối Chat tạm thời bị gián đoạn. Hãy kiểm tra mạng rồi mở Chat lại.", "error");
-      } else {
-        toast("Chat tạm thời chưa đồng bộ được. Hãy tải lại trang và thử lại.", "error");
+      console.error("Không đồng bộ được danh sách cuộc trò chuyện realtime:", error);
+
+      // Không để lỗi listener làm mất chức năng Chat. Hệ thống tự chuyển sang
+      // callable polling; nội dung cuộc trò chuyện đang mở vẫn realtime qua
+      // listener messages riêng.
+      startChatConversationFallbackPolling();
+
+      if (!state.chatConversationListenerWarningShown) {
+        state.chatConversationListenerWarningShown = true;
+        const errorCode = String(error?.code || "");
+        if (["unavailable", "deadline-exceeded", "cancelled"].includes(errorCode) || navigator.onLine === false) {
+          toast("Kết nối danh sách Chat đang gián đoạn. Hệ thống sẽ tự đồng bộ lại khi có mạng.", "error");
+        } else {
+          toast("Danh sách Chat đang dùng chế độ đồng bộ dự phòng và vẫn có thể nhắn tin bình thường.", "info");
+        }
       }
     }
   );
@@ -2218,7 +2294,7 @@ async function setupChatFeature() {
   bindChatUI();
   updateChatUnreadBadge();
   renderChatDirectory();
-  setupChatConversationListener();
+  await setupChatConversationListener();
   await loadChatUsers({ silent: true });
   if (state.pendingPushConversationId) {
     queuePushChatOpen(state.pendingPushConversationId, state.pendingPushChatPartnerUid);
@@ -2226,6 +2302,8 @@ async function setupChatFeature() {
 }
 
 function cleanupChatFeature() {
+  stopChatConversationFallbackPolling();
+  state.chatConversationListenerWarningShown = false;
   state.chatViewStates?.forEach((view) => {
     try { view.unsubscribe?.(); } catch (_) { /* no-op */ }
   });
@@ -3239,6 +3317,8 @@ onAuthStateChanged(auth, async (user) => {
   state.chatMobileReviewMode = false;
   state.chatOpenDesktopIds = [];
   state.chatReadRequestsInFlight = new Set();
+  state.chatConversationFallbackTimer = null;
+  state.chatConversationListenerWarningShown = false;
 
   if (!user) {
     showLogin();
