@@ -2086,7 +2086,24 @@ const CHAT_MAX_DESKTOP_WINDOWS = 3;
 const CHAT_MAX_ATTACHMENTS = 5;
 const CHAT_MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const CHAT_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
-const CHAT_ALLOWED_VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm", "video/x-m4v"]);
+const CHAT_MAX_FILE_BYTES = 50 * 1024 * 1024;
+const CHAT_ALLOWED_VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm", "video/x-m4v", "video/3gpp"]);
+const CHAT_FILE_TYPE_BY_EXTENSION = new Map([
+  ["pdf", "application/pdf"],
+  ["doc", "application/msword"],
+  ["docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  ["xls", "application/vnd.ms-excel"],
+  ["xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  ["ppt", "application/vnd.ms-powerpoint"],
+  ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  ["txt", "text/plain"],
+  ["csv", "text/csv"],
+  ["json", "application/json"],
+  ["zip", "application/zip"],
+  ["rar", "application/vnd.rar"],
+  ["7z", "application/x-7z-compressed"]
+]);
+const CHAT_ALLOWED_FILE_TYPES = new Set(CHAT_FILE_TYPE_BY_EXTENSION.values());
 const chatMediaUrlCache = new Map();
 let chatUiBound = false;
 let chatMobileViewportRaf = 0;
@@ -2539,10 +2556,11 @@ function isChatMessageReadByRecipient(message, conversation) {
 
 function getChatAttachmentKind(attachment) {
   const explicit = String(attachment?.kind || "").toLowerCase();
-  if (explicit === "image" || explicit === "video") return explicit;
+  if (["image", "video", "file"].includes(explicit)) return explicit;
   const type = String(attachment?.contentType || "").toLowerCase();
   if (type.startsWith("image/")) return "image";
   if (type.startsWith("video/")) return "video";
+  if (type) return "file";
   return "";
 }
 
@@ -2552,13 +2570,38 @@ function getChatMessageAttachments(message) {
     : [];
 }
 
+function formatChatFileSize(value) {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function getChatFileExtension(name = "") {
+  const match = String(name || "").trim().toLowerCase().match(/\.([a-z0-9]{1,8})$/);
+  return match?.[1] || "file";
+}
+
+function getChatFileIconLabel(name = "") {
+  const extension = getChatFileExtension(name);
+  const labels = {
+    pdf: "PDF", doc: "DOC", docx: "DOCX", xls: "XLS", xlsx: "XLSX",
+    ppt: "PPT", pptx: "PPTX", txt: "TXT", csv: "CSV", json: "JSON",
+    zip: "ZIP", rar: "RAR", "7z": "7Z"
+  };
+  return labels[extension] || "FILE";
+}
+
 function renderChatAttachmentsHtml(message) {
   const attachments = getChatMessageAttachments(message);
   if (!attachments.length) return "";
 
-  return `
-    <div class="culao-chat-media-grid ${attachments.length === 1 ? "is-single" : ""}">
-      ${attachments.map((attachment) => {
+  const mediaAttachments = attachments.filter((item) => getChatAttachmentKind(item) !== "file");
+  const fileAttachments = attachments.filter((item) => getChatAttachmentKind(item) === "file");
+  const mediaHtml = mediaAttachments.length ? `
+    <div class="culao-chat-media-grid ${mediaAttachments.length === 1 ? "is-single" : ""}">
+      ${mediaAttachments.map((attachment) => {
         const kind = getChatAttachmentKind(attachment);
         const path = escapeHtml(String(attachment.storagePath || ""));
         const name = escapeHtml(String(attachment.name || (kind === "video" ? "Video" : "Hình ảnh")));
@@ -2570,6 +2613,7 @@ function renderChatAttachmentsHtml(message) {
                 controls
                 playsinline
                 preload="metadata"
+                data-chat-attachment-path="${path}"
                 data-chat-media-path="${path}"
                 data-chat-media-kind="video"
                 data-chat-media-name="${name}"
@@ -2585,6 +2629,7 @@ function renderChatAttachmentsHtml(message) {
             <img
               loading="lazy"
               alt="${name}"
+              data-chat-attachment-path="${path}"
               data-chat-media-path="${path}"
               data-chat-media-kind="image"
               data-chat-media-name="${name}"
@@ -2595,14 +2640,43 @@ function renderChatAttachmentsHtml(message) {
         `;
       }).join("")}
     </div>
-  `;
+  ` : "";
+
+  const filesHtml = fileAttachments.length ? `
+    <div class="culao-chat-file-list">
+      ${fileAttachments.map((attachment) => {
+        const path = escapeHtml(String(attachment.storagePath || ""));
+        const name = escapeHtml(String(attachment.name || "Tệp đính kèm"));
+        const contentType = escapeHtml(String(attachment.contentType || ""));
+        const size = escapeHtml(formatChatFileSize(attachment.size));
+        const icon = escapeHtml(getChatFileIconLabel(attachment.name));
+        return `
+          <div
+            class="culao-chat-file-item"
+            data-chat-attachment-path="${path}"
+            data-chat-media-kind="file"
+            data-chat-media-name="${name}"
+            data-chat-media-content-type="${contentType}"
+          >
+            <span class="culao-chat-file-icon" aria-hidden="true">${icon}</span>
+            <span class="culao-chat-file-info">
+              <strong title="${name}">${name}</strong>
+              <small>${size || "Tệp đính kèm"}</small>
+            </span>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  ` : "";
+
+  return `${mediaHtml}${filesHtml}`;
 }
 
 function renderChatMediaActionsHtml(message) {
   if (!getChatMessageAttachments(message).length) return "";
   return `
     <div class="culao-chat-media-actions">
-      <button class="culao-chat-media-download-btn" type="button" data-chat-media-download aria-label="Tải tất cả hình ảnh và video trong tin nhắn này">
+      <button class="culao-chat-media-download-btn" type="button" data-chat-media-download aria-label="Tải tất cả tệp đính kèm trong tin nhắn này">
         <span aria-hidden="true">⬇</span>
         <span>Tải</span>
       </button>
@@ -2633,14 +2707,33 @@ function getChatMediaFileExtension(contentType = "", kind = "") {
   if (type.includes("webm")) return ".webm";
   if (type.includes("3gpp")) return ".3gp";
   if (type.includes("mp4") || type.includes("m4v")) return ".mp4";
-  return kind === "video" ? ".mp4" : ".jpg";
+  if (type === "application/pdf") return ".pdf";
+  if (type === "application/msword") return ".doc";
+  if (type.includes("wordprocessingml")) return ".docx";
+  if (type === "application/vnd.ms-excel") return ".xls";
+  if (type.includes("spreadsheetml")) return ".xlsx";
+  if (type === "application/vnd.ms-powerpoint") return ".ppt";
+  if (type.includes("presentationml")) return ".pptx";
+  if (type === "text/plain") return ".txt";
+  if (type === "text/csv") return ".csv";
+  if (type === "application/json") return ".json";
+  if (type === "application/zip") return ".zip";
+  if (type === "application/vnd.rar") return ".rar";
+  if (type === "application/x-7z-compressed") return ".7z";
+  if (kind === "video") return ".mp4";
+  if (kind === "image") return ".jpg";
+  return ".bin";
 }
 
 function getChatMediaDownloadFileName(attachment, index = 0) {
-  const kind = String(attachment?.kind || "").toLowerCase() === "video" ? "video" : "image";
-  const fallback = kind === "video" ? `video-chat-${index + 1}` : `hinh-chat-${index + 1}`;
+  const kind = getChatAttachmentKind(attachment) || "file";
+  const fallback = kind === "video"
+    ? `video-chat-${index + 1}`
+    : kind === "image"
+      ? `hinh-chat-${index + 1}`
+      : `tep-chat-${index + 1}`;
   const safeName = sanitizeStorageFileName(attachment?.name || fallback);
-  if (/\.[a-zA-Z0-9]{2,6}$/.test(safeName)) return safeName;
+  if (/\.[a-zA-Z0-9]{1,8}$/.test(safeName)) return safeName;
   return `${safeName}${getChatMediaFileExtension(attachment?.contentType, kind)}`;
 }
 
@@ -2648,9 +2741,9 @@ function collectChatMediaAttachmentsFromBubble(button) {
   const messageStack = button?.closest?.(".culao-chat-message-stack");
   if (!messageStack) return [];
   const seen = new Set();
-  return [...messageStack.querySelectorAll("[data-chat-media-path]")]
+  return [...messageStack.querySelectorAll("[data-chat-attachment-path], [data-chat-media-path]")]
     .map((element) => ({
-      storagePath: String(element.dataset.chatMediaPath || "").trim(),
+      storagePath: String(element.dataset.chatAttachmentPath || element.dataset.chatMediaPath || "").trim(),
       name: String(element.dataset.chatMediaName || "").trim(),
       kind: String(element.dataset.chatMediaKind || "").trim(),
       contentType: String(element.dataset.chatMediaContentType || "").trim()
@@ -2690,13 +2783,13 @@ function makeChatMediaZipFileName() {
   const now = new Date();
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
   const time = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
-  return `culao-task-chat-media-${date}-${time}.zip`;
+  return `culao-task-chat-files-${date}-${time}.zip`;
 }
 
 async function downloadAllChatMediaFromButton(button) {
   const attachments = collectChatMediaAttachmentsFromBubble(button);
   if (!attachments.length) {
-    toast("Không tìm thấy hình ảnh hoặc video để tải.", "error");
+    toast("Không tìm thấy tệp đính kèm để tải.", "error");
     return;
   }
 
@@ -2763,7 +2856,7 @@ async function downloadAllChatMediaFromButton(button) {
     );
   } catch (error) {
     console.error(error);
-    toast(error.message || "Không tải được hình ảnh và video Chat.", "error");
+    toast(error.message || "Không tải được tệp đính kèm Chat.", "error");
   } finally {
     if (button.isConnected) {
       button.disabled = false;
@@ -2828,14 +2921,18 @@ function closeChatMediaViewer() {
 }
 
 function inferChatMediaType(file) {
-  const type = String(file?.type || "").toLowerCase();
-  if (type) return type;
+  const type = String(file?.type || "").toLowerCase().trim();
+  if (type && (type.startsWith("image/") || type.startsWith("video/") || CHAT_ALLOWED_FILE_TYPES.has(type))) {
+    return type;
+  }
   const name = String(file?.name || "").toLowerCase();
   if (/\.(jpe?g|png|gif|webp|heic|heif)$/i.test(name)) return "image/jpeg";
   if (/\.mov$/i.test(name)) return "video/quicktime";
   if (/\.webm$/i.test(name)) return "video/webm";
+  if (/\.3gp$/i.test(name)) return "video/3gpp";
   if (/\.(mp4|m4v)$/i.test(name)) return "video/mp4";
-  return "";
+  const extension = getChatFileExtension(name);
+  return CHAT_FILE_TYPE_BY_EXTENSION.get(extension) || "";
 }
 
 function readVideoFileMetadata(file) {
@@ -2888,8 +2985,8 @@ async function prepareChatMediaFile(file) {
   }
 
   if (contentType.startsWith("video/")) {
-    if (!CHAT_ALLOWED_VIDEO_TYPES.has(contentType) && contentType !== "video/3gpp") {
-      throw new Error(`Video “${file.name}” không thuộc định dạng MP4, MOV hoặc WebM được hỗ trợ.`);
+    if (!CHAT_ALLOWED_VIDEO_TYPES.has(contentType)) {
+      throw new Error(`Video “${file.name}” không thuộc định dạng MP4, MOV, WebM hoặc 3GP được hỗ trợ.`);
     }
     if (Number(file.size || 0) > CHAT_MAX_VIDEO_BYTES) {
       throw new Error(`Video “${file.name}” vượt quá 100 MB.`);
@@ -2904,7 +3001,25 @@ async function prepareChatMediaFile(file) {
     };
   }
 
-  throw new Error(`Tệp “${file?.name || "đã chọn"}” không phải hình ảnh hoặc video.`);
+  if (CHAT_ALLOWED_FILE_TYPES.has(contentType)) {
+    if (Number(file.size || 0) <= 0) {
+      throw new Error(`Tệp “${file.name}” đang trống.`);
+    }
+    if (Number(file.size || 0) > CHAT_MAX_FILE_BYTES) {
+      throw new Error(`Tệp “${file.name}” vượt quá 50 MB.`);
+    }
+    return {
+      file,
+      originalName: file.name,
+      contentType,
+      kind: "file",
+      width: 0,
+      height: 0,
+      duration: 0
+    };
+  }
+
+  throw new Error(`Tệp “${file?.name || "đã chọn"}” chưa được hỗ trợ. Hãy chọn hình, video, PDF, Word, Excel, PowerPoint, TXT, CSV, JSON hoặc tệp nén ZIP/RAR/7Z.`);
 }
 
 function setChatMediaUploadBusy(elements, busy, current = 0, total = 0) {
@@ -2927,7 +3042,7 @@ async function sendChatMediaFiles(viewKey, recipientUid, fileList) {
   const files = Array.from(fileList || []).filter(Boolean);
   if (!view || view.reviewMode || !recipientUid || view.sendingMedia === true || !files.length) return;
   if (files.length > CHAT_MAX_ATTACHMENTS) {
-    toast(`Mỗi lần chỉ gửi tối đa ${CHAT_MAX_ATTACHMENTS} hình ảnh hoặc video.`, "error");
+    toast(`Mỗi lần chỉ gửi tối đa ${CHAT_MAX_ATTACHMENTS} tệp đính kèm.`, "error");
     if (elements.fileInput) elements.fileInput.value = "";
     return;
   }
@@ -2994,7 +3109,7 @@ async function sendChatMediaFiles(viewKey, recipientUid, fileList) {
     } catch (cleanupError) {
       console.warn("Không dọn được tệp Chat tải dở:", cleanupError);
     }
-    toast(error.message || "Không gửi được hình ảnh hoặc video.", "error");
+    toast(error.message || "Không gửi được tệp đính kèm.", "error");
   } finally {
     view.sendingMedia = false;
     setChatMediaUploadBusy(elements, false);
@@ -3364,8 +3479,8 @@ function openDesktopChatWindow({ conversationId, partnerUid = "", reviewMode = f
       <div class="culao-chat-messages" data-chat-messages></div>
       ${reviewMode ? '<div class="culao-chat-readonly-note">Admin đang xem lịch sử. Không thể gửi thay người tham gia.</div>' : `
         <form class="culao-chat-composer" data-chat-composer>
-          <button type="button" class="culao-chat-attach-btn" data-chat-attach aria-label="Gửi hình ảnh hoặc video">＋</button>
-          <input class="hidden" type="file" accept="image/*,video/*" multiple data-chat-file-input />
+          <button type="button" class="culao-chat-attach-btn" data-chat-attach aria-label="Gửi hình ảnh, video hoặc tệp">＋</button>
+          <input class="hidden" type="file" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.zip,.rar,.7z" multiple data-chat-file-input />
           <textarea data-chat-input rows="1" maxlength="2000" placeholder="Nhập tin nhắn..." aria-label="Nhập tin nhắn"></textarea>
           <button type="submit" class="culao-chat-send-btn" aria-label="Gửi tin nhắn">➤</button>
         </form>
