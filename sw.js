@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260720-employee-assignment-status-banner-1";
+const CACHE_NAME = "culao-task-shell-v20260720-employee-status-below-unassigned-1";
 const APP_SHELL = [
   "./",
   "./index.html",

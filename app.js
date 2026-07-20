@@ -2803,12 +2803,22 @@ function employeeHasCurrentAssignedWork() {
 
 function renderEmployeeEmploymentStatusBanner() {
   if (!els.employeeView || !state.profile || state.profile.role !== "employee") return;
+
+  // Hai ô trạng thái của nhân viên phải luôn nằm ngay dưới ô "Chưa giao việc"
+  // và phía trên bảng "Danh sách việc cần làm" trên cả desktop lẫn mobile.
+  const unassignedSummary = els.employeeView.querySelector(".employee-unassigned-work-order-summary");
+  const employeeHero = els.employeeView.querySelector(".employee-hero");
+
   let banner = document.getElementById("employeeEmploymentStatusBanner");
   if (!banner) {
     banner = document.createElement("section");
     banner.id = "employeeEmploymentStatusBanner";
-    const hero = els.employeeView.querySelector(".employee-hero");
-    hero?.insertAdjacentElement("afterend", banner);
+  }
+
+  if (unassignedSummary) {
+    unassignedSummary.insertAdjacentElement("afterend", banner);
+  } else {
+    employeeHero?.insertAdjacentElement("afterend", banner);
   }
 
   let assignmentBanner = document.getElementById("employeeAssignmentStatusBanner");
