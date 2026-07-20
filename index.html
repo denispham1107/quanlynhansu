@@ -9389,6 +9389,36 @@
     .employee-employment-status-banner.is-working { background:#f0fdf4; border-color:#86efac; color:#166534; }
     .employee-employment-status-banner.is-off { background:#fff7ed; border-color:#fdba74; color:#c2410c; }
 
+    .employee-assignment-status-banner {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      width:100%;
+      margin:-6px 0 14px;
+      padding:12px 16px;
+      border:1px solid;
+      border-radius:15px;
+      font-weight:800;
+      line-height:1.4;
+      box-sizing:border-box;
+    }
+    .employee-assignment-status-banner strong { font-weight:900; }
+    .employee-assignment-status-banner span { font-weight:800; }
+    .employee-assignment-status-banner.has-no-assigned-work {
+      color:#9f1239;
+      border-color:#c084fc;
+      border-left:5px solid #e11d48;
+      background:linear-gradient(135deg,#fff1f2 0%,#faf5ff 100%);
+      box-shadow:0 8px 20px rgba(159,18,57,.08);
+    }
+    .employee-assignment-status-banner.has-assigned-work {
+      color:#b45309;
+      border-color:#fbbf24;
+      border-left:5px solid #f97316;
+      background:linear-gradient(135deg,#fffbeb 0%,#fff7ed 100%);
+      box-shadow:0 8px 20px rgba(180,83,9,.08);
+    }
+
     @media (min-width: 1100px) {
       #adminView .employee-status-summary { grid-template-columns:repeat(6,minmax(0,1fr)); }
     }
@@ -9397,6 +9427,7 @@
       .employment-status-options { grid-template-columns:1fr; }
       .employment-status-actions { display:grid; grid-template-columns:1fr 1fr; }
       .employee-employment-status-banner { align-items:flex-start; flex-direction:column; gap:4px; margin:0 12px 12px; }
+      .employee-assignment-status-banner { width:auto; margin:-4px 12px 12px; padding:11px 14px; flex-wrap:wrap; }
       #employeeManagerView .staff-account-meta { gap:5px; overflow:hidden; }
       .employment-status-badge { font-size:.64rem; padding:2px 6px; }
     }

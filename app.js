@@ -2794,6 +2794,13 @@ async function saveEmploymentStatus() {
   }
 }
 
+function employeeHasCurrentAssignedWork() {
+  return state.tasks.some((task) => (
+    task.assignedToUid === state.user?.uid
+    && isUnfinishedAssignedTask(task)
+  ));
+}
+
 function renderEmployeeEmploymentStatusBanner() {
   if (!els.employeeView || !state.profile || state.profile.role !== "employee") return;
   let banner = document.getElementById("employeeEmploymentStatusBanner");
@@ -2803,11 +2810,32 @@ function renderEmployeeEmploymentStatusBanner() {
     const hero = els.employeeView.querySelector(".employee-hero");
     hero?.insertAdjacentElement("afterend", banner);
   }
+
+  let assignmentBanner = document.getElementById("employeeAssignmentStatusBanner");
   const isOff = normalizeEmploymentStatus(state.profile) === EMPLOYMENT_STATUS_OFF;
   banner.className = `employee-employment-status-banner ${isOff ? "is-off" : "is-working"}`;
   banner.innerHTML = isOff
     ? `<strong>Trạng thái làm việc: Đang Off</strong><span>Bạn hiện không nhận công việc mới. Các công việc đã được giao trước đó vẫn được giữ nguyên.</span>`
     : `<strong>Trạng thái làm việc: Đang làm</strong><span>Bạn có thể nhận công việc mới bình thường.</span>`;
+
+  if (isOff) {
+    assignmentBanner?.remove();
+    return;
+  }
+
+  if (!assignmentBanner) {
+    assignmentBanner = document.createElement("section");
+    assignmentBanner.id = "employeeAssignmentStatusBanner";
+    assignmentBanner.setAttribute("role", "status");
+    assignmentBanner.setAttribute("aria-live", "polite");
+  }
+
+  const hasAssignedWork = employeeHasCurrentAssignedWork();
+  assignmentBanner.className = `employee-assignment-status-banner ${hasAssignedWork ? "has-assigned-work" : "has-no-assigned-work"}`;
+  assignmentBanner.innerHTML = hasAssignedWork
+    ? `<strong>Đã nhận công việc</strong>`
+    : `<strong>Chưa có việc được giao:</strong><span>Xuống bán hàng nhận công việc mới</span>`;
+  banner.insertAdjacentElement("afterend", assignmentBanner);
 }
 
 function renderEmployees() {
@@ -6741,6 +6769,7 @@ function setupEmployeeDashboard() {
           return bDate - aDate;
         });
 
+      renderEmployeeEmploymentStatusBanner();
       renderEmployeeTasks();
     },
     handleSnapshotError
