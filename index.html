@@ -8529,7 +8529,8 @@
       background: #fff;
     }
 
-    .culao-chat-composer textarea {
+    .culao-chat-composer textarea,
+    .culao-chat-composer input[type="text"] {
       width: 100%;
       min-height: 42px;
       max-height: 112px;
@@ -8538,11 +8539,17 @@
       border: 1px solid #cbd5e1;
       border-radius: 14px;
       outline: none;
+      background: #fff;
+      color: #0f172a;
       font: inherit;
       font-size: 13px;
+      line-height: 1.35;
+      -webkit-appearance: none;
+      appearance: none;
     }
 
-    .culao-chat-composer textarea:focus {
+    .culao-chat-composer textarea:focus,
+    .culao-chat-composer input[type="text"]:focus {
       border-color: #3b82f6;
       box-shadow: 0 0 0 3px rgba(59, 130, 246, .1);
     }
@@ -8671,17 +8678,25 @@
       .culao-chat-unread-badge { top: -6px; right: -5px; }
       .culao-chat-directory-panel {
         position: fixed;
-        inset: 0;
-        width: 100%;
-        max-height: none;
+        inset: auto;
+        top: var(--culao-chat-vv-top, 0px);
+        left: var(--culao-chat-vv-left, 0px);
+        width: var(--culao-chat-vv-width, 100vw);
+        height: var(--culao-chat-vv-height, 100dvh);
+        max-height: var(--culao-chat-vv-height, 100dvh);
         border: 0;
         border-radius: 0;
         padding-top: env(safe-area-inset-top);
-        padding-bottom: env(safe-area-inset-bottom);
+        padding-bottom: 0;
         background: #fff;
+        transform: translateZ(0);
+        contain: layout paint;
       }
       .culao-chat-directory-view,
-      .culao-chat-mobile-conversation { height: 100%; }
+      .culao-chat-mobile-conversation {
+        min-height: 0;
+        height: 100%;
+      }
       .culao-chat-directory-head { min-height: 70px; padding: 12px 16px; }
       .culao-chat-directory-list { max-height: none; flex: 1; }
       .culao-chat-admin-open { margin-bottom: 10px; }
@@ -8689,7 +8704,32 @@
       .culao-chat-messages { padding: 16px 12px; }
       .culao-chat-bubble { max-width: 86%; font-size: 14px; }
       .culao-chat-composer {
-        padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+        flex: 0 0 auto;
+        padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+        gap: 8px;
+        background: rgba(255, 255, 255, .98);
+      }
+      .culao-chat-composer input[type="text"] {
+        min-height: 44px;
+        height: 44px;
+        max-height: 44px;
+        padding: 9px 14px;
+        border-radius: 18px;
+        font-size: 16px;
+        touch-action: manipulation;
+      }
+      .culao-chat-send-btn {
+        width: 44px;
+        height: 44px;
+        border-radius: 15px;
+        touch-action: manipulation;
+      }
+      .culao-chat-mobile-messages {
+        min-height: 0;
+        scroll-padding-bottom: 12px;
+      }
+      body.culao-chat-keyboard-open .culao-chat-composer {
+        padding-bottom: 8px;
       }
       .culao-chat-admin-modal { padding: 0; }
       .culao-chat-admin-card {
@@ -8832,7 +8872,7 @@
               <button id="chatMobileLoadMoreBtn" class="culao-chat-load-more hidden" type="button">Tải tin nhắn cũ</button>
               <div id="chatMobileMessages" class="culao-chat-messages culao-chat-mobile-messages"></div>
               <form id="chatMobileComposer" class="culao-chat-composer">
-                <textarea id="chatMobileInput" rows="1" maxlength="2000" placeholder="Nhập tin nhắn..." aria-label="Nhập tin nhắn"></textarea>
+                <input id="chatMobileInput" type="text" maxlength="2000" placeholder="Nhập tin nhắn..." inputmode="text" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" autocorrect="on" spellcheck="true" aria-label="Nhập tin nhắn" />
                 <button type="submit" class="culao-chat-send-btn" aria-label="Gửi tin nhắn">➤</button>
               </form>
             </div>

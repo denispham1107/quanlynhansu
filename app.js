@@ -2069,6 +2069,65 @@ async function createNotifications(items) {
 const CHAT_PAGE_SIZE = 50;
 const CHAT_MAX_DESKTOP_WINDOWS = 3;
 let chatUiBound = false;
+let chatMobileViewportRaf = 0;
+let chatMobileViewportBaseHeight = 0;
+
+function resetMobileChatVisualViewport() {
+  if (chatMobileViewportRaf) {
+    cancelAnimationFrame(chatMobileViewportRaf);
+    chatMobileViewportRaf = 0;
+  }
+  chatMobileViewportBaseHeight = 0;
+  document.body.classList.remove("culao-chat-keyboard-open");
+  const panel = els.chatDirectoryPanel;
+  if (!panel) return;
+  ["--culao-chat-vv-top", "--culao-chat-vv-left", "--culao-chat-vv-width", "--culao-chat-vv-height"]
+    .forEach((name) => panel.style.removeProperty(name));
+}
+
+function updateMobileChatVisualViewport({ keepLatestMessageVisible = false } = {}) {
+  const panel = els.chatDirectoryPanel;
+  if (!panel || !isMobileChatLayout() || panel.classList.contains("hidden")) {
+    resetMobileChatVisualViewport();
+    return;
+  }
+
+  const viewport = window.visualViewport;
+  const viewportWidth = Math.max(1, Math.round(viewport?.width || document.documentElement.clientWidth || window.innerWidth || 1));
+  const viewportHeight = Math.max(1, Math.round(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 1));
+  const viewportTop = Math.max(0, Math.round(viewport?.offsetTop || 0));
+  const viewportLeft = Math.max(0, Math.round(viewport?.offsetLeft || 0));
+
+  panel.style.setProperty("--culao-chat-vv-top", `${viewportTop}px`);
+  panel.style.setProperty("--culao-chat-vv-left", `${viewportLeft}px`);
+  panel.style.setProperty("--culao-chat-vv-width", `${viewportWidth}px`);
+  panel.style.setProperty("--culao-chat-vv-height", `${viewportHeight}px`);
+
+  const inputFocused = document.activeElement === els.chatMobileInput;
+  if (!inputFocused) {
+    chatMobileViewportBaseHeight = viewportHeight;
+  } else if (!chatMobileViewportBaseHeight) {
+    chatMobileViewportBaseHeight = Math.max(viewportHeight, Math.round(window.innerHeight || viewportHeight));
+  }
+
+  const keyboardOpen = inputFocused
+    && chatMobileViewportBaseHeight > 0
+    && chatMobileViewportBaseHeight - viewportHeight > 80;
+  document.body.classList.toggle("culao-chat-keyboard-open", keyboardOpen);
+
+  if ((keyboardOpen || keepLatestMessageVisible) && !els.chatMobileConversationView?.classList.contains("hidden")) {
+    const messages = els.chatMobileMessages;
+    if (messages) messages.scrollTop = messages.scrollHeight;
+  }
+}
+
+function scheduleMobileChatVisualViewport(options = {}) {
+  if (chatMobileViewportRaf) cancelAnimationFrame(chatMobileViewportRaf);
+  chatMobileViewportRaf = requestAnimationFrame(() => {
+    chatMobileViewportRaf = 0;
+    updateMobileChatVisualViewport(options);
+  });
+}
 
 function getChatConversationId(uidA, uidB) {
   return [String(uidA || "").trim(), String(uidB || "").trim()]
@@ -2386,10 +2445,13 @@ function openChatDirectory() {
   els.chatToggleBtn?.setAttribute("aria-expanded", "true");
   els.chatDirectoryView?.classList.remove("hidden");
   els.chatMobileConversationView?.classList.add("hidden");
-  if (isMobileChatLayout()) document.body.classList.add("culao-chat-overlay-open");
+  if (isMobileChatLayout()) {
+    document.body.classList.add("culao-chat-overlay-open");
+    scheduleMobileChatVisualViewport();
+  }
   renderChatDirectory();
   loadChatUsers({ silent: true });
-  window.setTimeout(() => els.chatDirectorySearch?.focus(), 60);
+  if (!isMobileChatLayout()) window.setTimeout(() => els.chatDirectorySearch?.focus(), 60);
 }
 
 function closeChatDirectory() {
@@ -2398,6 +2460,7 @@ function closeChatDirectory() {
   els.chatToggleBtn?.setAttribute("aria-expanded", "false");
   document.body.classList.remove("culao-chat-overlay-open");
   closeMobileChatConversation({ returnToDirectory: false });
+  resetMobileChatVisualViewport();
 }
 
 function toggleChatDirectory() {
@@ -2661,7 +2724,8 @@ async function sendChatMessage(viewKey, recipientUid) {
       || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await sendChatMessageCallable({ recipientUid, text, clientMessageId });
     input.value = "";
-    input.focus();
+    input.focus({ preventScroll: true });
+    if (viewKey === "mobile") scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
   } catch (error) {
     console.error(error);
     toast(error.message || "Không gửi được tin nhắn.", "error");
@@ -2757,7 +2821,10 @@ function openMobileChatConversation({ conversationId, partnerUid = "", reviewMod
   els.chatMobileConversationView.classList.remove("hidden");
   els.chatMobileComposer?.classList.toggle("hidden", reviewMode);
   subscribeChatView({ viewKey: "mobile", conversationId, partnerUid, reviewMode, showSenderNames: reviewMode });
-  window.setTimeout(() => els.chatMobileInput?.focus(), 80);
+  // Không tự bật bàn phím khi vừa mở cuộc trò chuyện. Chỉ mở khi người dùng
+  // chủ động chạm vào ô nhập, giống hành vi của các ứng dụng nhắn tin.
+  els.chatMobileInput?.blur();
+  scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
 }
 
 function closeMobileChatConversation({ returnToDirectory = true } = {}) {
@@ -2766,7 +2833,10 @@ function closeMobileChatConversation({ returnToDirectory = true } = {}) {
   state.chatMobilePartnerUid = "";
   state.chatMobileReviewMode = false;
   els.chatMobileConversationView?.classList.add("hidden");
+  els.chatMobileInput?.blur();
+  document.body.classList.remove("culao-chat-keyboard-open");
   if (returnToDirectory) els.chatDirectoryView?.classList.remove("hidden");
+  scheduleMobileChatVisualViewport();
 }
 
 async function openChatWithUser(userUid) {
@@ -2964,7 +3034,25 @@ function bindChatUI() {
     if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
     event.preventDefault();
     await sendChatMessage("mobile", state.chatMobilePartnerUid);
+    scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
   });
+  els.chatMobileInput?.addEventListener("focus", () => {
+    scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
+    window.setTimeout(() => scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true }), 120);
+    window.setTimeout(() => scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true }), 360);
+  });
+  els.chatMobileInput?.addEventListener("blur", () => {
+    document.body.classList.remove("culao-chat-keyboard-open");
+    window.setTimeout(() => scheduleMobileChatVisualViewport(), 80);
+  });
+
+  const mobileChatViewportHandler = () => scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
+  window.visualViewport?.addEventListener("resize", mobileChatViewportHandler, { passive: true });
+  window.visualViewport?.addEventListener("scroll", mobileChatViewportHandler, { passive: true });
+  window.addEventListener("orientationchange", () => {
+    chatMobileViewportBaseHeight = 0;
+    window.setTimeout(mobileChatViewportHandler, 120);
+  }, { passive: true });
   els.chatAdminCloseBtn?.addEventListener("click", closeChatAdminModal);
   els.chatAdminModal?.querySelector("[data-chat-admin-close]")?.addEventListener("click", closeChatAdminModal);
   els.chatAdminSearch?.addEventListener("input", () => {
