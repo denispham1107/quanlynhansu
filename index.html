@@ -8491,8 +8491,23 @@
     .culao-chat-message-row.is-own { justify-content: flex-end; }
     .culao-chat-message-row.is-other { justify-content: flex-start; }
 
-    .culao-chat-bubble {
+    .culao-chat-message-stack {
+      display: flex;
+      min-width: 0;
       max-width: 82%;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .culao-chat-message-stack.has-media {
+      width: min(82%, 560px);
+    }
+
+    .culao-chat-message-row.is-own .culao-chat-message-stack { align-items: flex-end; }
+
+    .culao-chat-bubble {
+      max-width: 100%;
       padding: 9px 11px 7px;
       border-radius: 15px;
       background: #fff;
@@ -8503,9 +8518,11 @@
       box-shadow: 0 4px 12px rgba(15, 23, 42, .08);
     }
 
+    .culao-chat-message-stack.has-media .culao-chat-bubble { width: 100%; }
+
     .culao-chat-message-row.is-own .culao-chat-bubble {
       border-bottom-right-radius: 5px;
-      background: linear-gradient(135deg, #2563eb, #4f7df3);
+      background: linear-gradient(135deg, #7c3aed 0%, #f97316 52%, #2563eb 100%);
       color: #fff;
     }
 
@@ -8582,7 +8599,7 @@
       align-items: center;
       justify-content: center;
       border: 0;
-      background: #2563eb;
+      background: linear-gradient(135deg, #7c3aed 0%, #f97316 52%, #2563eb 100%);
       color: #fff;
       cursor: pointer;
       font-weight: 900;
@@ -8592,13 +8609,15 @@
       width: 40px;
       height: 42px;
       border-radius: 13px;
-      background: #eef4ff;
-      color: #2563eb;
-      border: 1px solid #bfdbfe;
+      background: linear-gradient(135deg, #f3e8ff 0%, #fff7ed 52%, #eff6ff 100%);
+      color: #7c3aed;
+      border: 1px solid #fdba74;
       font-size: 21px;
     }
 
-    .culao-chat-attach-btn:hover { background: #dbeafe; }
+    .culao-chat-attach-btn:hover {
+      background: linear-gradient(135deg, #ede9fe 0%, #ffedd5 52%, #dbeafe 100%);
+    }
     .culao-chat-attach-btn:disabled,
     .culao-chat-send-btn:disabled { opacity: .58; cursor: wait; }
 
@@ -8650,21 +8669,24 @@
 
     .culao-chat-media-actions {
       display: flex;
+      width: 100%;
       justify-content: flex-end;
-      margin: -1px 0 5px;
+      margin: 0;
+      padding: 0 2px;
     }
 
     .culao-chat-media-download-btn {
       display: inline-flex;
-      min-height: 32px;
+      min-height: 34px;
       align-items: center;
       justify-content: center;
-      gap: 5px;
-      padding: 5px 10px;
-      border: 1px solid #bfdbfe;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 1px solid #d8dee9;
       border-radius: 999px;
-      background: #eff6ff;
-      color: #1d4ed8;
+      background: #fff;
+      color: #334155;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, .10);
       font: inherit;
       font-size: 11px;
       font-weight: 900;
@@ -8676,25 +8698,15 @@
 
     .culao-chat-media-download-btn:hover,
     .culao-chat-media-download-btn:focus-visible {
-      border-color: #60a5fa;
-      background: #dbeafe;
+      border-color: #f59e0b;
+      background: #fff7ed;
+      color: #7c3aed;
       outline: none;
     }
 
     .culao-chat-media-download-btn:disabled {
       opacity: .68;
       cursor: wait;
-    }
-
-    .culao-chat-message-row.is-own .culao-chat-media-download-btn {
-      border-color: rgba(255, 255, 255, .45);
-      background: rgba(255, 255, 255, .16);
-      color: #fff;
-    }
-
-    .culao-chat-message-row.is-own .culao-chat-media-download-btn:hover,
-    .culao-chat-message-row.is-own .culao-chat-media-download-btn:focus-visible {
-      background: rgba(255, 255, 255, .26);
     }
 
     .culao-chat-caption { margin-top: 2px; }
@@ -8916,7 +8928,9 @@
       .culao-chat-admin-open { margin-bottom: 10px; }
       .culao-chat-mini-container { display: none; }
       .culao-chat-messages { padding: 16px 12px; }
-      .culao-chat-bubble { max-width: 86%; font-size: 14px; }
+      .culao-chat-message-stack { max-width: 86%; }
+      .culao-chat-message-stack.has-media { width: 86%; }
+      .culao-chat-bubble { font-size: 14px; }
       .culao-chat-composer {
         flex: 0 0 auto;
         padding: 8px 10px calc(8px + env(safe-area-inset-bottom));

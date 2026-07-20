@@ -2546,10 +2546,14 @@ function getChatAttachmentKind(attachment) {
   return "";
 }
 
-function renderChatAttachmentsHtml(message) {
-  const attachments = Array.isArray(message?.attachments)
+function getChatMessageAttachments(message) {
+  return Array.isArray(message?.attachments)
     ? message.attachments.filter((item) => item?.storagePath && getChatAttachmentKind(item))
     : [];
+}
+
+function renderChatAttachmentsHtml(message) {
+  const attachments = getChatMessageAttachments(message);
   if (!attachments.length) return "";
 
   return `
@@ -2591,6 +2595,12 @@ function renderChatAttachmentsHtml(message) {
         `;
       }).join("")}
     </div>
+  `;
+}
+
+function renderChatMediaActionsHtml(message) {
+  if (!getChatMessageAttachments(message).length) return "";
+  return `
     <div class="culao-chat-media-actions">
       <button class="culao-chat-media-download-btn" type="button" data-chat-media-download aria-label="Tải tất cả hình ảnh và video trong tin nhắn này">
         <span aria-hidden="true">⬇</span>
@@ -2635,10 +2645,10 @@ function getChatMediaDownloadFileName(attachment, index = 0) {
 }
 
 function collectChatMediaAttachmentsFromBubble(button) {
-  const bubble = button?.closest?.(".culao-chat-bubble");
-  if (!bubble) return [];
+  const messageStack = button?.closest?.(".culao-chat-message-stack");
+  if (!messageStack) return [];
   const seen = new Set();
-  return [...bubble.querySelectorAll("[data-chat-media-path]")]
+  return [...messageStack.querySelectorAll("[data-chat-media-path]")]
     .map((element) => ({
       storagePath: String(element.dataset.chatMediaPath || "").trim(),
       name: String(element.dataset.chatMediaName || "").trim(),
@@ -3014,16 +3024,20 @@ function renderChatMessages(viewKey, { preserveScroll = false, forceBottom = fal
         ? '<span class="culao-chat-receipt">Đã xem ✓✓</span>'
         : "";
       const attachmentHtml = renderChatAttachmentsHtml(message);
+      const mediaActionsHtml = renderChatMediaActionsHtml(message);
       const textHtml = message.text
         ? `<div class="${attachmentHtml ? "culao-chat-caption" : ""}">${escapeHtml(message.text).replace(/\n/g, "<br>")}</div>`
         : "";
       return `
         <div class="culao-chat-message-row ${own ? "is-own" : "is-other"}">
-          <div class="culao-chat-bubble">
-            ${showSender ? `<strong class="culao-chat-sender-name">${escapeHtml(senderName)}</strong>` : ""}
-            ${attachmentHtml}
-            ${textHtml}
-            <span class="culao-chat-message-meta">${escapeHtml(formatChatMessageTime(message.createdAt))}${receipt}</span>
+          <div class="culao-chat-message-stack ${attachmentHtml ? "has-media" : ""}">
+            <div class="culao-chat-bubble">
+              ${showSender ? `<strong class="culao-chat-sender-name">${escapeHtml(senderName)}</strong>` : ""}
+              ${attachmentHtml}
+              ${textHtml}
+              <span class="culao-chat-message-meta">${escapeHtml(formatChatMessageTime(message.createdAt))}${receipt}</span>
+            </div>
+            ${mediaActionsHtml}
           </div>
         </div>
       `;
