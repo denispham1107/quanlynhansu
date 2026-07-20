@@ -8725,7 +8725,7 @@ function canEmployeeUploadTaskPhotos(task, mode, displayStatus = null) {
   if (mode !== "employee") return false;
   if (!task?.id || task.assignedToUid !== state.user?.uid) return false;
   const visibleStatus = displayStatus || getDisplayStatus(task);
-  return ["doing", "lunch_break", "hotel", "redo", "overdue", "near_due"].includes(visibleStatus)
+  return ["doing", "ship", "lunch_break", "hotel", "redo", "overdue", "near_due"].includes(visibleStatus)
     && ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status);
 }
 

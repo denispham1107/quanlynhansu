@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260720-notification-overlay-fix-2";
+const CACHE_NAME = "culao-task-shell-v20260720-ship-photo-upload-fix-1";
 const APP_SHELL = [
   "./",
   "./index.html",
