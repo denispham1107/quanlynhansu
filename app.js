@@ -2549,21 +2549,44 @@ function renderChatAttachmentsHtml(message) {
         const kind = getChatAttachmentKind(attachment);
         const path = escapeHtml(String(attachment.storagePath || ""));
         const name = escapeHtml(String(attachment.name || (kind === "video" ? "Video" : "Hình ảnh")));
+        const contentType = escapeHtml(String(attachment.contentType || ""));
         if (kind === "video") {
           return `
             <div class="culao-chat-media-item" data-chat-media-container>
-              <video controls playsinline preload="metadata" data-chat-media-path="${path}" data-chat-media-kind="video" aria-label="${name}"></video>
+              <video
+                controls
+                playsinline
+                preload="metadata"
+                data-chat-media-path="${path}"
+                data-chat-media-kind="video"
+                data-chat-media-name="${name}"
+                data-chat-media-content-type="${contentType}"
+                aria-label="${name}"
+              ></video>
               <span class="culao-chat-media-loading">Đang tải video...</span>
             </div>
           `;
         }
         return `
           <button class="culao-chat-media-item" type="button" data-chat-media-open data-chat-media-view-path="${path}" data-chat-media-view-kind="image" data-chat-media-view-name="${name}" aria-label="Xem ${name}">
-            <img loading="lazy" alt="${name}" data-chat-media-path="${path}" data-chat-media-kind="image" />
+            <img
+              loading="lazy"
+              alt="${name}"
+              data-chat-media-path="${path}"
+              data-chat-media-kind="image"
+              data-chat-media-name="${name}"
+              data-chat-media-content-type="${contentType}"
+            />
             <span class="culao-chat-media-loading">Đang tải hình...</span>
           </button>
         `;
       }).join("")}
+    </div>
+    <div class="culao-chat-media-actions">
+      <button class="culao-chat-media-download-btn" type="button" data-chat-media-download aria-label="Tải tất cả hình ảnh và video trong tin nhắn này">
+        <span aria-hidden="true">⬇</span>
+        <span>Tải</span>
+      </button>
     </div>
   `;
 }
@@ -2578,6 +2601,157 @@ async function getChatMediaDownloadUrl(storagePath) {
     }));
   }
   return chatMediaUrlCache.get(path);
+}
+
+function getChatMediaFileExtension(contentType = "", kind = "") {
+  const type = String(contentType || "").toLowerCase();
+  if (type.includes("jpeg") || type.includes("jpg")) return ".jpg";
+  if (type.includes("png")) return ".png";
+  if (type.includes("webp")) return ".webp";
+  if (type.includes("gif")) return ".gif";
+  if (type.includes("heic") || type.includes("heif")) return ".heic";
+  if (type.includes("quicktime")) return ".mov";
+  if (type.includes("webm")) return ".webm";
+  if (type.includes("3gpp")) return ".3gp";
+  if (type.includes("mp4") || type.includes("m4v")) return ".mp4";
+  return kind === "video" ? ".mp4" : ".jpg";
+}
+
+function getChatMediaDownloadFileName(attachment, index = 0) {
+  const kind = String(attachment?.kind || "").toLowerCase() === "video" ? "video" : "image";
+  const fallback = kind === "video" ? `video-chat-${index + 1}` : `hinh-chat-${index + 1}`;
+  const safeName = sanitizeStorageFileName(attachment?.name || fallback);
+  if (/\.[a-zA-Z0-9]{2,6}$/.test(safeName)) return safeName;
+  return `${safeName}${getChatMediaFileExtension(attachment?.contentType, kind)}`;
+}
+
+function collectChatMediaAttachmentsFromBubble(button) {
+  const bubble = button?.closest?.(".culao-chat-bubble");
+  if (!bubble) return [];
+  const seen = new Set();
+  return [...bubble.querySelectorAll("[data-chat-media-path]")]
+    .map((element) => ({
+      storagePath: String(element.dataset.chatMediaPath || "").trim(),
+      name: String(element.dataset.chatMediaName || "").trim(),
+      kind: String(element.dataset.chatMediaKind || "").trim(),
+      contentType: String(element.dataset.chatMediaContentType || "").trim()
+    }))
+    .filter((item) => {
+      if (!item.storagePath || seen.has(item.storagePath)) return false;
+      seen.add(item.storagePath);
+      return true;
+    });
+}
+
+async function getChatMediaBlobForDownload(attachment) {
+  const storagePath = String(attachment?.storagePath || "").trim();
+  if (!storagePath) throw new Error("Đường dẫn tệp Chat không hợp lệ.");
+  const errors = [];
+
+  try {
+    const blob = await getBlob(storageRef(storage, storagePath));
+    if (blob instanceof Blob) return blob;
+  } catch (error) {
+    errors.push(error?.message || String(error));
+  }
+
+  try {
+    const url = await getChatMediaDownloadUrl(storagePath);
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.blob();
+  } catch (error) {
+    errors.push(error?.message || String(error));
+  }
+
+  throw new Error(errors.filter(Boolean).join(" | ") || "Không tải được tệp Chat.");
+}
+
+function makeChatMediaZipFileName() {
+  const now = new Date();
+  const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+  const time = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+  return `culao-task-chat-media-${date}-${time}.zip`;
+}
+
+async function downloadAllChatMediaFromButton(button) {
+  const attachments = collectChatMediaAttachmentsFromBubble(button);
+  if (!attachments.length) {
+    toast("Không tìm thấy hình ảnh hoặc video để tải.", "error");
+    return;
+  }
+
+  const idleHtml = button.innerHTML;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+
+  try {
+    if (attachments.length === 1) {
+      button.textContent = "Đang tải...";
+      const blob = await getChatMediaBlobForDownload(attachments[0]);
+      downloadBlobFile(blob, getChatMediaDownloadFileName(attachments[0], 0));
+      toast("Đã tải tệp Chat về thiết bị.", "success");
+      return;
+    }
+
+    if (!window.JSZip) {
+      throw new Error("Chưa tải được thư viện tạo file ZIP. Vui lòng tải lại trang rồi thử lại.");
+    }
+
+    const zip = new window.JSZip();
+    const usedNames = new Set();
+    const failedFiles = [];
+    let successCount = 0;
+
+    for (let index = 0; index < attachments.length; index += 1) {
+      const attachment = attachments[index];
+      button.textContent = `Đang tải ${index + 1}/${attachments.length}...`;
+      try {
+        const blob = await getChatMediaBlobForDownload(attachment);
+        const fileName = makeUniqueZipFileName(
+          usedNames,
+          `${String(index + 1).padStart(2, "0")}-${getChatMediaDownloadFileName(attachment, index)}`
+        );
+        zip.file(fileName, blob, { binary: true, compression: "STORE" });
+        successCount += 1;
+      } catch (error) {
+        console.error("Không tải được tệp Chat để tạo ZIP:", attachment, error);
+        failedFiles.push(`${attachment.name || `Tệp ${index + 1}`}: ${error?.message || "Không rõ lỗi"}`);
+      }
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    }
+
+    if (!successCount) {
+      throw new Error("Không tải được tệp Chat nào. Hãy kiểm tra kết nối mạng và thử lại.");
+    }
+
+    if (failedFiles.length) {
+      zip.file("tep-khong-tai-duoc.txt", failedFiles.join("\n"), { compression: "STORE" });
+    }
+
+    button.textContent = "Đang tạo ZIP 0%...";
+    const zipBlob = await zip.generateAsync(
+      { type: "blob", compression: "STORE", streamFiles: true },
+      (metadata) => {
+        if (button.isConnected) button.textContent = `Đang tạo ZIP ${Math.round(metadata.percent || 0)}%...`;
+      }
+    );
+
+    downloadBlobFile(zipBlob, makeChatMediaZipFileName());
+    toast(
+      `Đã tải ${successCount}/${attachments.length} tệp Chat trong file ZIP.`,
+      failedFiles.length ? "warning" : "success"
+    );
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không tải được hình ảnh và video Chat.", "error");
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.innerHTML = idleHtml;
+    }
+  }
 }
 
 function hydrateChatMediaElements(root) {
@@ -3564,7 +3738,15 @@ function bindChatUI() {
     if (event.target === els.chatMediaViewer) closeChatMediaViewer();
   });
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
+    const downloadButton = event.target.closest("[data-chat-media-download]");
+    if (downloadButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      await downloadAllChatMediaFromButton(downloadButton);
+      return;
+    }
+
     const mediaButton = event.target.closest("[data-chat-media-open]");
     if (mediaButton) {
       openChatMediaViewer(
