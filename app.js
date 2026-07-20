@@ -2768,7 +2768,7 @@ async function sendChatMessage(viewKey, recipientUid) {
   const elements = getChatViewElements(viewKey);
   const input = elements.input;
   const form = elements.form;
-  if (!view || view.reviewMode || !input || !recipientUid) return;
+  if (!view || view.reviewMode || !input || !recipientUid || view.sending === true) return;
 
   const text = getChatInputText(input).trim();
   if (!text) return;
@@ -2777,19 +2777,38 @@ async function sendChatMessage(viewKey, recipientUid) {
     return;
   }
 
-  const sendButton = form?.querySelector('[type="submit"]');
+  const sendButton = form?.querySelector(".culao-chat-send-btn")
+    || form?.querySelector('[type="submit"]');
+  view.sending = true;
   setButtonLoading(sendButton, true, "Đang gửi...");
   try {
     const clientMessageId = window.crypto?.randomUUID?.()
       || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await sendChatMessageCallable({ recipientUid, text, clientMessageId });
     clearChatInput(input);
-    input.focus({ preventScroll: true });
+
+    // Trên iOS, giữ focus ngay trong vùng nhập để bàn phím không bị trượt xuống
+    // khi người dùng bấm nút Gửi nằm ngoài contenteditable.
+    window.requestAnimationFrame(() => {
+      try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); }
+      if (input.isContentEditable) {
+        const selection = window.getSelection?.();
+        const range = document.createRange?.();
+        if (selection && range) {
+          range.selectNodeContents(input);
+          range.collapse(false);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      }
+    });
+
     if (viewKey === "mobile") scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
   } catch (error) {
     console.error(error);
     toast(error.message || "Không gửi được tin nhắn.", "error");
   } finally {
+    view.sending = false;
     setButtonLoading(sendButton, false);
   }
 }
@@ -3086,9 +3105,36 @@ function bindChatUI() {
   els.chatMobileBackBtn?.addEventListener("click", () => closeMobileChatConversation());
   els.chatMobileCloseBtn?.addEventListener("click", closeChatDirectory);
   els.chatMobileLoadMoreBtn?.addEventListener("click", () => loadOlderChatMessages("mobile"));
-  els.chatMobileComposer?.querySelector(".culao-chat-send-btn")?.addEventListener("click", async () => {
+
+  // iOS có thể làm mất focus của contenteditable ngay khi chạm nút Gửi,
+  // khiến lần chạm đầu chỉ đóng bàn phím và sự kiện click bị nuốt. Gửi ngay từ
+  // pointerdown/touchstart và preventDefault để giữ bàn phím mở.
+  const mobileSendButton = els.chatMobileComposer?.querySelector(".culao-chat-send-btn");
+  let mobileSendHandledAt = 0;
+  const handleMobileSendPress = async (event) => {
+    if (event?.cancelable) event.preventDefault();
+    event?.stopPropagation?.();
+    mobileSendHandledAt = Date.now();
     await sendChatMessage("mobile", state.chatMobilePartnerUid);
-  });
+  };
+
+  if (mobileSendButton) {
+    if ("PointerEvent" in window) {
+      mobileSendButton.addEventListener("pointerdown", handleMobileSendPress, { passive: false });
+    } else {
+      mobileSendButton.addEventListener("touchstart", handleMobileSendPress, { passive: false });
+    }
+    mobileSendButton.addEventListener("click", async (event) => {
+      // Click là phương án dự phòng cho bàn phím/mouse; bỏ qua click phát sinh
+      // ngay sau pointerdown để tránh gửi trùng.
+      if (Date.now() - mobileSendHandledAt < 900) {
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
+      await handleMobileSendPress(event);
+    });
+  }
+
   els.chatMobileInput?.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
     event.preventDefault();
