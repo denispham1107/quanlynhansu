@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260720-employee-status-below-unassigned-1";
+const CACHE_NAME = "culao-task-shell-v20260720-internal-chat-v1";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -73,10 +73,14 @@ self.addEventListener("push", (event) => {
   const title = data.title || notification.title || "Culao Task";
   const body = data.body || data.message || notification.body || "Bạn có thông báo mới.";
   const taskId = data.taskId || "";
+  const chatConversationId = data.chatConversationId || "";
+  const chatPartnerUid = data.chatPartnerUid || "";
   const notificationId = data.notificationId || "";
-  const fallbackUrl = taskId
-    ? `./?taskId=${encodeURIComponent(taskId)}&notificationId=${encodeURIComponent(notificationId)}`
-    : "./";
+  const fallbackUrl = chatConversationId
+    ? `./?chatId=${encodeURIComponent(chatConversationId)}&chatWith=${encodeURIComponent(chatPartnerUid)}&notificationId=${encodeURIComponent(notificationId)}`
+    : taskId
+      ? `./?taskId=${encodeURIComponent(taskId)}&notificationId=${encodeURIComponent(notificationId)}`
+      : "./";
   const url = data.url || notification?.data?.url || fallbackUrl;
 
   event.waitUntil(
@@ -84,11 +88,13 @@ self.addEventListener("push", (event) => {
       body,
       icon: "./icon-192.png",
       badge: "./notification-badge.png",
-      tag: notificationId || taskId || `culao-task-${Date.now()}`,
+      tag: notificationId || chatConversationId || taskId || `culao-task-${Date.now()}`,
       renotify: false,
       data: {
         url,
         taskId,
+        chatConversationId,
+        chatPartnerUid,
         notificationId
       }
     })
@@ -110,6 +116,8 @@ self.addEventListener("notificationclick", (event) => {
           client.postMessage({
             type: "SHOP_TASK_PUSH_OPEN",
             taskId: event.notification?.data?.taskId || "",
+            chatConversationId: event.notification?.data?.chatConversationId || "",
+            chatPartnerUid: event.notification?.data?.chatPartnerUid || "",
             notificationId: event.notification?.data?.notificationId || ""
           });
           return;

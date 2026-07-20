@@ -26,7 +26,9 @@ import {
   arrayUnion,
   writeBatch,
   runTransaction,
-  increment
+  increment,
+  limit,
+  startAfter
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   getStorage,
@@ -82,6 +84,11 @@ const unregisterWebPushTokenCallable = httpsCallable(
   functions,
   "unregisterWebPushToken"
 );
+const getChatUsersCallable = httpsCallable(functions, "getChatUsers");
+const ensureChatConversationCallable = httpsCallable(functions, "ensureChatConversation");
+const sendChatMessageCallable = httpsCallable(functions, "sendChatMessage");
+const markChatConversationReadCallable = httpsCallable(functions, "markChatConversationRead");
+const deleteChatConversationCallable = httpsCallable(functions, "deleteChatConversation");
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -183,7 +190,23 @@ const state = {
   pushToken: "",
   pushTokenOwnerUid: "",
   pushForegroundUnsubscribe: null,
-  pendingPushTaskId: ""
+  pendingPushTaskId: "",
+  pendingPushConversationId: "",
+  pendingPushChatPartnerUid: "",
+  chatUsers: [],
+  chatConversations: [],
+  chatConversationMap: new Map(),
+  chatViewStates: new Map(),
+  chatDirectoryOpen: false,
+  chatDirectoryFilter: "all",
+  chatSearchText: "",
+  chatAdminSearchText: "",
+  chatMobileConversationId: "",
+  chatMobilePartnerUid: "",
+  chatMobileReviewMode: false,
+  chatOpenDesktopIds: [],
+  chatReadRequestsInFlight: new Set(),
+  chatUsersLoading: false
 };
 
 
@@ -480,6 +503,30 @@ const els = {
   notificationBadge: $("#notificationBadge"),
   markAllNotificationsReadBtn: $("#markAllNotificationsReadBtn"),
   deleteAllNotificationsBtn: $("#deleteAllNotificationsBtn"),
+  chatToggleBtn: $("#chatToggleBtn"),
+  chatUnreadBadge: $("#chatUnreadBadge"),
+  chatDirectoryPanel: $("#chatDirectoryPanel"),
+  chatDirectoryView: $("#chatDirectoryView"),
+  chatDirectorySearch: $("#chatDirectorySearch"),
+  chatDirectoryList: $("#chatDirectoryList"),
+  chatDirectoryAllTab: $("#chatDirectoryAllTab"),
+  chatDirectoryUnreadTab: $("#chatDirectoryUnreadTab"),
+  chatDirectoryCloseBtn: $("#chatDirectoryCloseBtn"),
+  openChatAdminBtn: $("#openChatAdminBtn"),
+  chatMobileConversationView: $("#chatMobileConversationView"),
+  chatMobileBackBtn: $("#chatMobileBackBtn"),
+  chatMobileCloseBtn: $("#chatMobileCloseBtn"),
+  chatMobileTitle: $("#chatMobileTitle"),
+  chatMobileSubtitle: $("#chatMobileSubtitle"),
+  chatMobileMessages: $("#chatMobileMessages"),
+  chatMobileLoadMoreBtn: $("#chatMobileLoadMoreBtn"),
+  chatMobileComposer: $("#chatMobileComposer"),
+  chatMobileInput: $("#chatMobileInput"),
+  chatMiniContainer: $("#chatMiniContainer"),
+  chatAdminModal: $("#chatAdminModal"),
+  chatAdminCloseBtn: $("#chatAdminCloseBtn"),
+  chatAdminSearch: $("#chatAdminSearch"),
+  chatAdminConversationList: $("#chatAdminConversationList"),
   extendTimeModal: $("#extendTimeModal"),
   extendTimeForm: $("#extendTimeForm"),
   extendTimeTaskTitle: $("#extendTimeTaskTitle"),
@@ -1517,14 +1564,23 @@ async function showSystemNotification(notification) {
   if (!notificationSupported() || Notification.permission !== "granted") return;
 
   const title = notification.title || "Culao Task";
+  const chatConversationId = notification.chatConversationId || "";
+  const chatPartnerUid = notification.chatSenderUid || notification.actorUid || "";
+  const targetUrl = chatConversationId
+    ? `./?chatId=${encodeURIComponent(chatConversationId)}&chatWith=${encodeURIComponent(chatPartnerUid)}`
+    : notification.taskId
+      ? `./?taskId=${encodeURIComponent(notification.taskId)}`
+      : "./";
   const options = {
     body: notification.message || "Bạn có thông báo mới.",
     icon: "./icon-192.png",
     badge: "./notification-badge.png",
-    tag: notification.id || notification.taskId || `${Date.now()}`,
+    tag: notification.id || chatConversationId || notification.taskId || `${Date.now()}`,
     data: {
-      url: notification.taskId ? `./?taskId=${encodeURIComponent(notification.taskId)}` : "./",
-      taskId: notification.taskId || null
+      url: targetUrl,
+      taskId: notification.taskId || null,
+      chatConversationId: chatConversationId || null,
+      chatPartnerUid: chatPartnerUid || null
     }
   };
 
@@ -1571,13 +1627,25 @@ function queuePushTaskOpen(taskId) {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "SHOP_TASK_PUSH_OPEN") {
-      queuePushTaskOpen(event.data.taskId || "");
+      const chatConversationId = event.data.chatConversationId || "";
+      if (chatConversationId) {
+        queuePushChatOpen(chatConversationId, event.data.chatPartnerUid || "");
+      } else {
+        queuePushTaskOpen(event.data.taskId || "");
+      }
     }
   });
 }
 
-const initialPushTaskId = new URLSearchParams(window.location.search).get("taskId") || "";
+const initialUrlParams = new URLSearchParams(window.location.search);
+const initialPushTaskId = initialUrlParams.get("taskId") || "";
+const initialPushConversationId = initialUrlParams.get("chatId") || "";
+const initialPushChatPartnerUid = initialUrlParams.get("chatWith") || "";
 if (initialPushTaskId) state.pendingPushTaskId = initialPushTaskId;
+if (initialPushConversationId) {
+  state.pendingPushConversationId = initialPushConversationId;
+  state.pendingPushChatPartnerUid = initialPushChatPartnerUid;
+}
 
 function setMobileTopbarMenuOpen(open) {
   const shouldOpen = Boolean(open);
@@ -1596,6 +1664,7 @@ function setMobileDataMenuOpen(open) {
 
 els.mobileTopbarMenuBtn?.addEventListener("click", (event) => {
   event.stopPropagation();
+  closeChatDirectory();
   const shouldOpen = !els.mobileTopbarMenu?.classList.contains("is-open");
   setMobileDataMenuOpen(false);
   els.notificationPanel?.classList.add("hidden");
@@ -1614,6 +1683,7 @@ els.mobileLogoutBtn?.addEventListener("click", () => {
 
 els.mobileDataMenuBtn?.addEventListener("click", (event) => {
   event.stopPropagation();
+  closeChatDirectory();
   const shouldOpen = !els.mobileDataMenu?.classList.contains("is-open");
   setMobileTopbarMenuOpen(false);
   setMobileDataMenuOpen(shouldOpen);
@@ -1624,6 +1694,7 @@ els.mobileDataMenuBtn?.addEventListener("click", (event) => {
 });
 
 els.notificationBellBtn?.addEventListener("click", () => {
+  closeChatDirectory();
   setMobileTopbarMenuOpen(false);
   setMobileDataMenuOpen(false);
   els.notificationPanel.classList.toggle("hidden");
@@ -1695,6 +1766,11 @@ function setupNotificationListener() {
 
         const notification = { id: change.doc.id, ...change.doc.data() };
         state.knownNotificationIds.add(change.doc.id);
+
+        if (notification.chatConversationId && isChatConversationVisible(notification.chatConversationId)) {
+          markNotificationRead(notification.id);
+          return;
+        }
 
         toast(notification.message || notification.title || "Bạn có thông báo mới.", "info");
         showSystemNotification(notification);
@@ -1895,6 +1971,11 @@ async function openNotificationTarget(notificationId) {
 
   els.notificationPanel?.classList.add("hidden");
 
+  if (notification.chatConversationId) {
+    await openChatConversationFromNotification(notification);
+    return;
+  }
+
   if (!notification.taskId) {
     toast("Thông báo này chưa có vị trí công việc để mở.", "info");
     return;
@@ -1957,6 +2038,921 @@ async function createNotifications(items) {
     toast("Thao tác chính đã xong nhưng chưa ghi được thông báo. Kiểm tra Firestore Rules notifications.", "error");
   }
 }
+
+// =========================
+// Chat nội bộ 1-1
+// =========================
+const CHAT_PAGE_SIZE = 50;
+const CHAT_MAX_DESKTOP_WINDOWS = 3;
+let chatUiBound = false;
+
+function getChatConversationId(uidA, uidB) {
+  return [String(uidA || "").trim(), String(uidB || "").trim()]
+    .filter(Boolean)
+    .sort()
+    .map((uid) => encodeURIComponent(uid))
+    .join("::");
+}
+
+function isMobileChatLayout() {
+  return window.matchMedia?.("(max-width: 768px)")?.matches === true;
+}
+
+function getChatUser(uid) {
+  const normalizedUid = String(uid || "").trim();
+  if (!normalizedUid) return null;
+  if (normalizedUid === state.user?.uid) {
+    return {
+      uid: normalizedUid,
+      name: state.profile?.name || state.user?.email || "Tôi",
+      email: state.profile?.email || state.user?.email || "",
+      role: state.profile?.role || "employee"
+    };
+  }
+  return state.chatUsers.find((item) => item.uid === normalizedUid) || null;
+}
+
+function getChatUserName(uid, conversation = null) {
+  const user = getChatUser(uid);
+  if (user?.name) return user.name;
+  const storedName = conversation?.participantNames?.[uid];
+  return storedName || "Tài khoản";
+}
+
+function getChatUserRole(uid, conversation = null) {
+  const user = getChatUser(uid);
+  const role = user?.role || conversation?.participantRoles?.[uid] || "employee";
+  return getRoleDisplayName(role);
+}
+
+function getChatConversation(conversationId) {
+  return state.chatConversationMap.get(conversationId) || null;
+}
+
+function getChatPartnerUid(conversation, currentUid = state.user?.uid) {
+  const participants = Array.isArray(conversation?.participantIds)
+    ? conversation.participantIds
+    : [];
+  return participants.find((uid) => uid !== currentUid) || "";
+}
+
+function getChatUnreadCount(conversation, uid = state.user?.uid) {
+  const value = Number(conversation?.unreadCounts?.[uid] || 0);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function getChatTimestampMs(value) {
+  return timestampToDate(value)?.getTime() || 0;
+}
+
+function formatChatListTime(value) {
+  const date = timestampToDate(value);
+  if (!date) return "";
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  }
+  return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
+}
+
+function formatChatMessageTime(value) {
+  const date = timestampToDate(value);
+  if (!date) return "Đang gửi...";
+  return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function chatAvatarHtml(user, conversation = null) {
+  const name = user?.name || getChatUserName(user?.uid, conversation) || "Tài khoản";
+  const avatarInitials = initials(name);
+  const role = user?.role || conversation?.participantRoles?.[user?.uid] || "employee";
+  return `<span class="culao-chat-avatar role-${escapeHtml(role)}" aria-hidden="true">${escapeHtml(avatarInitials)}</span>`;
+}
+
+function totalChatUnreadCount() {
+  if (!state.user) return 0;
+  return state.chatConversations.reduce((sum, item) => {
+    if (!Array.isArray(item.participantIds) || !item.participantIds.includes(state.user.uid)) return sum;
+    return sum + getChatUnreadCount(item);
+  }, 0);
+}
+
+function updateChatUnreadBadge() {
+  const unread = totalChatUnreadCount();
+  if (!els.chatUnreadBadge) return;
+  els.chatUnreadBadge.textContent = unread > 99 ? "99+" : String(unread);
+  els.chatUnreadBadge.classList.toggle("hidden", unread === 0);
+  els.chatToggleBtn?.setAttribute("aria-label", unread ? `Chat, ${unread} tin chưa đọc` : "Chat");
+}
+
+async function loadChatUsers({ silent = false } = {}) {
+  if (!state.user || state.chatUsersLoading) return;
+  state.chatUsersLoading = true;
+  if (!silent) renderChatDirectory();
+
+  try {
+    const response = await getChatUsersCallable();
+    const users = Array.isArray(response.data?.users) ? response.data.users : [];
+    state.chatUsers = users
+      .filter((item) => item?.uid && item.uid !== state.user.uid)
+      .map((item) => ({
+        uid: String(item.uid),
+        name: String(item.name || item.email || "Tài khoản"),
+        email: String(item.email || ""),
+        role: ["admin", "supervisor", "employee"].includes(item.role) ? item.role : "employee"
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+    renderChatDirectory();
+  } catch (error) {
+    console.error("Không tải được danh sách Chat:", error);
+    if (!silent) toast(error.message || "Không tải được danh sách tài khoản Chat.", "error");
+  } finally {
+    state.chatUsersLoading = false;
+    renderChatDirectory();
+  }
+}
+
+function setupChatConversationListener() {
+  if (!state.user) return;
+  const conversationsRef = collection(db, "chatConversations");
+  const conversationsQuery = isAdminProfile()
+    ? conversationsRef
+    : query(conversationsRef, where("participantIds", "array-contains", state.user.uid));
+
+  const unsubscribe = onSnapshot(
+    conversationsQuery,
+    (snapshot) => {
+      const conversations = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .sort((a, b) => getChatTimestampMs(b.lastMessageAt || b.updatedAt) - getChatTimestampMs(a.lastMessageAt || a.updatedAt));
+
+      state.chatConversations = conversations;
+      state.chatConversationMap = new Map(conversations.map((item) => [item.id, item]));
+      updateChatUnreadBadge();
+      renderChatDirectory();
+      renderChatAdminConversations();
+      refreshAllChatViews();
+      markVisibleChatConversationsRead();
+
+      if (state.pendingPushConversationId) {
+        queuePushChatOpen(state.pendingPushConversationId, state.pendingPushChatPartnerUid);
+      }
+    },
+    (error) => {
+      console.error("Không đọc được cuộc trò chuyện:", error);
+      toast("Không đọc được Chat. Hãy deploy Firestore Rules mới.", "error");
+    }
+  );
+
+  state.unsubs.push(unsubscribe);
+}
+
+async function setupChatFeature() {
+  if (!state.user) return;
+  bindChatUI();
+  updateChatUnreadBadge();
+  renderChatDirectory();
+  setupChatConversationListener();
+  await loadChatUsers({ silent: true });
+  if (state.pendingPushConversationId) {
+    queuePushChatOpen(state.pendingPushConversationId, state.pendingPushChatPartnerUid);
+  }
+}
+
+function cleanupChatFeature() {
+  state.chatViewStates?.forEach((view) => {
+    try { view.unsubscribe?.(); } catch (_) { /* no-op */ }
+  });
+  state.chatViewStates = new Map();
+  state.chatOpenDesktopIds = [];
+  if (els.chatMiniContainer) els.chatMiniContainer.innerHTML = "";
+  els.chatDirectoryPanel?.classList.add("hidden");
+  els.chatAdminModal?.classList.add("hidden");
+  els.chatMobileConversationView?.classList.add("hidden");
+  els.chatDirectoryView?.classList.remove("hidden");
+  document.body.classList.remove("culao-chat-overlay-open");
+}
+
+function setChatDirectoryFilter(filter) {
+  state.chatDirectoryFilter = filter === "unread" ? "unread" : "all";
+  els.chatDirectoryAllTab?.classList.toggle("is-active", state.chatDirectoryFilter === "all");
+  els.chatDirectoryUnreadTab?.classList.toggle("is-active", state.chatDirectoryFilter === "unread");
+  renderChatDirectory();
+}
+
+function renderChatDirectory() {
+  if (!els.chatDirectoryList) return;
+  if (state.chatUsersLoading && !state.chatUsers.length) {
+    els.chatDirectoryList.innerHTML = '<div class="culao-chat-empty">Đang tải danh sách tài khoản...</div>';
+    return;
+  }
+
+  const search = normalizeSearchText(state.chatSearchText || "");
+  const rows = state.chatUsers
+    .map((user) => {
+      const conversationId = getChatConversationId(state.user?.uid, user.uid);
+      const conversation = getChatConversation(conversationId);
+      return { user, conversationId, conversation, unread: getChatUnreadCount(conversation) };
+    })
+    .filter((item) => {
+      if (state.chatDirectoryFilter === "unread" && item.unread <= 0) return false;
+      if (!search) return true;
+      return normalizeSearchText(`${item.user.name} ${item.user.email} ${getRoleDisplayName(item.user.role)}`).includes(search);
+    })
+    .sort((a, b) => {
+      const timeDiff = getChatTimestampMs(b.conversation?.lastMessageAt) - getChatTimestampMs(a.conversation?.lastMessageAt);
+      if (timeDiff) return timeDiff;
+      return a.user.name.localeCompare(b.user.name, "vi");
+    });
+
+  els.openChatAdminBtn?.classList.toggle("hidden", !isAdminProfile());
+
+  if (!rows.length) {
+    els.chatDirectoryList.innerHTML = `<div class="culao-chat-empty">${state.chatDirectoryFilter === "unread" ? "Không có tin nhắn chưa đọc." : "Không tìm thấy tài khoản phù hợp."}</div>`;
+    return;
+  }
+
+  els.chatDirectoryList.innerHTML = rows.map(({ user, conversationId, conversation, unread }) => {
+    const preview = conversation?.lastMessage || "Bắt đầu trò chuyện";
+    const senderPrefix = conversation?.lastSenderId === state.user?.uid ? "Bạn: " : "";
+    return `
+      <button class="culao-chat-contact ${unread ? "has-unread" : ""}" type="button" data-chat-action="open-user" data-chat-user-id="${escapeHtml(user.uid)}" data-chat-conversation-id="${escapeHtml(conversationId)}">
+        ${chatAvatarHtml(user)}
+        <span class="culao-chat-contact-copy">
+          <span class="culao-chat-contact-line">
+            <strong>${escapeHtml(user.name)}</strong>
+            <time>${escapeHtml(formatChatListTime(conversation?.lastMessageAt))}</time>
+          </span>
+          <span class="culao-chat-contact-role">${escapeHtml(getRoleDisplayName(user.role))}</span>
+          <span class="culao-chat-contact-preview">${escapeHtml(senderPrefix + preview)}</span>
+        </span>
+        ${unread ? `<span class="culao-chat-count">${unread > 99 ? "99+" : unread}</span>` : ""}
+      </button>
+    `;
+  }).join("");
+}
+
+function openChatDirectory() {
+  if (!state.user || !els.chatDirectoryPanel) return;
+  state.chatDirectoryOpen = true;
+  els.notificationPanel?.classList.add("hidden");
+  setMobileTopbarMenuOpen(false);
+  setMobileDataMenuOpen(false);
+  els.chatDirectoryPanel.classList.remove("hidden");
+  els.chatToggleBtn?.setAttribute("aria-expanded", "true");
+  els.chatDirectoryView?.classList.remove("hidden");
+  els.chatMobileConversationView?.classList.add("hidden");
+  if (isMobileChatLayout()) document.body.classList.add("culao-chat-overlay-open");
+  renderChatDirectory();
+  loadChatUsers({ silent: true });
+  window.setTimeout(() => els.chatDirectorySearch?.focus(), 60);
+}
+
+function closeChatDirectory() {
+  state.chatDirectoryOpen = false;
+  els.chatDirectoryPanel?.classList.add("hidden");
+  els.chatToggleBtn?.setAttribute("aria-expanded", "false");
+  document.body.classList.remove("culao-chat-overlay-open");
+  closeMobileChatConversation({ returnToDirectory: false });
+}
+
+function toggleChatDirectory() {
+  if (els.chatDirectoryPanel?.classList.contains("hidden")) openChatDirectory();
+  else closeChatDirectory();
+}
+
+function getChatViewElements(viewKey) {
+  if (viewKey === "mobile") {
+    return {
+      root: els.chatMobileConversationView,
+      messages: els.chatMobileMessages,
+      loadMore: els.chatMobileLoadMoreBtn,
+      form: els.chatMobileComposer,
+      input: els.chatMobileInput
+    };
+  }
+  const safeKey = window.CSS?.escape ? CSS.escape(viewKey) : viewKey.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  const root = document.querySelector(`[data-chat-view-key="${safeKey}"]`);
+  return {
+    root,
+    messages: root?.querySelector("[data-chat-messages]"),
+    loadMore: root?.querySelector("[data-chat-load-more]"),
+    form: root?.querySelector("[data-chat-composer]"),
+    input: root?.querySelector("[data-chat-input]")
+  };
+}
+
+function unsubscribeChatView(viewKey) {
+  const view = state.chatViewStates.get(viewKey);
+  if (!view) return;
+  try { view.unsubscribe?.(); } catch (_) { /* no-op */ }
+  state.chatViewStates.delete(viewKey);
+}
+
+function getMergedChatMessages(view) {
+  const map = new Map();
+  [...(view.olderMessages || []), ...(view.realtimeMessages || [])].forEach((message) => {
+    if (message?.id) map.set(message.id, message);
+  });
+  return [...map.values()].sort((a, b) => getChatTimestampMs(a.createdAt) - getChatTimestampMs(b.createdAt));
+}
+
+function isChatMessageReadByRecipient(message, conversation) {
+  if (!message || message.senderId !== state.user?.uid) return false;
+  const otherUid = message.receiverId || getChatPartnerUid(conversation);
+  const readAt = conversation?.readAtBy?.[otherUid];
+  return getChatTimestampMs(readAt) >= getChatTimestampMs(message.createdAt) && getChatTimestampMs(message.createdAt) > 0;
+}
+
+function renderChatMessages(viewKey, { preserveScroll = false, forceBottom = false } = {}) {
+  const view = state.chatViewStates.get(viewKey);
+  const elements = getChatViewElements(viewKey);
+  if (!view || !elements.messages) return;
+
+  const conversation = getChatConversation(view.conversationId);
+  const messages = getMergedChatMessages(view);
+  const previousHeight = elements.messages.scrollHeight;
+  const previousTop = elements.messages.scrollTop;
+  const wasNearBottom = previousHeight - previousTop - elements.messages.clientHeight < 90;
+
+  if (!messages.length) {
+    elements.messages.innerHTML = '<div class="culao-chat-empty culao-chat-message-empty">Chưa có tin nhắn. Hãy gửi lời nhắn đầu tiên.</div>';
+  } else {
+    elements.messages.innerHTML = messages.map((message, index) => {
+      const own = message.senderId === state.user?.uid;
+      const senderName = getChatUserName(message.senderId, conversation);
+      const showSender = view.reviewMode || (!own && view.showSenderNames);
+      const receipt = index === messages.length - 1 && own && isChatMessageReadByRecipient(message, conversation)
+        ? '<span class="culao-chat-receipt">Đã xem ✓✓</span>'
+        : "";
+      return `
+        <div class="culao-chat-message-row ${own ? "is-own" : "is-other"}">
+          <div class="culao-chat-bubble">
+            ${showSender ? `<strong class="culao-chat-sender-name">${escapeHtml(senderName)}</strong>` : ""}
+            <div>${escapeHtml(message.text || "").replace(/\n/g, "<br>")}</div>
+            <span class="culao-chat-message-meta">${escapeHtml(formatChatMessageTime(message.createdAt))}${receipt}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  if (elements.loadMore) {
+    elements.loadMore.classList.toggle("hidden", !view.hasMore);
+    elements.loadMore.disabled = view.loadingOlder === true;
+    elements.loadMore.textContent = view.loadingOlder ? "Đang tải..." : "Tải tin nhắn cũ";
+  }
+
+  if (preserveScroll) {
+    const nextHeight = elements.messages.scrollHeight;
+    elements.messages.scrollTop = previousTop + (nextHeight - previousHeight);
+  } else if (forceBottom || wasNearBottom || !view.hasRendered) {
+    elements.messages.scrollTop = elements.messages.scrollHeight;
+  }
+  view.hasRendered = true;
+}
+
+function subscribeChatView({ viewKey, conversationId, partnerUid = "", reviewMode = false, showSenderNames = false }) {
+  unsubscribeChatView(viewKey);
+  const view = {
+    viewKey,
+    conversationId,
+    partnerUid,
+    reviewMode,
+    showSenderNames,
+    realtimeMessages: [],
+    olderMessages: [],
+    nextCursor: null,
+    hasMore: false,
+    loadingOlder: false,
+    hasRendered: false,
+    unsubscribe: null
+  };
+  state.chatViewStates.set(viewKey, view);
+
+  const messagesQuery = query(
+    collection(db, "chatConversations", conversationId, "messages"),
+    orderBy("createdAt", "desc"),
+    limit(CHAT_PAGE_SIZE)
+  );
+
+  view.unsubscribe = onSnapshot(
+    messagesQuery,
+    (snapshot) => {
+      const docs = snapshot.docs;
+      view.realtimeMessages = docs.map((item) => ({ id: item.id, ...item.data() }));
+      if (!view.olderMessages.length) {
+        view.nextCursor = docs[docs.length - 1] || null;
+        view.hasMore = docs.length === CHAT_PAGE_SIZE;
+      }
+      renderChatMessages(viewKey, { forceBottom: !view.hasRendered });
+      requestMarkChatRead(conversationId);
+    },
+    (error) => {
+      console.error("Không đọc được tin nhắn Chat:", error);
+      const elements = getChatViewElements(viewKey);
+      if (elements.messages) {
+        elements.messages.innerHTML = '<div class="culao-chat-empty">Không đọc được tin nhắn. Hãy deploy Firestore Rules mới.</div>';
+      }
+    }
+  );
+}
+
+async function loadOlderChatMessages(viewKey) {
+  const view = state.chatViewStates.get(viewKey);
+  if (!view || view.loadingOlder || !view.hasMore || !view.nextCursor) return;
+  view.loadingOlder = true;
+  renderChatMessages(viewKey, { preserveScroll: true });
+
+  try {
+    const olderQuery = query(
+      collection(db, "chatConversations", view.conversationId, "messages"),
+      orderBy("createdAt", "desc"),
+      startAfter(view.nextCursor),
+      limit(CHAT_PAGE_SIZE)
+    );
+    const snapshot = await getDocs(olderQuery);
+    const page = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    view.olderMessages = [...view.olderMessages, ...page];
+    view.nextCursor = snapshot.docs[snapshot.docs.length - 1] || view.nextCursor;
+    view.hasMore = snapshot.docs.length === CHAT_PAGE_SIZE;
+    renderChatMessages(viewKey, { preserveScroll: true });
+  } catch (error) {
+    console.error(error);
+    toast("Không tải được tin nhắn cũ.", "error");
+  } finally {
+    view.loadingOlder = false;
+    renderChatMessages(viewKey, { preserveScroll: true });
+  }
+}
+
+function isChatConversationVisible(conversationId) {
+  if (!conversationId) return false;
+  if (state.chatMobileConversationId === conversationId
+    && !els.chatMobileConversationView?.classList.contains("hidden")) {
+    return true;
+  }
+  const safeId = window.CSS?.escape ? CSS.escape(conversationId) : conversationId;
+  const windowRoot = els.chatMiniContainer?.querySelector(`[data-chat-conversation-id="${safeId}"]`);
+  return Boolean(windowRoot && !windowRoot.classList.contains("is-minimized"));
+}
+
+async function markChatNotificationsRead(conversationId) {
+  const unread = state.notifications.filter((item) =>
+    item.chatConversationId === conversationId && !item.readAt
+  );
+  if (!unread.length) return;
+  try {
+    await Promise.all(unread.slice(0, 50).map((item) => updateDoc(doc(db, "notifications", item.id), {
+      readAt: serverTimestamp()
+    })));
+  } catch (error) {
+    console.warn("Không đánh dấu được thông báo Chat đã đọc:", error);
+  }
+}
+
+async function requestMarkChatRead(conversationId) {
+  const conversation = getChatConversation(conversationId);
+  if (!state.user || !conversation || !Array.isArray(conversation.participantIds)) return;
+  if (!conversation.participantIds.includes(state.user.uid)) return;
+  if (state.chatReadRequestsInFlight.has(conversationId)) return;
+
+  const shouldResetUnread = getChatUnreadCount(conversation) > 0;
+  state.chatReadRequestsInFlight.add(conversationId);
+  try {
+    await Promise.all([
+      shouldResetUnread ? markChatConversationReadCallable({ conversationId }) : Promise.resolve(),
+      markChatNotificationsRead(conversationId)
+    ]);
+  } catch (error) {
+    console.warn("Không đánh dấu được Chat đã đọc:", error);
+  } finally {
+    state.chatReadRequestsInFlight.delete(conversationId);
+  }
+}
+
+function markVisibleChatConversationsRead() {
+  state.chatViewStates.forEach((view) => {
+    if (!view.reviewMode) requestMarkChatRead(view.conversationId);
+  });
+}
+
+function refreshAllChatViews() {
+  state.chatViewStates.forEach((view, viewKey) => {
+    const conversation = getChatConversation(view.conversationId);
+    if (conversation && Number(conversation.messageCount || 0) === 0 && !conversation.lastMessage) {
+      view.realtimeMessages = [];
+      view.olderMessages = [];
+      view.nextCursor = null;
+      view.hasMore = false;
+    }
+    renderChatMessages(viewKey);
+  });
+}
+
+async function sendChatMessage(viewKey, recipientUid) {
+  const view = state.chatViewStates.get(viewKey);
+  const elements = getChatViewElements(viewKey);
+  const input = elements.input;
+  const form = elements.form;
+  if (!view || view.reviewMode || !input || !recipientUid) return;
+
+  const text = String(input.value || "").trim();
+  if (!text) return;
+  if (text.length > 2000) {
+    toast("Mỗi tin nhắn tối đa 2.000 ký tự.", "error");
+    return;
+  }
+
+  const sendButton = form?.querySelector('[type="submit"]');
+  setButtonLoading(sendButton, true, "Đang gửi...");
+  try {
+    const clientMessageId = window.crypto?.randomUUID?.()
+      || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    await sendChatMessageCallable({ recipientUid, text, clientMessageId });
+    input.value = "";
+    input.focus();
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không gửi được tin nhắn.", "error");
+  } finally {
+    setButtonLoading(sendButton, false);
+  }
+}
+
+function buildChatWindowTitle(conversationId, partnerUid, reviewMode) {
+  const conversation = getChatConversation(conversationId);
+  if (reviewMode && conversation) {
+    return conversation.participantIds
+      .map((uid) => getChatUserName(uid, conversation))
+      .join(" ↔ ");
+  }
+  return getChatUserName(partnerUid, conversation);
+}
+
+function openDesktopChatWindow({ conversationId, partnerUid = "", reviewMode = false }) {
+  if (!els.chatMiniContainer) return;
+  const existing = els.chatMiniContainer.querySelector(`[data-chat-conversation-id="${window.CSS?.escape ? CSS.escape(conversationId) : conversationId}"]`);
+  if (existing) {
+    existing.classList.remove("is-minimized");
+    existing.querySelector("[data-chat-input]")?.focus();
+    return;
+  }
+
+  if (state.chatOpenDesktopIds.length >= CHAT_MAX_DESKTOP_WINDOWS) {
+    closeDesktopChatWindow(state.chatOpenDesktopIds[0]);
+  }
+
+  const viewKey = `desktop:${conversationId}`;
+  const title = buildChatWindowTitle(conversationId, partnerUid, reviewMode);
+  const conversation = getChatConversation(conversationId);
+  const subtitle = reviewMode
+    ? "Chế độ xem của Admin"
+    : getChatUserRole(partnerUid, conversation);
+  const root = document.createElement("section");
+  root.className = "culao-chat-mini-window";
+  root.dataset.chatConversationId = conversationId;
+  root.dataset.chatViewKey = viewKey;
+  root.innerHTML = `
+    <header class="culao-chat-mini-head">
+      <div class="culao-chat-mini-person">
+        ${reviewMode ? '<span class="culao-chat-avatar role-admin" aria-hidden="true">QL</span>' : chatAvatarHtml(getChatUser(partnerUid) || { uid: partnerUid, name: title }, conversation)}
+        <span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></span>
+      </div>
+      <div class="culao-chat-mini-actions">
+        <button type="button" data-chat-action="minimize-window" aria-label="Thu nhỏ">—</button>
+        <button type="button" data-chat-action="close-window" aria-label="Đóng">×</button>
+      </div>
+    </header>
+    <div class="culao-chat-mini-body">
+      <button class="culao-chat-load-more hidden" type="button" data-chat-load-more>Tải tin nhắn cũ</button>
+      <div class="culao-chat-messages" data-chat-messages></div>
+      ${reviewMode ? '<div class="culao-chat-readonly-note">Admin đang xem lịch sử. Không thể gửi thay người tham gia.</div>' : `
+        <form class="culao-chat-composer" data-chat-composer>
+          <textarea data-chat-input rows="1" maxlength="2000" placeholder="Nhập tin nhắn..." aria-label="Nhập tin nhắn"></textarea>
+          <button type="submit" class="culao-chat-send-btn" aria-label="Gửi tin nhắn">➤</button>
+        </form>
+      `}
+    </div>
+  `;
+  els.chatMiniContainer.appendChild(root);
+  state.chatOpenDesktopIds.push(conversationId);
+  subscribeChatView({ viewKey, conversationId, partnerUid, reviewMode, showSenderNames: reviewMode });
+  root.querySelector("[data-chat-input]")?.focus();
+}
+
+function closeDesktopChatWindow(conversationId) {
+  const safeId = window.CSS?.escape ? CSS.escape(conversationId) : conversationId;
+  const root = els.chatMiniContainer?.querySelector(`[data-chat-conversation-id="${safeId}"]`);
+  const viewKey = root?.dataset.chatViewKey || `desktop:${conversationId}`;
+  unsubscribeChatView(viewKey);
+  root?.remove();
+  state.chatOpenDesktopIds = state.chatOpenDesktopIds.filter((id) => id !== conversationId);
+}
+
+function openMobileChatConversation({ conversationId, partnerUid = "", reviewMode = false }) {
+  if (!els.chatMobileConversationView) return;
+  state.chatMobileConversationId = conversationId;
+  state.chatMobilePartnerUid = partnerUid;
+  state.chatMobileReviewMode = reviewMode;
+  const title = buildChatWindowTitle(conversationId, partnerUid, reviewMode);
+  const conversation = getChatConversation(conversationId);
+  if (els.chatMobileTitle) els.chatMobileTitle.textContent = title;
+  if (els.chatMobileSubtitle) {
+    els.chatMobileSubtitle.textContent = reviewMode
+      ? "Chế độ xem của Admin"
+      : getChatUserRole(partnerUid, conversation);
+  }
+  els.chatDirectoryView?.classList.add("hidden");
+  els.chatMobileConversationView.classList.remove("hidden");
+  els.chatMobileComposer?.classList.toggle("hidden", reviewMode);
+  subscribeChatView({ viewKey: "mobile", conversationId, partnerUid, reviewMode, showSenderNames: reviewMode });
+  window.setTimeout(() => els.chatMobileInput?.focus(), 80);
+}
+
+function closeMobileChatConversation({ returnToDirectory = true } = {}) {
+  unsubscribeChatView("mobile");
+  state.chatMobileConversationId = "";
+  state.chatMobilePartnerUid = "";
+  state.chatMobileReviewMode = false;
+  els.chatMobileConversationView?.classList.add("hidden");
+  if (returnToDirectory) els.chatDirectoryView?.classList.remove("hidden");
+}
+
+async function openChatWithUser(userUid) {
+  if (!state.user || !userUid || userUid === state.user.uid) return;
+  const conversationId = getChatConversationId(state.user.uid, userUid);
+  try {
+    await ensureChatConversationCallable({ recipientUid: userUid });
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không mở được cuộc trò chuyện.", "error");
+    return;
+  }
+  if (isMobileChatLayout()) {
+    openChatDirectory();
+    openMobileChatConversation({ conversationId, partnerUid: userUid });
+  } else {
+    closeChatDirectory();
+    openDesktopChatWindow({ conversationId, partnerUid: userUid });
+  }
+}
+
+async function openChatConversationById(conversationId, suggestedPartnerUid = "", { reviewMode = false } = {}) {
+  if (!conversationId || !state.user) return;
+  let conversation = getChatConversation(conversationId);
+  if (!conversation) {
+    try {
+      const snapshot = await getDoc(doc(db, "chatConversations", conversationId));
+      if (snapshot.exists()) conversation = { id: snapshot.id, ...snapshot.data() };
+    } catch (error) {
+      console.warn("Không đọc được cuộc trò chuyện cần mở:", error);
+    }
+  }
+
+  const isParticipant = conversation?.participantIds?.includes(state.user.uid) === true;
+  const effectiveReviewMode = reviewMode || (isAdminProfile() && conversation && !isParticipant);
+  const partnerUid = suggestedPartnerUid
+    || (isParticipant ? getChatPartnerUid(conversation) : "");
+
+  if (!conversation && !partnerUid) {
+    toast("Không tìm thấy cuộc trò chuyện.", "error");
+    return;
+  }
+
+  closeChatAdminModal();
+  if (isMobileChatLayout()) {
+    openChatDirectory();
+    openMobileChatConversation({ conversationId, partnerUid, reviewMode: effectiveReviewMode });
+  } else {
+    closeChatDirectory();
+    openDesktopChatWindow({ conversationId, partnerUid, reviewMode: effectiveReviewMode });
+  }
+  clearChatPushQueryParams();
+}
+
+async function openChatConversationFromNotification(notification) {
+  await openChatConversationById(
+    notification.chatConversationId,
+    notification.chatSenderUid || notification.actorUid || ""
+  );
+}
+
+function clearChatPushQueryParams() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("chatId") && !url.searchParams.has("chatWith")) return;
+  url.searchParams.delete("chatId");
+  url.searchParams.delete("chatWith");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function queuePushChatOpen(conversationId, partnerUid = "") {
+  const normalizedId = String(conversationId || "").trim();
+  if (!normalizedId) return;
+  state.pendingPushConversationId = normalizedId;
+  state.pendingPushChatPartnerUid = String(partnerUid || "").trim();
+  let attempts = 0;
+  const tryOpen = async () => {
+    attempts += 1;
+    if (state.user && state.profile && !state.chatUsersLoading) {
+      state.pendingPushConversationId = "";
+      state.pendingPushChatPartnerUid = "";
+      await openChatConversationById(normalizedId, partnerUid);
+      return;
+    }
+    if (attempts < 30 && state.user) window.setTimeout(tryOpen, 400);
+  };
+  tryOpen();
+}
+
+function openChatAdminModal() {
+  if (!isAdminProfile() || !els.chatAdminModal) return;
+  closeChatDirectory();
+  state.chatAdminSearchText = "";
+  if (els.chatAdminSearch) els.chatAdminSearch.value = "";
+  els.chatAdminModal.classList.remove("hidden");
+  document.body.classList.add("culao-chat-overlay-open");
+  renderChatAdminConversations();
+}
+
+function closeChatAdminModal() {
+  els.chatAdminModal?.classList.add("hidden");
+  if (!state.chatDirectoryOpen) document.body.classList.remove("culao-chat-overlay-open");
+}
+
+function renderChatAdminConversations() {
+  if (!els.chatAdminConversationList || !isAdminProfile()) return;
+  const search = normalizeSearchText(state.chatAdminSearchText || "");
+  const conversations = state.chatConversations
+    .filter((item) => Number(item.messageCount || 0) > 0 || item.lastMessage)
+    .filter((item) => {
+      if (!search) return true;
+      const names = (item.participantIds || []).map((uid) => getChatUserName(uid, item)).join(" ");
+      return normalizeSearchText(`${names} ${item.lastMessage || ""}`).includes(search);
+    })
+    .sort((a, b) => getChatTimestampMs(b.lastMessageAt) - getChatTimestampMs(a.lastMessageAt));
+
+  if (!conversations.length) {
+    els.chatAdminConversationList.innerHTML = '<div class="culao-chat-empty">Chưa có lịch sử trò chuyện phù hợp.</div>';
+    return;
+  }
+
+  els.chatAdminConversationList.innerHTML = conversations.map((conversation) => {
+    const participants = (conversation.participantIds || []).map((uid) => ({
+      uid,
+      name: getChatUserName(uid, conversation),
+      role: getChatUserRole(uid, conversation)
+    }));
+    const participantText = participants.map((item) => `${item.name} (${item.role})`).join(" ↔ ");
+    return `
+      <article class="culao-chat-admin-row">
+        <div class="culao-chat-admin-participants">
+          <strong>${escapeHtml(participantText)}</strong>
+          <span>${escapeHtml(conversation.lastMessage || "Chưa có nội dung")}</span>
+        </div>
+        <time>${escapeHtml(formatDateTime(conversation.lastMessageAt || conversation.updatedAt))}</time>
+        <span class="culao-chat-admin-count">${Number(conversation.messageCount || 0)} tin</span>
+        <div class="culao-chat-admin-actions">
+          <button class="btn primary small" type="button" data-chat-action="admin-open-conversation" data-chat-conversation-id="${escapeHtml(conversation.id)}">Mở Chat</button>
+          <button class="btn danger small" type="button" data-chat-action="admin-delete-conversation" data-chat-conversation-id="${escapeHtml(conversation.id)}">Xóa lịch sử</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function deleteChatConversationAsAdmin(conversationId, button) {
+  if (!isAdminProfile() || !conversationId) return;
+  const conversation = getChatConversation(conversationId);
+  const names = conversation?.participantIds?.map((uid) => getChatUserName(uid, conversation)).join(" và ") || "hai tài khoản";
+  if (!window.confirm(`Xóa toàn bộ lịch sử Chat giữa ${names}? Hành động này không thể hoàn tác.`)) return;
+
+  setButtonLoading(button, true, "Đang xóa...");
+  try {
+    await deleteChatConversationCallable({ conversationId });
+    closeDesktopChatWindow(conversationId);
+    if (state.chatMobileConversationId === conversationId) closeMobileChatConversation();
+    toast("Đã xóa toàn bộ lịch sử Chat.", "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không xóa được lịch sử Chat.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+function bindChatUI() {
+  if (chatUiBound) return;
+  chatUiBound = true;
+
+  // Đưa panel ra thẳng body để position: fixed không bị ảnh hưởng bởi
+  // backdrop-filter/stacking context của thanh topbar trên iOS và Android.
+  if (els.chatDirectoryPanel && els.chatDirectoryPanel.parentElement !== document.body) {
+    document.body.appendChild(els.chatDirectoryPanel);
+  }
+
+  els.chatToggleBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleChatDirectory();
+  });
+  els.chatDirectoryCloseBtn?.addEventListener("click", closeChatDirectory);
+  els.chatDirectorySearch?.addEventListener("input", () => {
+    state.chatSearchText = els.chatDirectorySearch.value;
+    renderChatDirectory();
+  });
+  els.chatDirectoryAllTab?.addEventListener("click", () => setChatDirectoryFilter("all"));
+  els.chatDirectoryUnreadTab?.addEventListener("click", () => setChatDirectoryFilter("unread"));
+  els.openChatAdminBtn?.addEventListener("click", openChatAdminModal);
+  els.chatMobileBackBtn?.addEventListener("click", () => closeMobileChatConversation());
+  els.chatMobileCloseBtn?.addEventListener("click", closeChatDirectory);
+  els.chatMobileLoadMoreBtn?.addEventListener("click", () => loadOlderChatMessages("mobile"));
+  els.chatMobileComposer?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await sendChatMessage("mobile", state.chatMobilePartnerUid);
+  });
+  els.chatMobileInput?.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    await sendChatMessage("mobile", state.chatMobilePartnerUid);
+  });
+  els.chatAdminCloseBtn?.addEventListener("click", closeChatAdminModal);
+  els.chatAdminModal?.querySelector("[data-chat-admin-close]")?.addEventListener("click", closeChatAdminModal);
+  els.chatAdminSearch?.addEventListener("input", () => {
+    state.chatAdminSearchText = els.chatAdminSearch.value;
+    renderChatAdminConversations();
+  });
+
+  els.chatDirectoryList?.addEventListener("click", (event) => {
+    const button = event.target.closest('[data-chat-action="open-user"]');
+    if (button) openChatWithUser(button.dataset.chatUserId);
+  });
+
+  els.chatMiniContainer?.addEventListener("click", (event) => {
+    const actionButton = event.target.closest("[data-chat-action]");
+    const root = event.target.closest("[data-chat-conversation-id]");
+    if (!actionButton || !root) return;
+    const conversationId = root.dataset.chatConversationId;
+    const viewKey = root.dataset.chatViewKey;
+    if (actionButton.dataset.chatAction === "close-window") closeDesktopChatWindow(conversationId);
+    if (actionButton.dataset.chatAction === "minimize-window") root.classList.toggle("is-minimized");
+    if (actionButton.hasAttribute("data-chat-load-more")) loadOlderChatMessages(viewKey);
+  });
+
+  els.chatMiniContainer?.addEventListener("submit", async (event) => {
+    const form = event.target.closest("[data-chat-composer]");
+    const root = event.target.closest("[data-chat-conversation-id]");
+    if (!form || !root) return;
+    event.preventDefault();
+    const view = state.chatViewStates.get(root.dataset.chatViewKey);
+    await sendChatMessage(root.dataset.chatViewKey, view?.partnerUid || "");
+  });
+
+  els.chatMiniContainer?.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    const input = event.target.closest("[data-chat-input]");
+    const root = event.target.closest("[data-chat-conversation-id]");
+    if (!input || !root) return;
+    event.preventDefault();
+    const view = state.chatViewStates.get(root.dataset.chatViewKey);
+    await sendChatMessage(root.dataset.chatViewKey, view?.partnerUid || "");
+  });
+
+  els.chatMiniContainer?.addEventListener("click", (event) => {
+    const loadMore = event.target.closest("[data-chat-load-more]");
+    const root = event.target.closest("[data-chat-view-key]");
+    if (loadMore && root) loadOlderChatMessages(root.dataset.chatViewKey);
+  });
+
+  els.chatAdminConversationList?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-chat-action]");
+    if (!button) return;
+    const conversationId = button.dataset.chatConversationId;
+    if (button.dataset.chatAction === "admin-open-conversation") {
+      await openChatConversationById(conversationId, "", { reviewMode: true });
+    }
+    if (button.dataset.chatAction === "admin-delete-conversation") {
+      await deleteChatConversationAsAdmin(conversationId, button);
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!state.chatDirectoryOpen || isMobileChatLayout()) return;
+    if (!event.target.closest(".culao-chat-wrap") && !event.target.closest(".culao-chat-directory-panel")) {
+      closeChatDirectory();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!els.chatAdminModal?.classList.contains("hidden")) {
+      closeChatAdminModal();
+      return;
+    }
+    if (state.chatDirectoryOpen) closeChatDirectory();
+  });
+}
+
+bindChatUI();
+
 
 // =========================
 // Date filter helpers
@@ -2193,6 +3189,7 @@ els.logoutBtn.addEventListener("click", async () => {
 
 onAuthStateChanged(auth, async (user) => {
   cleanupSubscriptions();
+  cleanupChatFeature();
 
   state.user = user;
   state.profile = null;
@@ -2216,6 +3213,19 @@ onAuthStateChanged(auth, async (user) => {
   state.workOrderSettingsAuthorizationExpiresAt = 0;
   state.pushToken = localStorage.getItem(PUSH_TOKEN_STORAGE_KEY) || "";
   state.pushTokenOwnerUid = localStorage.getItem(PUSH_TOKEN_OWNER_STORAGE_KEY) || "";
+  state.chatUsers = [];
+  state.chatConversations = [];
+  state.chatConversationMap = new Map();
+  state.chatViewStates = new Map();
+  state.chatDirectoryOpen = false;
+  state.chatDirectoryFilter = "all";
+  state.chatSearchText = "";
+  state.chatAdminSearchText = "";
+  state.chatMobileConversationId = "";
+  state.chatMobilePartnerUid = "";
+  state.chatMobileReviewMode = false;
+  state.chatOpenDesktopIds = [];
+  state.chatReadRequestsInFlight = new Set();
 
   if (!user) {
     showLogin();
@@ -2236,6 +3246,7 @@ onAuthStateChanged(auth, async (user) => {
 
     showApp();
     setupNotificationListener();
+    setupChatFeature();
     await syncPushSubscriptionIfAllowed();
 
     if (isManagementProfile()) {
@@ -2261,6 +3272,8 @@ function showLogin() {
   els.photoReportView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
   els.notificationPanel?.classList.add("hidden");
+  closeChatDirectory();
+  closeChatAdminModal();
 }
 
 function showApp() {
