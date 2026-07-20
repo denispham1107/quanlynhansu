@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260720-chat-mobile-keyboard-v4";
+const CACHE_NAME = "culao-task-shell-v20260720-chat-ios-contenteditable-v5";
 const APP_SHELL = [
   "./",
   "./index.html",

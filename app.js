@@ -2703,6 +2703,66 @@ function refreshAllChatViews() {
   });
 }
 
+function getChatInputText(input) {
+  if (!input) return "";
+  if (input.isContentEditable) return String(input.textContent || "").replace(/\u00a0/g, " ");
+  return String(input.value || "");
+}
+
+function clearChatInput(input) {
+  if (!input) return;
+  if (input.isContentEditable) {
+    input.textContent = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return;
+  }
+  input.value = "";
+}
+
+function normalizeSingleLineChatText(value) {
+  return String(value || "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .slice(0, 2000);
+}
+
+function setPlainTextAtSelection(element, text) {
+  if (!element) return;
+  const normalized = normalizeSingleLineChatText(text);
+  const selection = window.getSelection?.();
+  if (!selection || selection.rangeCount === 0 || !element.contains(selection.anchorNode)) {
+    element.textContent = normalizeSingleLineChatText(`${getChatInputText(element)}${normalized}`);
+    return;
+  }
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const node = document.createTextNode(normalized);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function sanitizeMobileChatInput({ preserveCaret = true } = {}) {
+  const input = els.chatMobileInput;
+  if (!input?.isContentEditable) return;
+  const current = getChatInputText(input);
+  const normalized = normalizeSingleLineChatText(current);
+  if (current === normalized) return;
+  input.textContent = normalized;
+  if (preserveCaret) {
+    const selection = window.getSelection?.();
+    const range = document.createRange?.();
+    if (selection && range) {
+      range.selectNodeContents(input);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+}
+
 async function sendChatMessage(viewKey, recipientUid) {
   const view = state.chatViewStates.get(viewKey);
   const elements = getChatViewElements(viewKey);
@@ -2710,7 +2770,7 @@ async function sendChatMessage(viewKey, recipientUid) {
   const form = elements.form;
   if (!view || view.reviewMode || !input || !recipientUid) return;
 
-  const text = String(input.value || "").trim();
+  const text = getChatInputText(input).trim();
   if (!text) return;
   if (text.length > 2000) {
     toast("Mỗi tin nhắn tối đa 2.000 ký tự.", "error");
@@ -2723,7 +2783,7 @@ async function sendChatMessage(viewKey, recipientUid) {
     const clientMessageId = window.crypto?.randomUUID?.()
       || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     await sendChatMessageCallable({ recipientUid, text, clientMessageId });
-    input.value = "";
+    clearChatInput(input);
     input.focus({ preventScroll: true });
     if (viewKey === "mobile") scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
   } catch (error) {
@@ -3026,8 +3086,7 @@ function bindChatUI() {
   els.chatMobileBackBtn?.addEventListener("click", () => closeMobileChatConversation());
   els.chatMobileCloseBtn?.addEventListener("click", closeChatDirectory);
   els.chatMobileLoadMoreBtn?.addEventListener("click", () => loadOlderChatMessages("mobile"));
-  els.chatMobileComposer?.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  els.chatMobileComposer?.querySelector(".culao-chat-send-btn")?.addEventListener("click", async () => {
     await sendChatMessage("mobile", state.chatMobilePartnerUid);
   });
   els.chatMobileInput?.addEventListener("keydown", async (event) => {
@@ -3036,6 +3095,18 @@ function bindChatUI() {
     await sendChatMessage("mobile", state.chatMobilePartnerUid);
     scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
   });
+  els.chatMobileInput?.addEventListener("beforeinput", (event) => {
+    if (event.isComposing) return;
+    if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
+      event.preventDefault();
+    }
+  });
+  els.chatMobileInput?.addEventListener("paste", (event) => {
+    event.preventDefault();
+    setPlainTextAtSelection(els.chatMobileInput, event.clipboardData?.getData("text/plain") || "");
+    sanitizeMobileChatInput();
+  });
+  els.chatMobileInput?.addEventListener("input", () => sanitizeMobileChatInput());
   els.chatMobileInput?.addEventListener("focus", () => {
     scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
     window.setTimeout(() => scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true }), 120);

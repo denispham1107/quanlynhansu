@@ -8530,7 +8530,8 @@
     }
 
     .culao-chat-composer textarea,
-    .culao-chat-composer input[type="text"] {
+    .culao-chat-composer input[type="text"],
+    .culao-chat-input-surface {
       width: 100%;
       min-height: 42px;
       max-height: 112px;
@@ -8549,9 +8550,30 @@
     }
 
     .culao-chat-composer textarea:focus,
-    .culao-chat-composer input[type="text"]:focus {
+    .culao-chat-composer input[type="text"]:focus,
+    .culao-chat-input-surface:focus {
       border-color: #3b82f6;
       box-shadow: 0 0 0 3px rgba(59, 130, 246, .1);
+    }
+
+    .culao-chat-input-surface {
+      display: block;
+      overflow-x: auto;
+      overflow-y: hidden;
+      white-space: nowrap;
+      word-break: normal;
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+
+    .culao-chat-input-surface::-webkit-scrollbar { display: none; }
+
+    .culao-chat-input-surface:empty::before {
+      content: attr(data-placeholder);
+      color: #94a3b8;
+      pointer-events: none;
     }
 
     .culao-chat-send-btn {
@@ -8709,13 +8731,15 @@
         gap: 8px;
         background: rgba(255, 255, 255, .98);
       }
-      .culao-chat-composer input[type="text"] {
+      .culao-chat-composer input[type="text"],
+      .culao-chat-input-surface {
         min-height: 44px;
         height: 44px;
         max-height: 44px;
-        padding: 9px 14px;
+        padding: 10px 14px;
         border-radius: 18px;
         font-size: 16px;
+        line-height: 22px;
         touch-action: manipulation;
       }
       .culao-chat-send-btn {
@@ -8871,10 +8895,25 @@
               </header>
               <button id="chatMobileLoadMoreBtn" class="culao-chat-load-more hidden" type="button">Tải tin nhắn cũ</button>
               <div id="chatMobileMessages" class="culao-chat-messages culao-chat-mobile-messages"></div>
-              <form id="chatMobileComposer" class="culao-chat-composer">
-                <input id="chatMobileInput" type="text" maxlength="2000" placeholder="Nhập tin nhắn..." inputmode="text" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" autocorrect="on" spellcheck="true" aria-label="Nhập tin nhắn" />
-                <button type="submit" class="culao-chat-send-btn" aria-label="Gửi tin nhắn">➤</button>
-              </form>
+              <div id="chatMobileComposer" class="culao-chat-composer" role="group" aria-label="Soạn tin nhắn">
+                <div
+                  id="chatMobileInput"
+                  class="culao-chat-input-surface"
+                  contenteditable="true"
+                  role="textbox"
+                  aria-multiline="false"
+                  aria-label="Nhập tin nhắn"
+                  data-placeholder="Nhập tin nhắn..."
+                  data-maxlength="2000"
+                  inputmode="text"
+                  enterkeyhint="send"
+                  autocapitalize="sentences"
+                  autocorrect="on"
+                  spellcheck="true"
+                  tabindex="0"
+                ></div>
+                <button id="chatMobileSendBtn" type="button" class="culao-chat-send-btn" aria-label="Gửi tin nhắn">➤</button>
+              </div>
             </div>
           </section>
         </div>
