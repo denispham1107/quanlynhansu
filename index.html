@@ -8235,14 +8235,41 @@
 
     .culao-chat-search-wrap input,
     .culao-chat-admin-toolbar input {
+      box-sizing: border-box;
       width: 100%;
       min-width: 0;
       min-height: 42px;
+      margin: 0;
       padding: 0;
-      border: 0;
+      border: 0 !important;
+      border-radius: 0;
       outline: 0;
-      background: transparent;
+      box-shadow: none !important;
+      background: transparent !important;
+      color: #0f172a;
       font: inherit;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .culao-chat-search-wrap input:focus,
+    .culao-chat-admin-toolbar input:focus {
+      border: 0 !important;
+      outline: 0;
+      box-shadow: none !important;
+      background: transparent !important;
+    }
+
+    .culao-chat-search-wrap input::-webkit-search-decoration,
+    .culao-chat-search-wrap input::-webkit-search-cancel-button,
+    .culao-chat-search-wrap input::-webkit-search-results-button,
+    .culao-chat-search-wrap input::-webkit-search-results-decoration,
+    .culao-chat-admin-toolbar input::-webkit-search-decoration,
+    .culao-chat-admin-toolbar input::-webkit-search-cancel-button,
+    .culao-chat-admin-toolbar input::-webkit-search-results-button,
+    .culao-chat-admin-toolbar input::-webkit-search-results-decoration {
+      display: none;
+      -webkit-appearance: none;
     }
 
     .culao-chat-tabs {
@@ -8874,7 +8901,7 @@
               </header>
               <div class="culao-chat-search-wrap">
                 <span aria-hidden="true">⌕</span>
-                <input id="chatDirectorySearch" type="search" placeholder="Tìm tên hoặc email..." autocomplete="off" aria-label="Tìm tài khoản Chat" />
+                <input id="chatDirectorySearch" type="text" inputmode="search" enterkeyhint="search" placeholder="Tìm tên hoặc email..." autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Tìm tài khoản Chat" />
               </div>
               <div class="culao-chat-tabs" role="tablist" aria-label="Lọc Chat">
                 <button id="chatDirectoryAllTab" class="is-active" type="button">Tất cả</button>

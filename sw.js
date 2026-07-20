@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260720-chat-send-button-v6";
+const CACHE_NAME = "culao-task-shell-v20260720-chat-search-single-field-v7";
 const APP_SHELL = [
   "./",
   "./index.html",
