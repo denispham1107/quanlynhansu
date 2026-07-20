@@ -8548,7 +8548,7 @@
 
     .culao-chat-composer {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 42px;
+      grid-template-columns: 40px minmax(0, 1fr) 42px;
       align-items: end;
       gap: 8px;
       padding: 10px;
@@ -8574,6 +8574,121 @@
       line-height: 1.35;
       -webkit-appearance: none;
       appearance: none;
+    }
+
+    .culao-chat-attach-btn,
+    .culao-chat-send-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      background: #2563eb;
+      color: #fff;
+      cursor: pointer;
+      font-weight: 900;
+    }
+
+    .culao-chat-attach-btn {
+      width: 40px;
+      height: 42px;
+      border-radius: 13px;
+      background: #eef4ff;
+      color: #2563eb;
+      border: 1px solid #bfdbfe;
+      font-size: 21px;
+    }
+
+    .culao-chat-attach-btn:hover { background: #dbeafe; }
+    .culao-chat-attach-btn:disabled,
+    .culao-chat-send-btn:disabled { opacity: .58; cursor: wait; }
+
+    .culao-chat-media-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+      margin: 2px 0 7px;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+
+    .culao-chat-media-grid.is-single { grid-template-columns: minmax(0, 1fr); }
+    .culao-chat-media-item {
+      position: relative;
+      min-width: 0;
+      min-height: 92px;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      border-radius: 10px;
+      background: rgba(148, 163, 184, .18);
+      color: inherit;
+    }
+
+    button.culao-chat-media-item { cursor: zoom-in; }
+    .culao-chat-media-item img,
+    .culao-chat-media-item video {
+      display: block;
+      width: 100%;
+      max-height: 280px;
+      object-fit: cover;
+      background: #0f172a;
+    }
+    .culao-chat-media-item video { object-fit: contain; }
+    .culao-chat-media-loading,
+    .culao-chat-media-error {
+      display: flex;
+      min-height: 92px;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      color: #64748b;
+      font-size: 11px;
+      text-align: center;
+    }
+    .culao-chat-message-row.is-own .culao-chat-media-loading,
+    .culao-chat-message-row.is-own .culao-chat-media-error { color: #dbeafe; }
+    .culao-chat-caption { margin-top: 2px; }
+
+    .culao-chat-media-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 26000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(2, 6, 23, .92);
+    }
+    .culao-chat-media-viewer.hidden { display: none !important; }
+    .culao-chat-media-viewer-close {
+      position: fixed;
+      top: calc(14px + env(safe-area-inset-top));
+      right: 14px;
+      z-index: 2;
+      width: 46px;
+      height: 46px;
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 15px;
+      background: rgba(15, 23, 42, .72);
+      color: #fff;
+      font-size: 28px;
+      cursor: pointer;
+    }
+    .culao-chat-media-viewer-content {
+      display: flex;
+      max-width: min(1100px, 100%);
+      max-height: calc(100dvh - 40px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+      align-items: center;
+      justify-content: center;
+    }
+    .culao-chat-media-viewer-content img,
+    .culao-chat-media-viewer-content video {
+      display: block;
+      max-width: 100%;
+      max-height: inherit;
+      border-radius: 14px;
+      object-fit: contain;
+      background: #000;
     }
 
     .culao-chat-composer textarea:focus,
@@ -8769,12 +8884,15 @@
         line-height: 22px;
         touch-action: manipulation;
       }
+      .culao-chat-attach-btn,
       .culao-chat-send-btn {
         width: 44px;
         height: 44px;
         border-radius: 15px;
         touch-action: manipulation;
       }
+      .culao-chat-media-item img,
+      .culao-chat-media-item video { max-height: 310px; }
       .culao-chat-mobile-messages {
         min-height: 0;
         scroll-padding-bottom: 12px;
@@ -8923,6 +9041,8 @@
               <button id="chatMobileLoadMoreBtn" class="culao-chat-load-more hidden" type="button">Tải tin nhắn cũ</button>
               <div id="chatMobileMessages" class="culao-chat-messages culao-chat-mobile-messages"></div>
               <div id="chatMobileComposer" class="culao-chat-composer" role="group" aria-label="Soạn tin nhắn">
+                <button id="chatMobileAttachBtn" type="button" class="culao-chat-attach-btn" aria-label="Gửi hình ảnh hoặc video">＋</button>
+                <input id="chatMobileFileInput" class="hidden" type="file" accept="image/*,video/*" multiple />
                 <div
                   id="chatMobileInput"
                   class="culao-chat-input-surface"
@@ -9446,6 +9566,11 @@
         <div id="chatAdminConversationList" class="culao-chat-admin-list"></div>
         <p class="culao-chat-admin-warning">Chỉ Admin được xóa lịch sử. Người dùng thông thường không có quyền xóa cuộc trò chuyện.</p>
       </section>
+    </div>
+
+    <div id="chatMediaViewer" class="culao-chat-media-viewer hidden" role="dialog" aria-modal="true" aria-label="Xem tệp Chat">
+      <button id="chatMediaViewerCloseBtn" class="culao-chat-media-viewer-close" type="button" aria-label="Đóng">×</button>
+      <div id="chatMediaViewerContent" class="culao-chat-media-viewer-content"></div>
     </div>
   </section>
 

@@ -89,6 +89,7 @@ const ensureChatConversationCallable = httpsCallable(functions, "ensureChatConve
 const sendChatMessageCallable = httpsCallable(functions, "sendChatMessage");
 const markChatConversationReadCallable = httpsCallable(functions, "markChatConversationRead");
 const deleteChatConversationCallable = httpsCallable(functions, "deleteChatConversation");
+const discardChatMediaUploadCallable = httpsCallable(functions, "discardChatMediaUpload");
 const syncChatConversationIndexCallable = httpsCallable(functions, "syncChatConversationIndex");
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
@@ -525,7 +526,12 @@ const els = {
   chatMobileLoadMoreBtn: $("#chatMobileLoadMoreBtn"),
   chatMobileComposer: $("#chatMobileComposer"),
   chatMobileInput: $("#chatMobileInput"),
+  chatMobileAttachBtn: $("#chatMobileAttachBtn"),
+  chatMobileFileInput: $("#chatMobileFileInput"),
   chatMiniContainer: $("#chatMiniContainer"),
+  chatMediaViewer: $("#chatMediaViewer"),
+  chatMediaViewerCloseBtn: $("#chatMediaViewerCloseBtn"),
+  chatMediaViewerContent: $("#chatMediaViewerContent"),
   chatAdminModal: $("#chatAdminModal"),
   chatAdminCloseBtn: $("#chatAdminCloseBtn"),
   chatAdminSearch: $("#chatAdminSearch"),
@@ -2068,6 +2074,11 @@ async function createNotifications(items) {
 // =========================
 const CHAT_PAGE_SIZE = 50;
 const CHAT_MAX_DESKTOP_WINDOWS = 3;
+const CHAT_MAX_ATTACHMENTS = 5;
+const CHAT_MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+const CHAT_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+const CHAT_ALLOWED_VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm", "video/x-m4v"]);
+const chatMediaUrlCache = new Map();
 let chatUiBound = false;
 let chatMobileViewportRaf = 0;
 let chatMobileViewportBaseHeight = 0;
@@ -2371,6 +2382,7 @@ function cleanupChatFeature() {
   if (els.chatMiniContainer) els.chatMiniContainer.innerHTML = "";
   els.chatDirectoryPanel?.classList.add("hidden");
   els.chatAdminModal?.classList.add("hidden");
+  closeChatMediaViewer();
   els.chatMobileConversationView?.classList.add("hidden");
   els.chatDirectoryView?.classList.remove("hidden");
   document.body.classList.remove("culao-chat-overlay-open");
@@ -2475,7 +2487,9 @@ function getChatViewElements(viewKey) {
       messages: els.chatMobileMessages,
       loadMore: els.chatMobileLoadMoreBtn,
       form: els.chatMobileComposer,
-      input: els.chatMobileInput
+      input: els.chatMobileInput,
+      attachButton: els.chatMobileAttachBtn,
+      fileInput: els.chatMobileFileInput
     };
   }
   const safeKey = window.CSS?.escape ? CSS.escape(viewKey) : viewKey.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
@@ -2485,7 +2499,9 @@ function getChatViewElements(viewKey) {
     messages: root?.querySelector("[data-chat-messages]"),
     loadMore: root?.querySelector("[data-chat-load-more]"),
     form: root?.querySelector("[data-chat-composer]"),
-    input: root?.querySelector("[data-chat-input]")
+    input: root?.querySelector("[data-chat-input]"),
+    attachButton: root?.querySelector("[data-chat-attach]"),
+    fileInput: root?.querySelector("[data-chat-file-input]")
   };
 }
 
@@ -2511,6 +2527,288 @@ function isChatMessageReadByRecipient(message, conversation) {
   return getChatTimestampMs(readAt) >= getChatTimestampMs(message.createdAt) && getChatTimestampMs(message.createdAt) > 0;
 }
 
+
+function getChatAttachmentKind(attachment) {
+  const explicit = String(attachment?.kind || "").toLowerCase();
+  if (explicit === "image" || explicit === "video") return explicit;
+  const type = String(attachment?.contentType || "").toLowerCase();
+  if (type.startsWith("image/")) return "image";
+  if (type.startsWith("video/")) return "video";
+  return "";
+}
+
+function renderChatAttachmentsHtml(message) {
+  const attachments = Array.isArray(message?.attachments)
+    ? message.attachments.filter((item) => item?.storagePath && getChatAttachmentKind(item))
+    : [];
+  if (!attachments.length) return "";
+
+  return `
+    <div class="culao-chat-media-grid ${attachments.length === 1 ? "is-single" : ""}">
+      ${attachments.map((attachment) => {
+        const kind = getChatAttachmentKind(attachment);
+        const path = escapeHtml(String(attachment.storagePath || ""));
+        const name = escapeHtml(String(attachment.name || (kind === "video" ? "Video" : "Hình ảnh")));
+        if (kind === "video") {
+          return `
+            <div class="culao-chat-media-item" data-chat-media-container>
+              <video controls playsinline preload="metadata" data-chat-media-path="${path}" data-chat-media-kind="video" aria-label="${name}"></video>
+              <span class="culao-chat-media-loading">Đang tải video...</span>
+            </div>
+          `;
+        }
+        return `
+          <button class="culao-chat-media-item" type="button" data-chat-media-open data-chat-media-view-path="${path}" data-chat-media-view-kind="image" data-chat-media-view-name="${name}" aria-label="Xem ${name}">
+            <img loading="lazy" alt="${name}" data-chat-media-path="${path}" data-chat-media-kind="image" />
+            <span class="culao-chat-media-loading">Đang tải hình...</span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+async function getChatMediaDownloadUrl(storagePath) {
+  const path = String(storagePath || "").trim();
+  if (!path) throw new Error("Đường dẫn tệp Chat không hợp lệ.");
+  if (!chatMediaUrlCache.has(path)) {
+    chatMediaUrlCache.set(path, getDownloadURL(storageRef(storage, path)).catch((error) => {
+      chatMediaUrlCache.delete(path);
+      throw error;
+    }));
+  }
+  return chatMediaUrlCache.get(path);
+}
+
+function hydrateChatMediaElements(root) {
+  if (!root) return;
+  root.querySelectorAll("[data-chat-media-path]").forEach((element) => {
+    if (element.dataset.chatMediaHydrated === "true" || element.dataset.chatMediaLoading === "true") return;
+    const storagePath = element.dataset.chatMediaPath || "";
+    element.dataset.chatMediaLoading = "true";
+    getChatMediaDownloadUrl(storagePath)
+      .then((url) => {
+        element.dataset.chatMediaHydrated = "true";
+        element.src = url;
+        const container = element.closest("[data-chat-media-container], .culao-chat-media-item");
+        container?.querySelector(".culao-chat-media-loading")?.remove();
+      })
+      .catch((error) => {
+        console.error("Không tải được tệp Chat:", error);
+        const container = element.closest("[data-chat-media-container], .culao-chat-media-item");
+        const loading = container?.querySelector(".culao-chat-media-loading");
+        if (loading) {
+          loading.className = "culao-chat-media-error";
+          loading.textContent = "Không tải được tệp.";
+        }
+      })
+      .finally(() => {
+        delete element.dataset.chatMediaLoading;
+      });
+  });
+}
+
+async function openChatMediaViewer(storagePath, kind = "image", name = "Tệp Chat") {
+  if (!els.chatMediaViewer || !els.chatMediaViewerContent) return;
+  try {
+    const url = await getChatMediaDownloadUrl(storagePath);
+    els.chatMediaViewerContent.innerHTML = kind === "video"
+      ? `<video src="${escapeHtml(url)}" controls autoplay playsinline aria-label="${escapeHtml(name)}"></video>`
+      : `<img src="${escapeHtml(url)}" alt="${escapeHtml(name)}" />`;
+    els.chatMediaViewer.classList.remove("hidden");
+    document.body.classList.add("culao-chat-overlay-open");
+  } catch (error) {
+    console.error(error);
+    toast("Không mở được tệp Chat.", "error");
+  }
+}
+
+function closeChatMediaViewer() {
+  if (!els.chatMediaViewer) return;
+  els.chatMediaViewer.classList.add("hidden");
+  const video = els.chatMediaViewerContent?.querySelector("video");
+  try { video?.pause(); } catch (_) { /* no-op */ }
+  if (els.chatMediaViewerContent) els.chatMediaViewerContent.innerHTML = "";
+  if (!state.chatDirectoryOpen && els.chatAdminModal?.classList.contains("hidden")) {
+    document.body.classList.remove("culao-chat-overlay-open");
+  }
+}
+
+function inferChatMediaType(file) {
+  const type = String(file?.type || "").toLowerCase();
+  if (type) return type;
+  const name = String(file?.name || "").toLowerCase();
+  if (/\.(jpe?g|png|gif|webp|heic|heif)$/i.test(name)) return "image/jpeg";
+  if (/\.mov$/i.test(name)) return "video/quicktime";
+  if (/\.webm$/i.test(name)) return "video/webm";
+  if (/\.(mp4|m4v)$/i.test(name)) return "video/mp4";
+  return "";
+}
+
+function readVideoFileMetadata(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const finish = (result) => {
+      URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      resolve(result);
+    };
+    video.preload = "metadata";
+    video.onloadedmetadata = () => finish({
+      width: Number(video.videoWidth || 0),
+      height: Number(video.videoHeight || 0),
+      duration: Number.isFinite(video.duration) ? Number(video.duration) : 0
+    });
+    video.onerror = () => finish({ width: 0, height: 0, duration: 0 });
+    video.src = url;
+  });
+}
+
+async function prepareChatMediaFile(file) {
+  const contentType = inferChatMediaType(file);
+  if (contentType.startsWith("image/")) {
+    const optimized = await optimizePhotoFileForUpload(file);
+    const preparedFile = optimized.file;
+    const preparedType = inferChatMediaType(preparedFile);
+    if (Number(preparedFile.size || 0) > CHAT_MAX_IMAGE_BYTES) {
+      throw new Error(`Hình “${file.name}” vượt quá 15 MB.`);
+    }
+    let width = Number(optimized.width || 0);
+    let height = Number(optimized.height || 0);
+    if ((!width || !height) && !preparedType.includes("heic") && !preparedType.includes("heif")) {
+      try {
+        const image = await loadImageElementFromFile(preparedFile);
+        width = Number(image.naturalWidth || image.width || 0);
+        height = Number(image.naturalHeight || image.height || 0);
+      } catch (_) { /* metadata không bắt buộc */ }
+    }
+    return {
+      file: preparedFile,
+      originalName: file.name,
+      contentType: preparedType || contentType,
+      kind: "image",
+      width,
+      height,
+      duration: 0
+    };
+  }
+
+  if (contentType.startsWith("video/")) {
+    if (!CHAT_ALLOWED_VIDEO_TYPES.has(contentType) && contentType !== "video/3gpp") {
+      throw new Error(`Video “${file.name}” không thuộc định dạng MP4, MOV hoặc WebM được hỗ trợ.`);
+    }
+    if (Number(file.size || 0) > CHAT_MAX_VIDEO_BYTES) {
+      throw new Error(`Video “${file.name}” vượt quá 100 MB.`);
+    }
+    const metadata = await readVideoFileMetadata(file);
+    return {
+      file,
+      originalName: file.name,
+      contentType,
+      kind: "video",
+      ...metadata
+    };
+  }
+
+  throw new Error(`Tệp “${file?.name || "đã chọn"}” không phải hình ảnh hoặc video.`);
+}
+
+function setChatMediaUploadBusy(elements, busy, current = 0, total = 0) {
+  const button = elements?.attachButton;
+  const fileInput = elements?.fileInput;
+  if (button) {
+    if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || "＋";
+    button.disabled = busy;
+    button.setAttribute("aria-busy", busy ? "true" : "false");
+    button.textContent = busy ? (total > 1 ? `${current}/${total}` : "…") : button.dataset.idleLabel;
+  }
+  if (fileInput) fileInput.disabled = busy;
+  const sendButton = elements?.form?.querySelector(".culao-chat-send-btn");
+  if (sendButton) sendButton.disabled = busy;
+}
+
+async function sendChatMediaFiles(viewKey, recipientUid, fileList) {
+  const view = state.chatViewStates.get(viewKey);
+  const elements = getChatViewElements(viewKey);
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (!view || view.reviewMode || !recipientUid || view.sendingMedia === true || !files.length) return;
+  if (files.length > CHAT_MAX_ATTACHMENTS) {
+    toast(`Mỗi lần chỉ gửi tối đa ${CHAT_MAX_ATTACHMENTS} hình ảnh hoặc video.`, "error");
+    if (elements.fileInput) elements.fileInput.value = "";
+    return;
+  }
+
+  const text = getChatInputText(elements.input).trim();
+  if (text.length > 2000) {
+    toast("Mỗi tin nhắn tối đa 2.000 ký tự.", "error");
+    return;
+  }
+
+  const clientMessageId = window.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const conversationId = view.conversationId || getChatConversationId(state.user?.uid, recipientUid);
+  const uploadedAttachments = [];
+  view.sendingMedia = true;
+  setChatMediaUploadBusy(elements, true, 0, files.length);
+
+  try {
+    for (let index = 0; index < files.length; index += 1) {
+      setChatMediaUploadBusy(elements, true, index + 1, files.length);
+      const prepared = await prepareChatMediaFile(files[index]);
+      const safeName = sanitizeStorageFileName(prepared.file.name || prepared.originalName || `tep-${index + 1}`);
+      const storagePath = `chat-media/${conversationId}/${state.user.uid}/${clientMessageId}/${String(index + 1).padStart(2, "0")}-${safeName}`;
+      await uploadBytes(storageRef(storage, storagePath), prepared.file, {
+        contentType: prepared.contentType,
+        customMetadata: {
+          uploaderUid: state.user.uid,
+          conversationId,
+          uploadId: clientMessageId,
+          originalName: String(prepared.originalName || prepared.file.name || "").slice(0, 180),
+          kind: prepared.kind
+        }
+      });
+      uploadedAttachments.push({
+        storagePath,
+        name: prepared.originalName || prepared.file.name || safeName,
+        contentType: prepared.contentType,
+        kind: prepared.kind,
+        size: Number(prepared.file.size || 0),
+        width: Number(prepared.width || 0),
+        height: Number(prepared.height || 0),
+        duration: Number(prepared.duration || 0)
+      });
+    }
+
+    await sendChatMessageCallable({
+      recipientUid,
+      text,
+      clientMessageId,
+      attachments: uploadedAttachments
+    });
+    clearChatInput(elements.input);
+    if (elements.fileInput) elements.fileInput.value = "";
+    if (viewKey === "mobile") {
+      window.requestAnimationFrame(() => {
+        try { elements.input?.focus({ preventScroll: true }); } catch (_) { elements.input?.focus(); }
+      });
+      scheduleMobileChatVisualViewport({ keepLatestMessageVisible: true });
+    }
+  } catch (error) {
+    console.error(error);
+    try {
+      await discardChatMediaUploadCallable({ recipientUid, uploadId: clientMessageId });
+    } catch (cleanupError) {
+      console.warn("Không dọn được tệp Chat tải dở:", cleanupError);
+    }
+    toast(error.message || "Không gửi được hình ảnh hoặc video.", "error");
+  } finally {
+    view.sendingMedia = false;
+    setChatMediaUploadBusy(elements, false);
+    if (elements.fileInput) elements.fileInput.value = "";
+  }
+}
+
 function renderChatMessages(viewKey, { preserveScroll = false, forceBottom = false } = {}) {
   const view = state.chatViewStates.get(viewKey);
   const elements = getChatViewElements(viewKey);
@@ -2532,17 +2830,24 @@ function renderChatMessages(viewKey, { preserveScroll = false, forceBottom = fal
       const receipt = index === messages.length - 1 && own && isChatMessageReadByRecipient(message, conversation)
         ? '<span class="culao-chat-receipt">Đã xem ✓✓</span>'
         : "";
+      const attachmentHtml = renderChatAttachmentsHtml(message);
+      const textHtml = message.text
+        ? `<div class="${attachmentHtml ? "culao-chat-caption" : ""}">${escapeHtml(message.text).replace(/\n/g, "<br>")}</div>`
+        : "";
       return `
         <div class="culao-chat-message-row ${own ? "is-own" : "is-other"}">
           <div class="culao-chat-bubble">
             ${showSender ? `<strong class="culao-chat-sender-name">${escapeHtml(senderName)}</strong>` : ""}
-            <div>${escapeHtml(message.text || "").replace(/\n/g, "<br>")}</div>
+            ${attachmentHtml}
+            ${textHtml}
             <span class="culao-chat-message-meta">${escapeHtml(formatChatMessageTime(message.createdAt))}${receipt}</span>
           </div>
         </div>
       `;
     }).join("");
   }
+
+  hydrateChatMediaElements(elements.messages);
 
   if (elements.loadMore) {
     elements.loadMore.classList.toggle("hidden", !view.hasMore);
@@ -2768,7 +3073,7 @@ async function sendChatMessage(viewKey, recipientUid) {
   const elements = getChatViewElements(viewKey);
   const input = elements.input;
   const form = elements.form;
-  if (!view || view.reviewMode || !input || !recipientUid || view.sending === true) return;
+  if (!view || view.reviewMode || !input || !recipientUid || view.sending === true || view.sendingMedia === true) return;
 
   const text = getChatInputText(input).trim();
   if (!text) return;
@@ -2862,6 +3167,8 @@ function openDesktopChatWindow({ conversationId, partnerUid = "", reviewMode = f
       <div class="culao-chat-messages" data-chat-messages></div>
       ${reviewMode ? '<div class="culao-chat-readonly-note">Admin đang xem lịch sử. Không thể gửi thay người tham gia.</div>' : `
         <form class="culao-chat-composer" data-chat-composer>
+          <button type="button" class="culao-chat-attach-btn" data-chat-attach aria-label="Gửi hình ảnh hoặc video">＋</button>
+          <input class="hidden" type="file" accept="image/*,video/*" multiple data-chat-file-input />
           <textarea data-chat-input rows="1" maxlength="2000" placeholder="Nhập tin nhắn..." aria-label="Nhập tin nhắn"></textarea>
           <button type="submit" class="culao-chat-send-btn" aria-label="Gửi tin nhắn">➤</button>
         </form>
@@ -3105,6 +3412,13 @@ function bindChatUI() {
   els.chatMobileBackBtn?.addEventListener("click", () => closeMobileChatConversation());
   els.chatMobileCloseBtn?.addEventListener("click", closeChatDirectory);
   els.chatMobileLoadMoreBtn?.addEventListener("click", () => loadOlderChatMessages("mobile"));
+  els.chatMobileAttachBtn?.addEventListener("click", () => {
+    if (!state.chatMobilePartnerUid || state.chatMobileReviewMode) return;
+    els.chatMobileFileInput?.click();
+  });
+  els.chatMobileFileInput?.addEventListener("change", async () => {
+    await sendChatMediaFiles("mobile", state.chatMobilePartnerUid, els.chatMobileFileInput?.files);
+  });
 
   // iOS có thể làm mất focus của contenteditable ngay khi chạm nút Gửi,
   // khiến lần chạm đầu chỉ đóng bàn phím và sự kiện click bị nuốt. Gửi ngay từ
@@ -3193,6 +3507,21 @@ function bindChatUI() {
     if (actionButton.hasAttribute("data-chat-load-more")) loadOlderChatMessages(viewKey);
   });
 
+  els.chatMiniContainer?.addEventListener("click", (event) => {
+    const attachButton = event.target.closest("[data-chat-attach]");
+    const root = event.target.closest("[data-chat-view-key]");
+    if (!attachButton || !root) return;
+    root.querySelector("[data-chat-file-input]")?.click();
+  });
+
+  els.chatMiniContainer?.addEventListener("change", async (event) => {
+    const fileInput = event.target.closest("[data-chat-file-input]");
+    const root = event.target.closest("[data-chat-view-key]");
+    if (!fileInput || !root) return;
+    const view = state.chatViewStates.get(root.dataset.chatViewKey);
+    await sendChatMediaFiles(root.dataset.chatViewKey, view?.partnerUid || "", fileInput.files);
+  });
+
   els.chatMiniContainer?.addEventListener("submit", async (event) => {
     const form = event.target.closest("[data-chat-composer]");
     const root = event.target.closest("[data-chat-conversation-id]");
@@ -3230,7 +3559,21 @@ function bindChatUI() {
     }
   });
 
+  els.chatMediaViewerCloseBtn?.addEventListener("click", closeChatMediaViewer);
+  els.chatMediaViewer?.addEventListener("click", (event) => {
+    if (event.target === els.chatMediaViewer) closeChatMediaViewer();
+  });
+
   document.addEventListener("click", (event) => {
+    const mediaButton = event.target.closest("[data-chat-media-open]");
+    if (mediaButton) {
+      openChatMediaViewer(
+        mediaButton.dataset.chatMediaViewPath || "",
+        mediaButton.dataset.chatMediaViewKind || "image",
+        mediaButton.dataset.chatMediaViewName || "Tệp Chat"
+      );
+      return;
+    }
     if (!state.chatDirectoryOpen || isMobileChatLayout()) return;
     if (!event.target.closest(".culao-chat-wrap") && !event.target.closest(".culao-chat-directory-panel")) {
       closeChatDirectory();
@@ -3239,6 +3582,10 @@ function bindChatUI() {
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    if (!els.chatMediaViewer?.classList.contains("hidden")) {
+      closeChatMediaViewer();
+      return;
+    }
     if (!els.chatAdminModal?.classList.contains("hidden")) {
       closeChatAdminModal();
       return;
