@@ -466,6 +466,8 @@ const els = {
   employeeMobileFilterApplyBtn: $("#employeeMobileFilterApplyBtn"),
   employeeActiveFilterChips: $("#employeeActiveFilterChips"),
   employeeMobileResultSummary: $("#employeeMobileResultSummary"),
+  employeeUnassignedWorkOrderCard: $("#employeeUnassignedWorkOrderCard"),
+  employeeUnassignedWorkOrderCount: $("#employeeUnassignedWorkOrderCount"),
   employeeTaskList: $("#employeeTaskList"),
   statDraft: $("#statDraft"),
   statDoing: $("#statDoing"),
@@ -7772,7 +7774,31 @@ function renderTicketGroup(group, mode = "admin") {
   `;
 }
 
+
+function getEmployeeUnassignedWorkOrderCount() {
+  return state.workOrders.filter((workOrder) => (
+    String(workOrder?.status || "").trim().toLowerCase() === "draft"
+  )).length;
+}
+
+function renderEmployeeUnassignedWorkOrderSummary() {
+  const count = getEmployeeUnassignedWorkOrderCount();
+
+  if (els.employeeUnassignedWorkOrderCount) {
+    els.employeeUnassignedWorkOrderCount.textContent = String(count);
+  }
+
+  if (els.employeeUnassignedWorkOrderCard) {
+    els.employeeUnassignedWorkOrderCard.setAttribute(
+      "aria-label",
+      `Hiện còn ${count} Phiếu công việc chưa được giao`
+    );
+  }
+}
+
 function renderEmployeeTasks() {
+  renderEmployeeUnassignedWorkOrderSummary();
+
   let filtered = state.tasks
     .filter((task) => isTaskInDateFilter(task, state.employeeDateFilter))
     .map((task) => ({
