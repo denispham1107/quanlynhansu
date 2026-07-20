@@ -2198,8 +2198,15 @@ function setupChatConversationListener() {
       }
     },
     (error) => {
-      console.error("Không đọc được cuộc trò chuyện:", error);
-      toast("Không đọc được Chat. Hãy deploy Firestore Rules mới.", "error");
+      console.error("Không đồng bộ được danh sách cuộc trò chuyện:", error);
+      const errorCode = String(error?.code || "");
+      if (errorCode === "permission-denied") {
+        toast("Không đồng bộ được danh sách Chat do quyền truy cập. Hãy tải lại trang sau khi cập nhật Firestore Rules.", "error");
+      } else if (["unavailable", "deadline-exceeded", "cancelled"].includes(errorCode) || navigator.onLine === false) {
+        toast("Kết nối Chat tạm thời bị gián đoạn. Hãy kiểm tra mạng rồi mở Chat lại.", "error");
+      } else {
+        toast("Chat tạm thời chưa đồng bộ được. Hãy tải lại trang và thử lại.", "error");
+      }
     }
   );
 
@@ -2448,10 +2455,16 @@ function subscribeChatView({ viewKey, conversationId, partnerUid = "", reviewMod
       requestMarkChatRead(conversationId);
     },
     (error) => {
-      console.error("Không đọc được tin nhắn Chat:", error);
+      console.error("Không đồng bộ được tin nhắn Chat:", error);
       const elements = getChatViewElements(viewKey);
       if (elements.messages) {
-        elements.messages.innerHTML = '<div class="culao-chat-empty">Không đọc được tin nhắn. Hãy deploy Firestore Rules mới.</div>';
+        const errorCode = String(error?.code || "");
+        const message = errorCode === "permission-denied"
+          ? "Không có quyền đọc cuộc trò chuyện này. Hãy tải lại trang sau khi cập nhật Firestore Rules."
+          : (["unavailable", "deadline-exceeded", "cancelled"].includes(errorCode) || navigator.onLine === false)
+            ? "Kết nối Chat đang bị gián đoạn. Hãy kiểm tra mạng rồi thử lại."
+            : "Tin nhắn tạm thời chưa đồng bộ được. Hãy tải lại trang và thử lại.";
+        elements.messages.innerHTML = `<div class="culao-chat-empty">${escapeHtml(message)}</div>`;
       }
     }
   );
