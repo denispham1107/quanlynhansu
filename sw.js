@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260720-chat-media-download-all-v9";
+const CACHE_NAME = "culao-task-shell-v20260720-chat-toast-sender-v10";
 const APP_SHELL = [
   "./",
   "./index.html",

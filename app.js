@@ -1802,7 +1802,16 @@ function setupNotificationListener() {
           return;
         }
 
-        toast(notification.message || notification.title || "Bạn có thông báo mới.", "info");
+        const toastText = notification.type === "chat_message"
+          ? (() => {
+              const senderName = String(notification.actorName || "").trim();
+              const title = String(notification.title || (senderName ? `Tin nhắn từ ${senderName}` : "Tin nhắn mới")).trim();
+              const message = String(notification.message || "").trim();
+              return message ? `${title}: ${message}` : title;
+            })()
+          : (notification.message || notification.title || "Bạn có thông báo mới.");
+
+        toast(toastText, "info");
         showSystemNotification(notification);
       });
     },
