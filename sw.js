@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260720-chat-directory-scroll-fix-v14";
+const CACHE_NAME = "culao-task-shell-v20260721-employee-draft-date-count-v15";
 const APP_SHELL = [
   "./",
   "./index.html",

@@ -91,6 +91,10 @@ const markChatConversationReadCallable = httpsCallable(functions, "markChatConve
 const deleteChatConversationCallable = httpsCallable(functions, "deleteChatConversation");
 const discardChatMediaUploadCallable = httpsCallable(functions, "discardChatMediaUpload");
 const syncChatConversationIndexCallable = httpsCallable(functions, "syncChatConversationIndex");
+const getEmployeeUnassignedTaskCountCallable = httpsCallable(
+  functions,
+  "getEmployeeUnassignedTaskCount"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -149,6 +153,10 @@ const state = {
   employeeWorkOrderSearch: "",
   employeeWorkOrderSuggestionIndex: -1,
   employeeMobileFilterSheetOpen: false,
+  employeeUnassignedTaskCountCache: new Map(),
+  employeeUnassignedTaskCountPendingKey: "",
+  employeeUnassignedTaskCountRequestSerial: 0,
+  employeeUnassignedTaskCountWarningShown: false,
   adminDateFilter: {
     mode: "today",
     single: "",
@@ -4161,6 +4169,10 @@ onAuthStateChanged(auth, async (user) => {
   state.staffAccounts = [];
   state.tasks = [];
   state.workOrders = [];
+  state.employeeUnassignedTaskCountCache = new Map();
+  state.employeeUnassignedTaskCountPendingKey = "";
+  state.employeeUnassignedTaskCountRequestSerial += 1;
+  state.employeeUnassignedTaskCountWarningShown = false;
   state.adminWorkOrderSearch = "";
   state.adminWorkOrderSuggestionIndex = -1;
   if (els.adminWorkOrderSearch) els.adminWorkOrderSearch.value = "";
@@ -8772,6 +8784,12 @@ function setupEmployeeDashboard() {
     employeeWorkOrdersQuery,
     (snapshot) => {
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      // Bất kỳ thay đổi nào ở Phiếu công việc (tạo mới, giao việc hoặc xoá phiếu)
+      // đều có thể làm số lượng "Chưa giao việc" thay đổi. Xoá cache để lần
+      // render kế tiếp lấy lại con số chính xác từ máy chủ theo bộ lọc ngày.
+      state.employeeUnassignedTaskCountCache.clear();
+      state.employeeUnassignedTaskCountPendingKey = "";
+      state.employeeUnassignedTaskCountRequestSerial += 1;
       renderEmployeeTasks();
     },
     (error) => {
@@ -9792,25 +9810,117 @@ function renderTicketGroup(group, mode = "admin") {
 }
 
 
-function getEmployeeUnassignedWorkOrderCount() {
-  return state.workOrders.filter((workOrder) => (
-    String(workOrder?.status || "").trim().toLowerCase() === "draft"
-  )).length;
+function getEmployeeUnassignedDateScope(filter = state.employeeDateFilter) {
+  const safeFilter = filter || { mode: "all", single: "", from: "", to: "" };
+
+  if (safeFilter.mode === "today") {
+    const date = todayInputValue();
+    return { from: date, to: date };
+  }
+
+  if (safeFilter.mode === "yesterday") {
+    const date = yesterdayInputValue();
+    return { from: date, to: date };
+  }
+
+  if (safeFilter.mode === "current_month" || safeFilter.mode === "previous_month") {
+    const range = getMonthDateRange(safeFilter.mode === "current_month" ? 0 : -1);
+    return { from: range.from, to: range.to };
+  }
+
+  if (safeFilter.mode === "single") {
+    const date = String(safeFilter.single || "").trim();
+    return date ? { from: date, to: date } : { from: "", to: "" };
+  }
+
+  if (safeFilter.mode === "range") {
+    return {
+      from: String(safeFilter.from || "").trim(),
+      to: String(safeFilter.to || "").trim()
+    };
+  }
+
+  return { from: "", to: "" };
 }
 
-function renderEmployeeUnassignedWorkOrderSummary() {
-  const count = getEmployeeUnassignedWorkOrderCount();
+function getEmployeeUnassignedDateScopeKey(scope = getEmployeeUnassignedDateScope()) {
+  return `${scope.from || "*"}|${scope.to || "*"}`;
+}
+
+function updateEmployeeUnassignedTaskCountDisplay(value, options = {}) {
+  const text = String(value);
 
   if (els.employeeUnassignedWorkOrderCount) {
-    els.employeeUnassignedWorkOrderCount.textContent = String(count);
+    els.employeeUnassignedWorkOrderCount.textContent = text;
   }
 
   if (els.employeeUnassignedWorkOrderCard) {
-    els.employeeUnassignedWorkOrderCard.setAttribute(
-      "aria-label",
-      `Hiện còn ${count} Phiếu công việc chưa được giao`
-    );
+    const ariaLabel = options.loading
+      ? "Đang tải số lượng công việc chưa giao theo bộ lọc ngày"
+      : `Hiện còn ${text} công việc chưa được giao trong thời gian đang chọn`;
+    els.employeeUnassignedWorkOrderCard.setAttribute("aria-label", ariaLabel);
   }
+}
+
+async function refreshEmployeeUnassignedTaskCount() {
+  if (!state.user?.uid || state.profile?.role !== "employee") return;
+
+  const scope = getEmployeeUnassignedDateScope();
+  const cacheKey = getEmployeeUnassignedDateScopeKey(scope);
+  const cachedCount = state.employeeUnassignedTaskCountCache.get(cacheKey);
+
+  if (Number.isFinite(cachedCount)) {
+    updateEmployeeUnassignedTaskCountDisplay(cachedCount);
+    return;
+  }
+
+  if (state.employeeUnassignedTaskCountPendingKey === cacheKey) return;
+
+  const requestSerial = ++state.employeeUnassignedTaskCountRequestSerial;
+  state.employeeUnassignedTaskCountPendingKey = cacheKey;
+  updateEmployeeUnassignedTaskCountDisplay("…", { loading: true });
+
+  try {
+    const result = await getEmployeeUnassignedTaskCountCallable({ dateScope: scope });
+    const count = Math.max(0, Number(result?.data?.count || 0));
+    state.employeeUnassignedTaskCountCache.set(cacheKey, count);
+    state.employeeUnassignedTaskCountWarningShown = false;
+
+    const currentKey = getEmployeeUnassignedDateScopeKey();
+    if (requestSerial === state.employeeUnassignedTaskCountRequestSerial && currentKey === cacheKey) {
+      updateEmployeeUnassignedTaskCountDisplay(count);
+    }
+  } catch (error) {
+    console.error("EMPLOYEE UNASSIGNED TASK COUNT ERROR:", error);
+
+    const currentKey = getEmployeeUnassignedDateScopeKey();
+    if (requestSerial === state.employeeUnassignedTaskCountRequestSerial && currentKey === cacheKey) {
+      updateEmployeeUnassignedTaskCountDisplay("--");
+    }
+
+    if (!state.employeeUnassignedTaskCountWarningShown) {
+      state.employeeUnassignedTaskCountWarningShown = true;
+      toast("Chưa đồng bộ được số Chưa giao việc theo bộ lọc ngày. Hệ thống sẽ thử lại khi dữ liệu thay đổi.", "error");
+    }
+  } finally {
+    if (state.employeeUnassignedTaskCountPendingKey === cacheKey) {
+      state.employeeUnassignedTaskCountPendingKey = "";
+    }
+  }
+}
+
+function renderEmployeeUnassignedWorkOrderSummary() {
+  const scope = getEmployeeUnassignedDateScope();
+  const cacheKey = getEmployeeUnassignedDateScopeKey(scope);
+  const cachedCount = state.employeeUnassignedTaskCountCache.get(cacheKey);
+
+  if (Number.isFinite(cachedCount)) {
+    updateEmployeeUnassignedTaskCountDisplay(cachedCount);
+  } else {
+    updateEmployeeUnassignedTaskCountDisplay("…", { loading: true });
+  }
+
+  void refreshEmployeeUnassignedTaskCount();
 }
 
 function renderEmployeeTasks() {
