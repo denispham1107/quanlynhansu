@@ -1378,8 +1378,29 @@ function isPhotoCapturedBeforeTaskAssignment(capturedAt, task) {
   return capturedDate.getTime() + PHOTO_CAPTURE_BEFORE_ASSIGNMENT_TOLERANCE_MS < assignmentDate.getTime();
 }
 
+function isTruthyPhotoValidationFlag(value) {
+  if (value === true || value === 1) return true;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
 function isPreAssignmentPhoto(photo) {
-  return Boolean(photo?.capturedBeforeAssignment || photo?.takenBeforeDispatch);
+  return isTruthyPhotoValidationFlag(photo?.capturedBeforeAssignment)
+    || isTruthyPhotoValidationFlag(photo?.takenBeforeDispatch);
+}
+
+function isInvalidReportPhoto(photo) {
+  const validationStatus = String(photo?.validationStatus || photo?.validity || "").trim().toLowerCase();
+  return isPreAssignmentPhoto(photo)
+    || photo?.invalid === true
+    || photo?.isInvalid === true
+    || validationStatus === "invalid";
+}
+
+function getInvalidReportPhotoReason(photo) {
+  if (isPreAssignmentPhoto(photo)) return "Ảnh chụp trước khi giao việc";
+  return String(photo?.invalidReason || photo?.validationMessage || "Ảnh báo cáo không hợp lệ").trim()
+    || "Ảnh báo cáo không hợp lệ";
 }
 
 function getOptimizedImageFileName(fileName = "image.jpg") {
@@ -1517,6 +1538,171 @@ function getOptimizationSummary(results = []) {
 }
 
 
+const REPORT_PHOTO_CONTENT_HASH_ALGORITHM = "sha256-v1";
+const REPORT_PHOTO_VISUAL_HASH_ALGORITHM = "dhash64-v1";
+
+function bytesToHex(bytes = []) {
+  return Array.from(bytes, (value) => Number(value || 0).toString(16).padStart(2, "0")).join("");
+}
+
+function createFallbackBinaryHash(buffer) {
+  const bytes = new Uint8Array(buffer || new ArrayBuffer(0));
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    hash ^= bytes[index];
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+
+  return `fnv32-${hash.toString(16).padStart(8, "0")}-${bytes.length}`;
+}
+
+async function createReportPhotoContentHash(blob) {
+  const buffer = await blob.arrayBuffer();
+
+  if (globalThis.crypto?.subtle?.digest) {
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
+    return bytesToHex(new Uint8Array(digest));
+  }
+
+  return createFallbackBinaryHash(buffer);
+}
+
+function getPixelGrayValue(pixelData, offset) {
+  return Math.round(
+    Number(pixelData[offset] || 0) * 0.299
+    + Number(pixelData[offset + 1] || 0) * 0.587
+    + Number(pixelData[offset + 2] || 0) * 0.114
+  );
+}
+
+async function createReportPhotoVisualHash(blob) {
+  const image = await loadImageElementFromFile(blob);
+  const sourceWidth = Number(image.naturalWidth || image.width || 0);
+  const sourceHeight = Number(image.naturalHeight || image.height || 0);
+
+  if (!sourceWidth || !sourceHeight) {
+    return { visualHash: "", aspectRatio: 0 };
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 9;
+  canvas.height = 8;
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return { visualHash: "", aspectRatio: sourceWidth / sourceHeight };
+
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let bitText = "";
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width - 1; x += 1) {
+      const leftOffset = (y * canvas.width + x) * 4;
+      const rightOffset = (y * canvas.width + x + 1) * 4;
+      bitText += getPixelGrayValue(imageData, leftOffset) > getPixelGrayValue(imageData, rightOffset)
+        ? "1"
+        : "0";
+    }
+  }
+
+  let visualHash = "";
+  for (let index = 0; index < bitText.length; index += 4) {
+    visualHash += Number.parseInt(bitText.slice(index, index + 4), 2).toString(16);
+  }
+
+  return {
+    visualHash: visualHash.padStart(16, "0"),
+    aspectRatio: sourceWidth / sourceHeight
+  };
+}
+
+async function createReportPhotoFingerprint(blob) {
+  const contentHash = await createReportPhotoContentHash(blob);
+  let visualInfo = { visualHash: "", aspectRatio: 0 };
+
+  try {
+    visualInfo = await createReportPhotoVisualHash(blob);
+  } catch (error) {
+    console.warn("Không tạo được dấu vân tay hình ảnh, sẽ kiểm tra trùng bằng nội dung file:", error);
+  }
+
+  return {
+    contentHash,
+    contentHashAlgorithm: REPORT_PHOTO_CONTENT_HASH_ALGORITHM,
+    visualHash: visualInfo.visualHash,
+    visualHashAlgorithm: REPORT_PHOTO_VISUAL_HASH_ALGORITHM,
+    aspectRatio: Number(visualInfo.aspectRatio || 0)
+  };
+}
+
+function getStoredReportPhotoFingerprint(photo = {}) {
+  return {
+    contentHash: String(photo.contentHash || photo.binaryHash || "").trim().toLowerCase(),
+    contentHashAlgorithm: String(photo.contentHashAlgorithm || "").trim(),
+    visualHash: String(photo.visualHash || photo.perceptualHash || "").trim().toLowerCase(),
+    visualHashAlgorithm: String(photo.visualHashAlgorithm || "").trim(),
+    aspectRatio: Number(photo.aspectRatio || 0)
+  };
+}
+
+function areReportPhotoFingerprintsDuplicate(first = {}, second = {}) {
+  const firstContentHash = String(first.contentHash || "").trim().toLowerCase();
+  const secondContentHash = String(second.contentHash || "").trim().toLowerCase();
+  if (firstContentHash && secondContentHash && firstContentHash === secondContentHash) return true;
+
+  const firstVisualHash = String(first.visualHash || "").trim().toLowerCase();
+  const secondVisualHash = String(second.visualHash || "").trim().toLowerCase();
+  if (!firstVisualHash || !secondVisualHash || firstVisualHash !== secondVisualHash) return false;
+
+  const firstRatio = Number(first.aspectRatio || 0);
+  const secondRatio = Number(second.aspectRatio || 0);
+  if (!firstRatio || !secondRatio) return true;
+
+  return Math.abs(firstRatio - secondRatio) <= 0.015;
+}
+
+async function getReportPhotoBlob(photo) {
+  const path = String(photo?.storagePath || "").trim();
+  if (path) return getBlob(storageRef(storage, path));
+
+  const url = String(photo?.url || "").trim();
+  if (!url) throw new Error("Ảnh báo cáo không có đường dẫn để kiểm tra trùng lặp.");
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Không đọc được ảnh đã đăng (${response.status}).`);
+  return response.blob();
+}
+
+async function getExistingReportPhotoFingerprints(task, button) {
+  const photos = getTaskPhotos(task);
+  const fingerprints = [];
+
+  for (let index = 0; index < photos.length; index += 1) {
+    const photo = photos[index];
+    let fingerprint = getStoredReportPhotoFingerprint(photo);
+
+    if (!fingerprint.contentHash && !fingerprint.visualHash) {
+      try {
+        if (button) button.textContent = `Đang đối chiếu ảnh cũ ${index + 1}/${photos.length}...`;
+        const blob = await getReportPhotoBlob(photo);
+        fingerprint = await createReportPhotoFingerprint(blob);
+      } catch (error) {
+        console.warn("Không tạo được dấu vân tay cho ảnh báo cáo cũ:", photo, error);
+      }
+    }
+
+    if (fingerprint.contentHash || fingerprint.visualHash) fingerprints.push(fingerprint);
+  }
+
+  return fingerprints;
+}
+
+function findMatchingReportPhotoFingerprint(fingerprint, knownFingerprints = []) {
+  return knownFingerprints.find((item) => areReportPhotoFingerprintsDuplicate(fingerprint, item)) || null;
+}
+
+
 function getTaskPhotos(task) {
   return Array.isArray(task?.photos) ? task.photos.filter((item) => item?.url) : [];
 }
@@ -1524,6 +1710,18 @@ function getTaskPhotos(task) {
 function getTaskPhotoCount(task) {
   const count = Number(task?.photoCount ?? getTaskPhotos(task).length ?? 0);
   return Number.isFinite(count) ? count : 0;
+}
+
+function getTaskInvalidPhotos(task) {
+  return getTaskPhotos(task).filter((photo) => isInvalidReportPhoto(photo));
+}
+
+function getTaskInvalidPhotoCount(task) {
+  return getTaskInvalidPhotos(task).length;
+}
+
+function getTaskValidPhotoCount(task) {
+  return Math.max(0, getTaskPhotoCount(task) - getTaskInvalidPhotoCount(task));
 }
 
 function taskRequiresPhotos(task) {
@@ -1536,9 +1734,44 @@ function getTaskRequiredPhotoCount(task) {
   return Number.isFinite(count) && count > 0 ? count : 1;
 }
 
+function getTaskPhotoCompletionState(task) {
+  const required = taskRequiresPhotos(task);
+  const requiredCount = getTaskRequiredPhotoCount(task);
+  const totalCount = getTaskPhotoCount(task);
+  const invalidCount = getTaskInvalidPhotoCount(task);
+  const validCount = Math.max(0, totalCount - invalidCount);
+  const enoughValidPhotos = !required || validCount >= requiredCount;
+  const ready = !required || (enoughValidPhotos && invalidCount === 0);
+
+  return {
+    required,
+    requiredCount,
+    totalCount,
+    validCount,
+    invalidCount,
+    enoughValidPhotos,
+    ready
+  };
+}
+
+function getTaskPhotoCompletionBlockedMessage(task) {
+  const photoState = getTaskPhotoCompletionState(task);
+  if (!photoState.required || photoState.ready) return "";
+
+  if (photoState.invalidCount > 0) {
+    const missingCount = Math.max(0, photoState.requiredCount - photoState.validCount);
+    const replacementText = missingCount > 0
+      ? ` Bạn cần đăng lại ít nhất ${missingCount} ảnh hợp lệ để đủ số lượng.`
+      : ` Hãy xóa ${photoState.invalidCount} ảnh này trước khi hoàn thành.`;
+    return `Có ${photoState.invalidCount} ảnh báo cáo không hợp lệ.${replacementText}`;
+  }
+
+  const missingCount = Math.max(0, photoState.requiredCount - photoState.validCount);
+  return `Cần đăng thêm ${missingCount} ảnh báo cáo hợp lệ trước khi hoàn thành.`;
+}
+
 function hasEnoughRequiredPhotos(task) {
-  if (!taskRequiresPhotos(task)) return true;
-  return getTaskPhotoCount(task) >= getTaskRequiredPhotoCount(task);
+  return getTaskPhotoCompletionState(task).ready;
 }
 
 const LUNCH_BREAK_MAX_MINUTES_PER_DAY = 30;
@@ -10516,11 +10749,10 @@ function toggleTaskMobileDetails(button) {
 }
 
 function renderDesktopTaskSummary(task, mode, employeeName, initialCountdownText) {
-  const photoCount = getTaskPhotoCount(task);
-  const requiredPhotoCount = getTaskRequiredPhotoCount(task);
-  const photoText = taskRequiresPhotos(task)
-    ? `${photoCount}/${requiredPhotoCount} hình`
-    : `${photoCount} hình`;
+  const photoState = getTaskPhotoCompletionState(task);
+  const photoText = photoState.required
+    ? `${photoState.validCount}/${photoState.requiredCount} hợp lệ${photoState.invalidCount ? ` • ${photoState.invalidCount} không hợp lệ` : ""}`
+    : `${photoState.totalCount} hình`;
 
   return `
     <div class="task-desktop-summary" aria-label="Tóm tắt công việc trên desktop">
@@ -10625,17 +10857,18 @@ function renderTaskCard(task, mode) {
   const mobileDetailsId = `task-mobile-details-${String(task.id || "task").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
   const initialCountdownText = getInitialCountdownText(task);
-  const mobilePhotoCount = getTaskPhotoCount(task);
+  const mobilePhotoState = getTaskPhotoCompletionState(task);
+  const mobilePhotoCount = mobilePhotoState.totalCount;
   const canViewMobilePhotos = mobilePhotoCount > 0 && (mode === "admin" || mode === "employee");
   const mobilePhotoQuickAction = canViewMobilePhotos
     ? `
       <button
-        class="task-mobile-photo-action"
+        class="task-mobile-photo-action ${mobilePhotoState.invalidCount > 0 ? "has-invalid-photos" : ""}"
         data-action="view-task-photos"
         data-task-id="${escapeHtml(task.id)}"
         type="button"
       >
-        Xem hình (${mobilePhotoCount})
+        Xem hình (${mobilePhotoCount}${mobilePhotoState.invalidCount > 0 ? ` • ${mobilePhotoState.invalidCount} không hợp lệ` : ""})
       </button>
     `
     : "";
@@ -10654,13 +10887,18 @@ function renderTaskCard(task, mode) {
     `
     : "";
 
+  const photoCompletionState = getTaskPhotoCompletionState(task);
   const taskActions = renderTaskActions(task, {
     canEmployeeSubmit,
     canAdminReview,
     canAdminEndLunchBreak: canAdminEndLunchBreak(task, mode),
     canAdminExtendTime: canAdminExtendTaskTime(task, mode),
     canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
-    submitPhotoReady: hasEnoughRequiredPhotos(task)
+    submitPhotoReady: photoCompletionState.ready,
+    submitPhotoBlockedReason: getTaskPhotoCompletionBlockedMessage(task),
+    submitInvalidPhotoCount: photoCompletionState.required && !photoCompletionState.ready
+      ? photoCompletionState.invalidCount
+      : 0
   });
 
   return `
@@ -10875,17 +11113,25 @@ function renderLunchBreakHistoryBox(task) {
 }
 
 function renderPhotoReportBox(task, mode) {
-  const photoCount = getTaskPhotoCount(task);
-  const required = taskRequiresPhotos(task);
-  const requiredCount = getTaskRequiredPhotoCount(task);
-  const enough = hasEnoughRequiredPhotos(task);
+  const photoState = getTaskPhotoCompletionState(task);
+  const photoCount = photoState.totalCount;
+  const required = photoState.required;
+  const requiredCount = photoState.requiredCount;
+  const enough = photoState.ready;
   const summary = required
-    ? `Bắt buộc ${requiredCount} hình • đã đăng ${photoCount}/${requiredCount}`
+    ? `Bắt buộc ${requiredCount} ảnh hợp lệ • đã đăng ${photoCount} ảnh (${photoState.validCount} hợp lệ, ${photoState.invalidCount} không hợp lệ)`
     : `Không bắt buộc đăng hình • đã đăng ${photoCount} hình`;
 
-  const statusText = required
-    ? (enough ? "Đã đủ hình báo cáo" : `Còn thiếu ${Math.max(0, requiredCount - photoCount)} hình`)
-    : "Nhân viên có thể hoàn thành mà không cần đăng hình";
+  let statusText = "Nhân viên có thể hoàn thành mà không cần đăng hình";
+  if (photoState.invalidCount > 0) {
+    statusText = required
+      ? `Có ${photoState.invalidCount} ảnh báo cáo không hợp lệ. Hãy xóa hoặc thay ảnh này trước khi hoàn thành.`
+      : `Có ${photoState.invalidCount} ảnh báo cáo không hợp lệ; công việc này không bắt buộc ảnh.`;
+  } else if (required) {
+    statusText = photoState.enoughValidPhotos
+      ? "Đã đủ ảnh báo cáo hợp lệ"
+      : `Còn thiếu ${Math.max(0, requiredCount - photoState.validCount)} ảnh hợp lệ`;
+  }
 
   const canView = photoCount > 0 && (mode === "admin" || mode === "employee");
   const editableByAdmin = hasPermission("managePhotoRequirements") && !["completed"].includes(task.status);
@@ -10895,12 +11141,13 @@ function renderPhotoReportBox(task, mode) {
 
   return `
     <div
-      class="photo-report-box ${required && !enough ? "is-missing" : ""} ${editableByAdmin ? "is-admin-editable" : ""}"
+      class="photo-report-box ${required && !enough ? "is-missing" : ""} ${photoState.invalidCount > 0 ? "has-invalid-photos" : ""} ${editableByAdmin ? "is-admin-editable" : ""}"
       ${editableByAdmin ? `data-action="edit-photo-requirement" data-task-id="${escapeHtml(task.id)}" role="button" tabindex="0" title="${escapeHtml(titleText)}"` : ""}
     >
       <div>
         <strong>Ảnh báo cáo</strong>
         <span>${escapeHtml(summary)} • ${escapeHtml(statusText)}</span>
+        ${required && photoState.invalidCount > 0 ? `<small class="photo-report-invalid-note">⚠ ${photoState.invalidCount} ảnh không hợp lệ không được tính vào số lượng bắt buộc và đang khóa nút “Hoàn thành”.</small>` : ""}
         ${editableByAdmin ? `<small class="photo-report-hint">Admin bấm vào ô này hoặc nút “Chỉnh số ảnh” để sửa số lượng ảnh bắt buộc.</small>` : ""}
       </div>
       ${(editableByAdmin || canView) ? `
@@ -11271,12 +11518,16 @@ function renderTaskActions(task, permissions) {
 
   if (permissions.canEmployeeSubmit) {
     const disabled = permissions.submitPhotoReady ? "" : " disabled";
-    const title = permissions.submitPhotoReady ? "" : " title=\"Cần đăng đủ số lượng hình theo quy định trước khi hoàn thành\"";
+    const blockedReason = permissions.submitPhotoBlockedReason || "Cần đăng đủ số lượng ảnh hợp lệ theo quy định trước khi hoàn thành";
+    const title = permissions.submitPhotoReady ? "" : ` title="${escapeHtml(blockedReason)}"`;
 
     buttons.push(`
       <button class="btn primary" data-action="submit-task" data-task-id="${escapeHtml(task.id)}"${disabled}${title}>
         Hoàn thành
       </button>
+      ${Number(permissions.submitInvalidPhotoCount || 0) > 0
+        ? `<span class="task-photo-block-message">⚠ ${Number(permissions.submitInvalidPhotoCount || 0)} ảnh không hợp lệ</span>`
+        : ""}
     `);
   }
 
@@ -13191,18 +13442,20 @@ function renderPhotoReportPageContent(task) {
 
   if (els.photoReportSummary) {
     const employeeName = task.assignedToName || getEmployeeDisplayNameByUid(task.assignedToUid, "Nhân viên");
-    const requiredCount = getTaskRequiredPhotoCount(task);
-    const requiresPhotos = taskRequiresPhotos(task);
-    const hasEnoughPhotos = !requiresPhotos || photos.length >= requiredCount;
-    const requirementText = requiresPhotos
-      ? `${photos.length}/${requiredCount} ảnh`
+    const photoState = getTaskPhotoCompletionState(task);
+    const requirementText = photoState.required
+      ? `${photoState.validCount}/${photoState.requiredCount} ảnh hợp lệ`
       : "Không bắt buộc";
-    const statusText = requiresPhotos
-      ? (hasEnoughPhotos ? "Đã đủ ảnh" : "Còn thiếu ảnh")
-      : "Ảnh tự chọn";
-    const statusClass = requiresPhotos
-      ? (hasEnoughPhotos ? "is-success" : "is-warning")
-      : "is-neutral";
+    const statusText = photoState.invalidCount > 0
+      ? `${photoState.invalidCount} ảnh không hợp lệ`
+      : (photoState.required
+        ? (photoState.ready ? "Đã đủ ảnh" : "Còn thiếu ảnh")
+        : "Ảnh tự chọn");
+    const statusClass = photoState.invalidCount > 0
+      ? "is-danger"
+      : (photoState.required
+        ? (photoState.ready ? "is-success" : "is-warning")
+        : "is-neutral");
 
     els.photoReportSummary.innerHTML = `
       <span class="photo-report-meta-chip">👤 ${escapeHtml(employeeName)}</span>
@@ -13220,11 +13473,12 @@ function renderPhotoReportPageContent(task) {
         const photoKey = getPhotoStableKey(photo, index);
         const selected = isManager && state.photoReportSelectedKeys.has(photoKey);
         const displayName = photo.name || `Ảnh ${index + 1}`;
-        const capturedBeforeAssignment = isPreAssignmentPhoto(photo);
+        const invalidPhoto = isInvalidReportPhoto(photo);
+        const invalidReason = getInvalidReportPhotoReason(photo);
 
         return `
           <article
-            class="photo-report-item ${selected ? "is-selected" : ""} ${capturedBeforeAssignment ? "is-pre-assignment-photo" : ""}"
+            class="photo-report-item ${selected ? "is-selected" : ""} ${invalidPhoto ? "is-pre-assignment-photo" : ""}"
             data-photo-key="${escapeHtml(photoKey)}"
           >
             <button
@@ -13235,7 +13489,7 @@ function renderPhotoReportPageContent(task) {
             >
               <span class="photo-report-image-wrap">
                 <img src="${escapeHtml(photo.url)}" alt="Ảnh báo cáo ${index + 1}" loading="lazy" />
-                ${capturedBeforeAssignment ? `<span class="photo-capture-warning">Ảnh chụp trước khi giao việc</span>` : ""}
+                ${invalidPhoto ? `<span class="photo-capture-warning">Ảnh không hợp lệ<br>${escapeHtml(invalidReason)}</span>` : ""}
               </span>
               <div>
                 <strong>${escapeHtml(displayName)}</strong>
@@ -13331,6 +13585,16 @@ function validateSelectedPhotoFiles(files) {
   return null;
 }
 
+function cleanupUncommittedReportPhotos(photos = []) {
+  const uniquePaths = Array.from(new Set(
+    photos.map((photo) => String(photo?.storagePath || "").trim()).filter(Boolean)
+  ));
+
+  await Promise.allSettled(
+    uniquePaths.map((path) => deleteObject(storageRef(storage, path)))
+  );
+}
+
 async function openPhotoUploadPicker(taskId, button) {
   const task = state.tasks.find((item) => item.id === taskId);
 
@@ -13361,24 +13625,49 @@ async function openPhotoUploadPicker(taskId, button) {
       return;
     }
 
-    setButtonLoading(button, true, "Đang tối ưu hình...");
+    setButtonLoading(button, true, "Đang kiểm tra ảnh trùng...");
+
+    const uploadedPhotos = [];
+    let committedPhotoIds = new Set();
 
     try {
       const now = new Date();
-      const uploadedPhotos = [];
       const optimizedResults = [];
+      const duplicateFiles = [];
+      const knownFingerprints = await getExistingReportPhotoFingerprints(task, button);
 
       for (let index = 0; index < files.length; index += 1) {
-        if (button) button.textContent = `Đang kiểm tra ${index + 1}/${files.length}...`;
-        const captureInfo = await readPhotoCapturedAt(files[index]);
+        const originalFile = files[index];
+        if (button) button.textContent = `Đang kiểm tra ảnh ${index + 1}/${files.length}...`;
+
+        const fingerprint = await createReportPhotoFingerprint(originalFile);
+        const duplicateFingerprint = findMatchingReportPhotoFingerprint(fingerprint, knownFingerprints);
+
+        if (duplicateFingerprint) {
+          duplicateFiles.push(originalFile);
+          continue;
+        }
+
+        knownFingerprints.push(fingerprint);
+        const captureInfo = await readPhotoCapturedAt(originalFile);
         if (button) button.textContent = `Đang tối ưu ${index + 1}/${files.length}...`;
-        const optimizedItem = await optimizePhotoFileForUpload(files[index]);
+        const optimizedItem = await optimizePhotoFileForUpload(originalFile);
+
         optimizedResults.push({
           ...optimizedItem,
+          ...fingerprint,
           capturedAtDate: captureInfo.date,
           captureTimeSource: captureInfo.source,
           capturedBeforeAssignment: isPhotoCapturedBeforeTaskAssignment(captureInfo.date, task)
         });
+      }
+
+      if (!optimizedResults.length) {
+        toast(
+          `Không có hình mới để đăng. Hệ thống đã bỏ qua ${duplicateFiles.length} hình trùng lặp; vui lòng chọn hình khác.`,
+          "warning"
+        );
+        return;
       }
 
       const optimizationSummary = getOptimizationSummary(optimizedResults);
@@ -13403,7 +13692,12 @@ async function openPhotoUploadPicker(taskId, button) {
             originalSize: String(item.originalSize || file.size || 0),
             capturedAt: item.capturedAtDate?.toISOString?.() || "",
             captureTimeSource: item.captureTimeSource || "unavailable",
-            capturedBeforeAssignment: item.capturedBeforeAssignment ? "true" : "false"
+            capturedBeforeAssignment: item.capturedBeforeAssignment ? "true" : "false",
+            contentHash: item.contentHash || "",
+            contentHashAlgorithm: item.contentHashAlgorithm || REPORT_PHOTO_CONTENT_HASH_ALGORITHM,
+            visualHash: item.visualHash || "",
+            visualHashAlgorithm: item.visualHashAlgorithm || REPORT_PHOTO_VISUAL_HASH_ALGORITHM,
+            aspectRatio: String(item.aspectRatio || 0)
           }
         });
 
@@ -13421,6 +13715,11 @@ async function openPhotoUploadPicker(taskId, button) {
           optimized: Boolean(item.optimized),
           width: Number(item.width || 0),
           height: Number(item.height || 0),
+          contentHash: item.contentHash || "",
+          contentHashAlgorithm: item.contentHashAlgorithm || REPORT_PHOTO_CONTENT_HASH_ALGORITHM,
+          visualHash: item.visualHash || "",
+          visualHashAlgorithm: item.visualHashAlgorithm || REPORT_PHOTO_VISUAL_HASH_ALGORITHM,
+          aspectRatio: Number(item.aspectRatio || 0),
           uploadedAt: Timestamp.fromDate(now),
           capturedAt: item.capturedAtDate ? Timestamp.fromDate(item.capturedAtDate) : null,
           captureTimeSource: item.captureTimeSource || "unavailable",
@@ -13431,23 +13730,81 @@ async function openPhotoUploadPicker(taskId, button) {
         });
       }
 
-      if (!uploadedPhotos.length) return;
+      const taskRef = doc(db, "tasks", task.id);
+      let transactionResult = { committedPhotos: [], duplicatePhotos: [] };
 
-      await updateDoc(doc(db, "tasks", task.id), {
-        photos: arrayUnion(...uploadedPhotos),
-        photoCount: increment(uploadedPhotos.length),
-        lastPhotoUploadedAt: serverTimestamp()
+      await runTransaction(db, async (transaction) => {
+        const latestTaskSnap = await transaction.get(taskRef);
+        if (!latestTaskSnap.exists()) throw new Error("Không tìm thấy công việc cần đăng hình.");
+
+        const latestTask = { id: latestTaskSnap.id, ...latestTaskSnap.data() };
+        if (latestTask.assignedToUid !== state.user.uid) {
+          throw new Error("Bạn không còn là nhân viên phụ trách công việc này.");
+        }
+
+        const latestPhotos = getTaskPhotos(latestTask);
+        const latestFingerprints = latestPhotos
+          .map((photo) => getStoredReportPhotoFingerprint(photo))
+          .filter((fingerprint) => fingerprint.contentHash || fingerprint.visualHash);
+        const committedPhotos = [];
+        const duplicatePhotos = [];
+
+        uploadedPhotos.forEach((photo) => {
+          const fingerprint = getStoredReportPhotoFingerprint(photo);
+          if (findMatchingReportPhotoFingerprint(fingerprint, latestFingerprints)) {
+            duplicatePhotos.push(photo);
+            return;
+          }
+
+          latestFingerprints.push(fingerprint);
+          committedPhotos.push(photo);
+        });
+
+        if (committedPhotos.length) {
+          const nextPhotos = [...latestPhotos, ...committedPhotos];
+          transaction.update(taskRef, {
+            photos: nextPhotos,
+            photoCount: nextPhotos.length,
+            lastPhotoUploadedAt: serverTimestamp()
+          });
+        }
+
+        transactionResult = { committedPhotos, duplicatePhotos };
       });
+
+      committedPhotoIds = new Set(transactionResult.committedPhotos.map((photo) => photo.id));
+      await cleanupUncommittedReportPhotos(transactionResult.duplicatePhotos);
+
+      const duplicateCount = duplicateFiles.length + transactionResult.duplicatePhotos.length;
+      const committedPhotos = transactionResult.committedPhotos;
+
+      if (!committedPhotos.length) {
+        toast(
+          `Không có hình mới được đăng. Hệ thống đã bỏ qua ${duplicateCount} hình trùng lặp; vui lòng chọn ${duplicateCount} hình khác.`,
+          "warning"
+        );
+        return;
+      }
 
       const savedText = optimizationSummary.savedBytes > 0
         ? ` Đã tối ưu giảm khoảng ${formatFileSize(optimizationSummary.savedBytes)}.`
         : "";
-      const preAssignmentCount = uploadedPhotos.filter((photo) => photo.capturedBeforeAssignment).length;
-      const warningText = preAssignmentCount > 0
-        ? ` Có ${preAssignmentCount} ảnh được phát hiện chụp trước khi giao việc và đã được đánh dấu.`
+      const preAssignmentCount = committedPhotos.filter((photo) => photo.capturedBeforeAssignment).length;
+      const invalidText = preAssignmentCount > 0
+        ? ` Có ${preAssignmentCount} ảnh không hợp lệ cần xử lý hoặc đăng lại trước khi bấm Hoàn thành.`
         : "";
-      toast(`Đã đăng thành công ${uploadedPhotos.length} hình.${savedText}${warningText}`, preAssignmentCount > 0 ? "warning" : "success");
+      const duplicateText = duplicateCount > 0
+        ? ` Đã bỏ qua ${duplicateCount} hình trùng lặp và không tải chúng lên; hãy chọn ${duplicateCount} hình khác nếu vẫn chưa đủ số lượng.`
+        : "";
+      const toastType = preAssignmentCount > 0 || duplicateCount > 0 ? "warning" : "success";
+
+      toast(
+        `Đã đăng thành công ${committedPhotos.length} hình.${savedText}${invalidText}${duplicateText}`,
+        toastType
+      );
     } catch (error) {
+      const uncommittedPhotos = uploadedPhotos.filter((photo) => !committedPhotoIds.has(photo.id));
+      await cleanupUncommittedReportPhotos(uncommittedPhotos);
       console.error(error);
       toast(error.message || "Không đăng được hình. Kiểm tra Firebase Storage Rules hoặc kết nối mạng.", "error");
     } finally {
@@ -14111,13 +14468,22 @@ async function submitTask(taskId, button) {
   setButtonLoading(button, true, "Đang gửi...");
 
   try {
-    const task = state.tasks.find((item) => item.id === taskId);
+    const taskRef = doc(db, "tasks", taskId);
+    const taskSnap = await getDoc(taskRef);
+    const task = taskSnap.exists()
+      ? { id: taskSnap.id, ...taskSnap.data() }
+      : state.tasks.find((item) => item.id === taskId);
 
     if (!task || task.assignedToUid !== state.user.uid) {
       throw new Error("Bạn không có quyền hoàn thành công việc này.");
     }
 
-    await updateDoc(doc(db, "tasks", taskId), {
+    const photoBlockedMessage = getTaskPhotoCompletionBlockedMessage(task);
+    if (photoBlockedMessage) {
+      throw new Error(photoBlockedMessage);
+    }
+
+    await updateDoc(taskRef, {
       status: "submitted",
       submittedAt: serverTimestamp()
     });

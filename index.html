@@ -10626,4 +10626,64 @@
       border-radius: 13px !important;
     }
   }
+
+
+    /* Khôi phục kiểm tra ảnh báo cáo không hợp lệ và cảnh báo chặn Hoàn thành. */
+    .photo-report-box.has-invalid-photos {
+      border-color: #f43f5e;
+      background: linear-gradient(135deg, #fff1f2 0%, #faf5ff 100%);
+      box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.08);
+    }
+
+    .photo-report-invalid-note {
+      display: block;
+      margin-top: 7px;
+      color: #be123c;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.45;
+    }
+
+    .task-photo-block-message {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      padding: 5px 9px;
+      border: 1px solid #fecdd3;
+      border-radius: 10px;
+      background: #fff1f2;
+      color: #be123c;
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1.2;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .photo-viewer-stage.is-pre-assignment-photo::after {
+      content: "Ảnh báo cáo không hợp lệ\A Chụp trước khi giao việc";
+      white-space: pre-line;
+    }
+
+    .photo-report-meta-chip.is-danger {
+      border-color: #fecdd3;
+      background: #fff1f2;
+      color: #be123c;
+    }
+
+    .task-mobile-photo-action.has-invalid-photos {
+      border-color: #fda4af;
+      background: #fff1f2;
+      color: #be123c;
+    }
+
+    @media (max-width: 768px) {
+      .task-actions .task-photo-block-message {
+        grid-column: 1 / -1;
+        width: 100%;
+        white-space: normal;
+      }
+    }
+
 </style>
