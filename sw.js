@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260722-photo-validation-dedup-restore-v18";
+const CACHE_NAME = "culao-task-shell-v20260721-report-photo-deduplicate-v17";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,8 +7,7 @@ const APP_SHELL = [
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
-  "./notification-badge.png",
-  "./task-review-alert.wav"
+  "./notification-badge.png"
 ];
 
 self.addEventListener("install", (event) => {

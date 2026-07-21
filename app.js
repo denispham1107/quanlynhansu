@@ -91,6 +91,10 @@ const markChatConversationReadCallable = httpsCallable(functions, "markChatConve
 const deleteChatConversationCallable = httpsCallable(functions, "deleteChatConversation");
 const discardChatMediaUploadCallable = httpsCallable(functions, "discardChatMediaUpload");
 const syncChatConversationIndexCallable = httpsCallable(functions, "syncChatConversationIndex");
+const getEmployeeUnassignedTaskCountCallable = httpsCallable(
+  functions,
+  "getEmployeeUnassignedTaskCount"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -149,6 +153,10 @@ const state = {
   employeeWorkOrderSearch: "",
   employeeWorkOrderSuggestionIndex: -1,
   employeeMobileFilterSheetOpen: false,
+  employeeUnassignedTaskCountCache: new Map(),
+  employeeUnassignedTaskCountPendingKey: "",
+  employeeUnassignedTaskCountRequestSerial: 0,
+  employeeUnassignedTaskCountWarningShown: false,
   adminDateFilter: {
     mode: "today",
     single: "",
@@ -210,18 +218,7 @@ const state = {
   chatReadRequestsInFlight: new Set(),
   chatUsersLoading: false,
   chatConversationFallbackTimer: null,
-  chatConversationListenerWarningShown: false,
-  taskReviewAlertAudioContext: null,
-  taskReviewAlertAudioElement: null,
-  taskReviewAlertMediaUnlocked: false,
-  taskReviewAlertUnlockInFlight: false,
-  taskReviewAlertMediaPlayPromise: null,
-  taskReviewAlertTimer: null,
-  taskReviewAlertUnlocked: false,
-  taskReviewAlertUserEnabled: false,
-  taskReviewAlertPendingCount: 0,
-  taskReviewAlertGestureBound: false,
-  taskReviewAlertNeedsGestureToastShown: false
+  chatConversationListenerWarningShown: false
 };
 
 
@@ -260,437 +257,6 @@ function isSupervisorProfile(profile = state.profile) {
 
 function isManagementProfile(profile = state.profile) {
   return isAdminProfile(profile) || isSupervisorProfile(profile);
-}
-
-// =========================
-// Âm báo lặp khi có công việc chờ Admin xác nhận
-// =========================
-const TASK_REVIEW_ALERT_INTERVAL_MS = 1800;
-const TASK_REVIEW_ALERT_AUDIO_URL = "./task-review-alert.wav";
-const TASK_REVIEW_ALERT_FALLBACK_GAIN = 0.48; // Gấp 3 mức cũ 0.16.
-
-function getPendingTaskReviewCount(excludedTaskId = "") {
-  const excludedId = String(excludedTaskId || "").trim();
-  return state.tasks.filter((task) => (
-    task?.status === "submitted"
-    && (!excludedId || task.id !== excludedId)
-  )).length;
-}
-
-function ensureTaskReviewAlertAudioElement() {
-  if (state.taskReviewAlertAudioElement) return state.taskReviewAlertAudioElement;
-
-  const audio = new Audio(TASK_REVIEW_ALERT_AUDIO_URL);
-  audio.preload = "auto";
-  audio.loop = true;
-  audio.volume = 1;
-  audio.setAttribute("playsinline", "");
-  audio.setAttribute("webkit-playsinline", "");
-  audio.setAttribute("x-webkit-airplay", "deny");
-
-  state.taskReviewAlertAudioElement = audio;
-  return audio;
-}
-
-function usePlaybackAudioSessionWhenAvailable() {
-  try {
-    if (navigator.audioSession && "type" in navigator.audioSession) {
-      navigator.audioSession.type = "playback";
-    }
-  } catch (_) {
-    // Trình duyệt chưa hỗ trợ Audio Session API thì bỏ qua.
-  }
-}
-
-function updateTaskReviewAlertEnableButtons() {
-  const shouldShow = isAdminProfile();
-  const isLoading = state.taskReviewAlertUnlockInFlight;
-  let label = "🔊 Bật âm báo";
-
-  if (isLoading) {
-    label = "Đang bật âm báo...";
-  } else if (state.taskReviewAlertUserEnabled) {
-    label = "🔕 Tắt âm báo";
-  }
-
-  [els.enableTaskReviewAlertBtn, els.mobileEnableTaskReviewAlertBtn].forEach((button) => {
-    if (!button) return;
-    button.classList.toggle("hidden", !shouldShow);
-    button.classList.toggle("is-enabled", state.taskReviewAlertUserEnabled);
-    button.disabled = isLoading;
-    button.setAttribute("aria-pressed", state.taskReviewAlertUserEnabled ? "true" : "false");
-    button.textContent = label;
-  });
-}
-
-function playTaskReviewAlertPattern() {
-  const audioContext = state.taskReviewAlertAudioContext;
-  if (!audioContext || audioContext.state !== "running") return false;
-
-  const startAt = audioContext.currentTime + 0.02;
-  const tones = [
-    { frequency: 880, offset: 0, duration: 0.13 },
-    { frequency: 880, offset: 0.22, duration: 0.13 },
-    { frequency: 660, offset: 0.46, duration: 0.2 }
-  ];
-
-  tones.forEach(({ frequency, offset, duration }) => {
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    const toneStart = startAt + offset;
-    const toneEnd = toneStart + duration;
-
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(frequency, toneStart);
-    gain.gain.setValueAtTime(0.0001, toneStart);
-    gain.gain.exponentialRampToValueAtTime(TASK_REVIEW_ALERT_FALLBACK_GAIN, toneStart + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, toneEnd);
-
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
-    oscillator.start(toneStart);
-    oscillator.stop(toneEnd + 0.03);
-  });
-
-  return true;
-}
-
-function stopTaskReviewAlertFallbackSound() {
-  if (state.taskReviewAlertTimer) {
-    clearInterval(state.taskReviewAlertTimer);
-    state.taskReviewAlertTimer = null;
-  }
-}
-
-function startTaskReviewAlertFallbackSound() {
-  const audioContext = state.taskReviewAlertAudioContext;
-  if (!state.taskReviewAlertUserEnabled) return;
-  if (!state.taskReviewAlertUnlocked || !audioContext || audioContext.state !== "running") return;
-  if (state.taskReviewAlertTimer) return;
-
-  playTaskReviewAlertPattern();
-  state.taskReviewAlertTimer = window.setInterval(() => {
-    if (
-      !state.taskReviewAlertUserEnabled
-      || !isAdminProfile()
-      || state.taskReviewAlertPendingCount <= 0
-    ) {
-      stopTaskReviewAlertSound();
-      return;
-    }
-    playTaskReviewAlertPattern();
-  }, TASK_REVIEW_ALERT_INTERVAL_MS);
-}
-
-function stopTaskReviewAlertSound() {
-  stopTaskReviewAlertFallbackSound();
-  state.taskReviewAlertMediaPlayPromise = null;
-
-  const audio = state.taskReviewAlertAudioElement;
-  if (audio) {
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-      audio.volume = 1;
-    } catch (_) {
-      // Không ảnh hưởng đến luồng duyệt công việc.
-    }
-  }
-}
-
-function startTaskReviewAlertHtmlAudioFallback() {
-  if (
-    !state.taskReviewAlertUserEnabled
-    || !isAdminProfile()
-    || state.taskReviewAlertPendingCount <= 0
-  ) return;
-
-  const audio = ensureTaskReviewAlertAudioElement();
-  audio.loop = true;
-  audio.volume = 1;
-
-  if (!audio.paused) {
-    state.taskReviewAlertMediaUnlocked = true;
-    return;
-  }
-
-  if (state.taskReviewAlertMediaPlayPromise) return;
-
-  try {
-    const playResult = audio.play();
-    if (!playResult || typeof playResult.then !== "function") {
-      state.taskReviewAlertMediaUnlocked = true;
-      return;
-    }
-
-    state.taskReviewAlertMediaPlayPromise = playResult;
-    playResult.then(() => {
-      state.taskReviewAlertMediaPlayPromise = null;
-      state.taskReviewAlertMediaUnlocked = true;
-      state.taskReviewAlertNeedsGestureToastShown = false;
-      updateTaskReviewAlertEnableButtons();
-    }).catch((error) => {
-      state.taskReviewAlertMediaPlayPromise = null;
-      state.taskReviewAlertMediaUnlocked = false;
-      console.warn("Không phát được file âm báo dự phòng:", error);
-      // Không tự tắt lựa chọn của Admin. Web Audio vẫn có thể hoạt động bình thường.
-      updateTaskReviewAlertEnableButtons();
-    });
-  } catch (error) {
-    state.taskReviewAlertMediaUnlocked = false;
-    console.warn("Không thể phát file âm báo dự phòng:", error);
-  }
-}
-
-function startTaskReviewAlertSound() {
-  if (
-    !state.taskReviewAlertUserEnabled
-    || !isAdminProfile()
-    || state.taskReviewAlertPendingCount <= 0
-  ) {
-    stopTaskReviewAlertSound();
-    return;
-  }
-
-  usePlaybackAudioSessionWhenAvailable();
-
-  // Ưu tiên Web Audio vì cơ chế này ổn định trên Chrome, Safari, iOS và Android
-  // sau khi Admin đã bấm trực tiếp nút Bật âm báo.
-  if (
-    state.taskReviewAlertUnlocked
-    && state.taskReviewAlertAudioContext
-    && state.taskReviewAlertAudioContext.state === "running"
-  ) {
-    const audio = state.taskReviewAlertAudioElement;
-    if (audio && !audio.paused) {
-      try {
-        audio.pause();
-        audio.currentTime = 0;
-      } catch (_) {
-        // Bỏ qua lỗi dừng file dự phòng.
-      }
-    }
-    startTaskReviewAlertFallbackSound();
-    return;
-  }
-
-  // Chỉ dùng file WAV khi thiết bị không hỗ trợ hoặc chưa mở được Web Audio.
-  startTaskReviewAlertHtmlAudioFallback();
-}
-
-function syncTaskReviewAlertSound() {
-  const pendingCount = isAdminProfile() ? getPendingTaskReviewCount() : 0;
-  state.taskReviewAlertPendingCount = pendingCount;
-  updateTaskReviewAlertEnableButtons();
-
-  if (!state.taskReviewAlertUserEnabled || pendingCount <= 0) {
-    stopTaskReviewAlertSound();
-    state.taskReviewAlertNeedsGestureToastShown = false;
-    return;
-  }
-
-  bindTaskReviewAlertUnlockEvents();
-  startTaskReviewAlertSound();
-
-  if (!state.taskReviewAlertMediaUnlocked && !state.taskReviewAlertUnlocked) {
-    if (!state.taskReviewAlertNeedsGestureToastShown) {
-      state.taskReviewAlertNeedsGestureToastShown = true;
-      toast(
-        `Có ${pendingCount} công việc đang chờ xác nhận. Hãy nhấn nút “Bật âm báo” để điện thoại cho phép phát chuông liên tục.`,
-        "info"
-      );
-    }
-  }
-}
-
-async function unlockTaskReviewAlertAudio() {
-  if (!state.taskReviewAlertUserEnabled || !state.user || !isAdminProfile()) return false;
-  if (state.taskReviewAlertUnlockInFlight) return false;
-
-  state.taskReviewAlertUnlockInFlight = true;
-  state.taskReviewAlertNeedsGestureToastShown = false;
-  updateTaskReviewAlertEnableButtons();
-  usePlaybackAudioSessionWhenAvailable();
-
-  let webAudioReady = false;
-  let htmlAudioReady = false;
-  let lastError = null;
-
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-
-  // Gọi resume() ngay trong sự kiện click/touch để giữ quyền user activation.
-  let resumePromise = null;
-  try {
-    if (AudioContextClass) {
-      if (!state.taskReviewAlertAudioContext || state.taskReviewAlertAudioContext.state === "closed") {
-        state.taskReviewAlertAudioContext = new AudioContextClass();
-      }
-      const audioContext = state.taskReviewAlertAudioContext;
-      resumePromise = audioContext.state === "running"
-        ? Promise.resolve()
-        : audioContext.resume();
-    }
-  } catch (error) {
-    lastError = error;
-    console.warn("Không thể khởi tạo Web Audio:", error);
-  }
-
-  // Khởi động file WAV song song như phương án dự phòng. Nếu file lỗi/404 thì
-  // không được tự tắt nút vì Web Audio vẫn có thể phát tốt.
-  let mediaPromise = null;
-  try {
-    const audio = ensureTaskReviewAlertAudioElement();
-    audio.loop = false;
-    audio.volume = 0.01;
-    audio.currentTime = 0;
-    const playResult = audio.play();
-    mediaPromise = playResult && typeof playResult.then === "function"
-      ? playResult
-      : Promise.resolve();
-  } catch (error) {
-    lastError = error;
-    console.warn("Không thể khởi động file âm báo dự phòng:", error);
-  }
-
-  try {
-    if (resumePromise) {
-      try {
-        await resumePromise;
-        const audioContext = state.taskReviewAlertAudioContext;
-        if (audioContext?.state === "running") {
-          state.taskReviewAlertUnlocked = true;
-          webAudioReady = true;
-        }
-      } catch (error) {
-        lastError = error;
-        console.warn("Trình duyệt chưa mở được Web Audio:", error);
-      }
-    }
-
-    if (mediaPromise) {
-      try {
-        await mediaPromise;
-        state.taskReviewAlertMediaUnlocked = true;
-        htmlAudioReady = true;
-      } catch (error) {
-        lastError = error;
-        state.taskReviewAlertMediaUnlocked = false;
-        console.warn("Trình duyệt không phát được file WAV dự phòng:", error);
-      } finally {
-        const audio = state.taskReviewAlertAudioElement;
-        if (audio) {
-          try {
-            audio.pause();
-            audio.currentTime = 0;
-            audio.loop = true;
-            audio.volume = 1;
-          } catch (_) {
-            // Không ảnh hưởng đến Web Audio.
-          }
-        }
-      }
-    }
-
-    if (!webAudioReady && !htmlAudioReady) {
-      state.taskReviewAlertUserEnabled = false;
-      stopTaskReviewAlertSound();
-      toast("Thiết bị chưa cho phép phát âm báo. Hãy chạm trực tiếp nút Bật âm báo rồi thử lại.", "error");
-      if (lastError) console.warn("Chi tiết lỗi mở âm báo:", lastError);
-      return false;
-    }
-
-    state.taskReviewAlertNeedsGestureToastShown = false;
-
-    // Phát một tiếng kiểm tra ngay sau khi bật để Admin biết thiết bị đã cấp quyền.
-    if (webAudioReady) {
-      playTaskReviewAlertPattern();
-    }
-
-    toast("Đã bật âm báo chờ duyệt.", "success");
-    return true;
-  } finally {
-    state.taskReviewAlertUnlockInFlight = false;
-    updateTaskReviewAlertEnableButtons();
-    syncTaskReviewAlertSound();
-  }
-}
-
-function setTaskReviewAlertEnabled(enabled) {
-  if (!state.user || !isAdminProfile()) return;
-
-  const nextEnabled = enabled === true;
-  state.taskReviewAlertNeedsGestureToastShown = false;
-
-  if (!nextEnabled) {
-    state.taskReviewAlertUserEnabled = false;
-    state.taskReviewAlertUnlockInFlight = false;
-    stopTaskReviewAlertSound();
-    updateTaskReviewAlertEnableButtons();
-    toast("Đã tắt âm báo chờ duyệt.", "info");
-    return;
-  }
-
-  state.taskReviewAlertUserEnabled = true;
-  updateTaskReviewAlertEnableButtons();
-  void unlockTaskReviewAlertAudio();
-}
-
-function bindTaskReviewAlertUnlockEvents() {
-  if (state.taskReviewAlertGestureBound) return;
-  state.taskReviewAlertGestureBound = true;
-
-  [els.enableTaskReviewAlertBtn, els.mobileEnableTaskReviewAlertBtn].forEach((button) => {
-    button?.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (state.taskReviewAlertUnlockInFlight) return;
-      setTaskReviewAlertEnabled(!state.taskReviewAlertUserEnabled);
-      toggleMobileTopbarMenu(false);
-    });
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && state.taskReviewAlertUserEnabled) {
-      syncTaskReviewAlertSound();
-    }
-  });
-}
-
-function markTaskReviewDecisionLocally(taskId, nextStatus) {
-  const task = state.tasks.find((item) => item.id === taskId);
-  if (task) task.status = nextStatus;
-  syncTaskReviewAlertSound();
-}
-
-function resetTaskReviewAlertSound() {
-  stopTaskReviewAlertSound();
-  state.taskReviewAlertPendingCount = 0;
-  state.taskReviewAlertUnlocked = false;
-  state.taskReviewAlertUserEnabled = false;
-  state.taskReviewAlertMediaUnlocked = false;
-  state.taskReviewAlertUnlockInFlight = false;
-  state.taskReviewAlertNeedsGestureToastShown = false;
-
-  const audio = state.taskReviewAlertAudioElement;
-  state.taskReviewAlertAudioElement = null;
-  if (audio) {
-    try {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-    } catch (_) {
-      // Không ảnh hưởng đến đăng xuất.
-    }
-  }
-
-  const audioContext = state.taskReviewAlertAudioContext;
-  state.taskReviewAlertAudioContext = null;
-  if (audioContext && audioContext.state !== "closed") {
-    audioContext.close().catch(() => undefined);
-  }
-
-  updateTaskReviewAlertEnableButtons();
 }
 
 function normalizeSupervisorPermissions(value = {}) {
@@ -786,7 +352,6 @@ const els = {
   mobileTopbarMenuBtn: $("#mobileTopbarMenuBtn"),
   mobileTopbarMenu: $("#mobileTopbarMenu"),
   mobileNotificationPermissionBtn: $("#mobileNotificationPermissionBtn"),
-  mobileEnableTaskReviewAlertBtn: $("#mobileEnableTaskReviewAlertBtn"),
   mobileLogoutBtn: $("#mobileLogoutBtn"),
   createEmployeeForm: $("#createEmployeeForm"),
   employeeList: $("#employeeList"),
@@ -944,7 +509,6 @@ const els = {
   statHotel: $("#statHotel"),
   statCompleted: $("#statCompleted"),
   enableNotificationsBtn: $("#enableNotificationsBtn"),
-  enableTaskReviewAlertBtn: $("#enableTaskReviewAlertBtn"),
   notificationBellBtn: $("#notificationBellBtn"),
   notificationPanel: $("#notificationPanel"),
   notificationList: $("#notificationList"),
@@ -1536,7 +1100,6 @@ function getOptimizationSummary(results = []) {
     savedBytes
   };
 }
-
 
 const REPORT_PHOTO_CONTENT_HASH_ALGORITHM = "sha256-v1";
 const REPORT_PHOTO_VISUAL_HASH_ALGORITHM = "dhash64-v1";
@@ -4830,7 +4393,6 @@ els.logoutBtn.addEventListener("click", async () => {
 onAuthStateChanged(auth, async (user) => {
   cleanupSubscriptions();
   cleanupChatFeature();
-  resetTaskReviewAlertSound();
 
   state.user = user;
   state.profile = null;
@@ -4839,6 +4401,10 @@ onAuthStateChanged(auth, async (user) => {
   state.staffAccounts = [];
   state.tasks = [];
   state.workOrders = [];
+  state.employeeUnassignedTaskCountCache = new Map();
+  state.employeeUnassignedTaskCountPendingKey = "";
+  state.employeeUnassignedTaskCountRequestSerial += 1;
+  state.employeeUnassignedTaskCountWarningShown = false;
   state.adminWorkOrderSearch = "";
   state.adminWorkOrderSuggestionIndex = -1;
   if (els.adminWorkOrderSearch) els.adminWorkOrderSearch.value = "";
@@ -5173,8 +4739,6 @@ bindSupervisorPermissionUI();
 // Admin / Giám sát dashboard
 // =========================
 function setupAdminDashboard() {
-  bindTaskReviewAlertUnlockEvents();
-  updateTaskReviewAlertEnableButtons();
   els.adminView.classList.remove("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
@@ -5220,7 +4784,6 @@ function setupAdminDashboard() {
     tasksQuery,
     async (snapshot) => {
       state.tasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-      syncTaskReviewAlertSound();
       renderAdminTasks();
 
       // Chỉ tài khoản Admin tự đồng bộ trạng thái quá hạn vào database.
@@ -9453,6 +9016,12 @@ function setupEmployeeDashboard() {
     employeeWorkOrdersQuery,
     (snapshot) => {
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      // Bất kỳ thay đổi nào ở Phiếu công việc (tạo mới, giao việc hoặc xoá phiếu)
+      // đều có thể làm số lượng "Chưa giao việc" thay đổi. Xoá cache để lần
+      // render kế tiếp lấy lại con số chính xác từ máy chủ theo bộ lọc ngày.
+      state.employeeUnassignedTaskCountCache.clear();
+      state.employeeUnassignedTaskCountPendingKey = "";
+      state.employeeUnassignedTaskCountRequestSerial += 1;
       renderEmployeeTasks();
     },
     (error) => {
@@ -10473,25 +10042,117 @@ function renderTicketGroup(group, mode = "admin") {
 }
 
 
-function getEmployeeUnassignedWorkOrderCount() {
-  return state.workOrders.filter((workOrder) => (
-    String(workOrder?.status || "").trim().toLowerCase() === "draft"
-  )).length;
+function getEmployeeUnassignedDateScope(filter = state.employeeDateFilter) {
+  const safeFilter = filter || { mode: "all", single: "", from: "", to: "" };
+
+  if (safeFilter.mode === "today") {
+    const date = todayInputValue();
+    return { from: date, to: date };
+  }
+
+  if (safeFilter.mode === "yesterday") {
+    const date = yesterdayInputValue();
+    return { from: date, to: date };
+  }
+
+  if (safeFilter.mode === "current_month" || safeFilter.mode === "previous_month") {
+    const range = getMonthDateRange(safeFilter.mode === "current_month" ? 0 : -1);
+    return { from: range.from, to: range.to };
+  }
+
+  if (safeFilter.mode === "single") {
+    const date = String(safeFilter.single || "").trim();
+    return date ? { from: date, to: date } : { from: "", to: "" };
+  }
+
+  if (safeFilter.mode === "range") {
+    return {
+      from: String(safeFilter.from || "").trim(),
+      to: String(safeFilter.to || "").trim()
+    };
+  }
+
+  return { from: "", to: "" };
 }
 
-function renderEmployeeUnassignedWorkOrderSummary() {
-  const count = getEmployeeUnassignedWorkOrderCount();
+function getEmployeeUnassignedDateScopeKey(scope = getEmployeeUnassignedDateScope()) {
+  return `${scope.from || "*"}|${scope.to || "*"}`;
+}
+
+function updateEmployeeUnassignedTaskCountDisplay(value, options = {}) {
+  const text = String(value);
 
   if (els.employeeUnassignedWorkOrderCount) {
-    els.employeeUnassignedWorkOrderCount.textContent = String(count);
+    els.employeeUnassignedWorkOrderCount.textContent = text;
   }
 
   if (els.employeeUnassignedWorkOrderCard) {
-    els.employeeUnassignedWorkOrderCard.setAttribute(
-      "aria-label",
-      `Hiện còn ${count} Phiếu công việc chưa được giao`
-    );
+    const ariaLabel = options.loading
+      ? "Đang tải số lượng công việc chưa giao theo bộ lọc ngày"
+      : `Hiện còn ${text} công việc chưa được giao trong thời gian đang chọn`;
+    els.employeeUnassignedWorkOrderCard.setAttribute("aria-label", ariaLabel);
   }
+}
+
+async function refreshEmployeeUnassignedTaskCount() {
+  if (!state.user?.uid || state.profile?.role !== "employee") return;
+
+  const scope = getEmployeeUnassignedDateScope();
+  const cacheKey = getEmployeeUnassignedDateScopeKey(scope);
+  const cachedCount = state.employeeUnassignedTaskCountCache.get(cacheKey);
+
+  if (Number.isFinite(cachedCount)) {
+    updateEmployeeUnassignedTaskCountDisplay(cachedCount);
+    return;
+  }
+
+  if (state.employeeUnassignedTaskCountPendingKey === cacheKey) return;
+
+  const requestSerial = ++state.employeeUnassignedTaskCountRequestSerial;
+  state.employeeUnassignedTaskCountPendingKey = cacheKey;
+  updateEmployeeUnassignedTaskCountDisplay("…", { loading: true });
+
+  try {
+    const result = await getEmployeeUnassignedTaskCountCallable({ dateScope: scope });
+    const count = Math.max(0, Number(result?.data?.count || 0));
+    state.employeeUnassignedTaskCountCache.set(cacheKey, count);
+    state.employeeUnassignedTaskCountWarningShown = false;
+
+    const currentKey = getEmployeeUnassignedDateScopeKey();
+    if (requestSerial === state.employeeUnassignedTaskCountRequestSerial && currentKey === cacheKey) {
+      updateEmployeeUnassignedTaskCountDisplay(count);
+    }
+  } catch (error) {
+    console.error("EMPLOYEE UNASSIGNED TASK COUNT ERROR:", error);
+
+    const currentKey = getEmployeeUnassignedDateScopeKey();
+    if (requestSerial === state.employeeUnassignedTaskCountRequestSerial && currentKey === cacheKey) {
+      updateEmployeeUnassignedTaskCountDisplay("--");
+    }
+
+    if (!state.employeeUnassignedTaskCountWarningShown) {
+      state.employeeUnassignedTaskCountWarningShown = true;
+      toast("Chưa đồng bộ được số Chưa giao việc theo bộ lọc ngày. Hệ thống sẽ thử lại khi dữ liệu thay đổi.", "error");
+    }
+  } finally {
+    if (state.employeeUnassignedTaskCountPendingKey === cacheKey) {
+      state.employeeUnassignedTaskCountPendingKey = "";
+    }
+  }
+}
+
+function renderEmployeeUnassignedWorkOrderSummary() {
+  const scope = getEmployeeUnassignedDateScope();
+  const cacheKey = getEmployeeUnassignedDateScopeKey(scope);
+  const cachedCount = state.employeeUnassignedTaskCountCache.get(cacheKey);
+
+  if (Number.isFinite(cachedCount)) {
+    updateEmployeeUnassignedTaskCountDisplay(cachedCount);
+  } else {
+    updateEmployeeUnassignedTaskCountDisplay("…", { loading: true });
+  }
+
+  void refreshEmployeeUnassignedTaskCount();
 }
 
 function renderEmployeeTasks() {
@@ -12386,7 +12047,7 @@ function updatePhotoViewerContent(options = {}) {
     els.photoViewerName.textContent = displayName;
   }
 
-  const capturedBeforeAssignment = isPreAssignmentPhoto(photo);
+  const invalidPhoto = isInvalidReportPhoto(photo);
   const capturedAtText = photo.capturedAt ? formatFullDateTime(photo.capturedAt) : "";
 
   if (els.photoViewerMeta) {
@@ -12394,7 +12055,7 @@ function updatePhotoViewerContent(options = {}) {
     els.photoViewerMeta.textContent = `${uploader} • ${uploadedAt} • ${sizeText}${captureText}`;
   }
 
-  els.photoViewerStage?.classList.toggle("is-pre-assignment-photo", capturedBeforeAssignment);
+  els.photoViewerStage?.classList.toggle("is-pre-assignment-photo", invalidPhoto);
 
   if (els.photoViewerOpenOriginal) {
     els.photoViewerOpenOriginal.href = photo.url;
@@ -13585,7 +13246,7 @@ function validateSelectedPhotoFiles(files) {
   return null;
 }
 
-function cleanupUncommittedReportPhotos(photos = []) {
+async function cleanupUncommittedReportPhotos(photos = []) {
   const uniquePaths = Array.from(new Set(
     photos.map((photo) => String(photo?.storagePath || "").trim()).filter(Boolean)
   ));
@@ -14543,10 +14204,6 @@ async function approveTask(taskId, button) {
       differencePercent: result.differencePercent
     });
 
-    // Tắt âm báo ngay khi Admin đã xử lý công việc này. Nếu vẫn còn công việc khác
-    // ở trạng thái chờ xác nhận thì âm báo tiếp tục phát.
-    markTaskReviewDecisionLocally(taskId, "completed");
-
     await reflowQueuedTasksForEmployee(task.assignedToUid, taskId);
 
     const resultText = taskResultShortText(result);
@@ -14705,10 +14362,6 @@ async function requestRedo(taskId, button) {
       lastRedoRequestedByUid: requestedByUid,
       lastRedoRequestedByName: requestedByName
     });
-
-    // Tắt âm báo ngay khi Admin đã chọn Yêu cầu làm lại. Nếu còn phiếu khác
-    // chờ xác nhận thì chuông vẫn tiếp tục.
-    markTaskReviewDecisionLocally(taskId, "redo");
 
     if (task) {
       await createNotifications([
