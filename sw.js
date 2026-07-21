@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260721-report-photo-deduplicate-v17";
+const CACHE_NAME = "culao-task-shell-v20260721-task-review-sound-v14";
 const APP_SHELL = [
   "./",
   "./index.html",
