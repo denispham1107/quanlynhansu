@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260721-task-review-sound-mobile-loud-v15";
+const CACHE_NAME = "culao-task-shell-v20260722-chat-scroll-audio-toggle-fix-v16";
 const APP_SHELL = [
   "./",
   "./index.html",

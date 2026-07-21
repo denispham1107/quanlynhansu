@@ -90,6 +90,13 @@
       box-shadow: 0 8px 20px rgba(225, 29, 72, 0.12);
     }
 
+    .task-review-alert-enable-btn.is-enabled {
+      border-color: #86efac !important;
+      background: linear-gradient(135deg, #ecfdf5, #eff6ff) !important;
+      color: #166534 !important;
+      box-shadow: 0 8px 20px rgba(22, 163, 74, 0.14);
+    }
+
     .task-review-alert-enable-btn:disabled {
       cursor: wait;
       opacity: 0.68;
@@ -8167,8 +8174,14 @@
       right: 18px;
       z-index: 3200;
       width: min(390px, calc(100vw - 28px));
-      max-height: min(680px, calc(100vh - 100px));
+      height: min(680px, calc(100vh - 96px));
+      height: min(680px, calc(100dvh - 96px));
+      max-height: calc(100vh - 96px);
+      max-height: calc(100dvh - 96px);
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
+      overscroll-behavior: contain;
       border: 1px solid #bfdbfe;
       border-radius: 22px;
       background: #fff;
@@ -8178,8 +8191,11 @@
     .culao-chat-directory-view,
     .culao-chat-mobile-conversation {
       min-height: 0;
+      height: 100%;
+      flex: 1 1 auto;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
     .culao-chat-directory-head,
@@ -8193,6 +8209,7 @@
     }
 
     .culao-chat-directory-head {
+      flex: 0 0 auto;
       padding: 18px 18px 12px;
       border-bottom: 1px solid #e2e8f0;
     }
@@ -8234,6 +8251,7 @@
 
     .culao-chat-search-wrap,
     .culao-chat-admin-toolbar {
+      flex: 0 0 auto;
       margin: 12px 16px 8px;
       display: flex;
       align-items: center;
@@ -8290,6 +8308,7 @@
     }
 
     .culao-chat-tabs {
+      flex: 0 0 auto;
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 6px;
@@ -8313,10 +8332,15 @@
     }
 
     .culao-chat-directory-list {
-      min-height: 150px;
-      max-height: 470px;
+      min-height: 0;
+      max-height: none;
+      flex: 1 1 auto;
+      overflow-x: hidden;
       overflow-y: auto;
       overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-gutter: stable;
+      touch-action: pan-y;
       padding: 6px 8px;
     }
 
@@ -8413,6 +8437,7 @@
     }
 
     .culao-chat-admin-open {
+      flex: 0 0 auto;
       margin: 8px 16px 16px;
       min-height: 42px;
       border: 1px solid #c4b5fd;
@@ -9140,7 +9165,7 @@
       </div>
       <div class="topbar-actions">
         <button id="enableNotificationsBtn" class="btn ghost notify-permission-btn" type="button">Bật thông báo</button>
-        <button id="enableTaskReviewAlertBtn" class="btn ghost task-review-alert-enable-btn hidden" type="button">🔊 Bật âm báo</button>
+        <button id="enableTaskReviewAlertBtn" class="btn ghost task-review-alert-enable-btn hidden" type="button" aria-pressed="false">🔊 Bật âm báo</button>
         <div class="culao-chat-wrap">
           <button id="chatToggleBtn" class="culao-chat-topbar-btn" type="button" aria-label="Chat" aria-controls="chatDirectoryPanel" aria-expanded="false">
             <span aria-hidden="true">💬</span>
@@ -9231,7 +9256,7 @@
           >☰</button>
           <div id="mobileTopbarMenu" class="mobile-topbar-menu" aria-hidden="true">
             <button id="mobileNotificationPermissionBtn" type="button">🔔 Bật thông báo</button>
-            <button id="mobileEnableTaskReviewAlertBtn" class="hidden" type="button">🔊 Bật âm báo</button>
+            <button id="mobileEnableTaskReviewAlertBtn" class="task-review-alert-enable-btn hidden" type="button" aria-pressed="false">🔊 Bật âm báo</button>
             <button id="mobileLogoutBtn" class="is-danger" type="button">Đăng xuất</button>
           </div>
         </div>

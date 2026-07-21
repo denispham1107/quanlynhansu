@@ -218,6 +218,7 @@ const state = {
   taskReviewAlertMediaPlayPromise: null,
   taskReviewAlertTimer: null,
   taskReviewAlertUnlocked: false,
+  taskReviewAlertUserEnabled: false,
   taskReviewAlertPendingCount: 0,
   taskReviewAlertGestureBound: false,
   taskReviewAlertNeedsGestureToastShown: false
@@ -303,14 +304,22 @@ function usePlaybackAudioSessionWhenAvailable() {
 }
 
 function updateTaskReviewAlertEnableButtons() {
-  const shouldShow = isAdminProfile() && !state.taskReviewAlertMediaUnlocked;
+  const shouldShow = isAdminProfile();
   const isLoading = state.taskReviewAlertUnlockInFlight;
-  const label = isLoading ? "Đang bật âm báo..." : "🔊 Bật âm báo";
+  let label = "🔊 Bật âm báo";
+
+  if (isLoading) {
+    label = "Đang bật âm báo...";
+  } else if (state.taskReviewAlertUserEnabled) {
+    label = "🔕 Tắt âm báo";
+  }
 
   [els.enableTaskReviewAlertBtn, els.mobileEnableTaskReviewAlertBtn].forEach((button) => {
     if (!button) return;
     button.classList.toggle("hidden", !shouldShow);
+    button.classList.toggle("is-enabled", state.taskReviewAlertUserEnabled);
     button.disabled = isLoading;
+    button.setAttribute("aria-pressed", state.taskReviewAlertUserEnabled ? "true" : "false");
     button.textContent = label;
   });
 }
@@ -354,12 +363,17 @@ function stopTaskReviewAlertFallbackSound() {
 
 function startTaskReviewAlertFallbackSound() {
   const audioContext = state.taskReviewAlertAudioContext;
+  if (!state.taskReviewAlertUserEnabled) return;
   if (!state.taskReviewAlertUnlocked || !audioContext || audioContext.state !== "running") return;
   if (state.taskReviewAlertTimer) return;
 
   playTaskReviewAlertPattern();
   state.taskReviewAlertTimer = window.setInterval(() => {
-    if (!isAdminProfile() || state.taskReviewAlertPendingCount <= 0) {
+    if (
+      !state.taskReviewAlertUserEnabled
+      || !isAdminProfile()
+      || state.taskReviewAlertPendingCount <= 0
+    ) {
       stopTaskReviewAlertSound();
       return;
     }
@@ -384,7 +398,11 @@ function stopTaskReviewAlertSound() {
 }
 
 function startTaskReviewAlertSound() {
-  if (!isAdminProfile() || state.taskReviewAlertPendingCount <= 0) {
+  if (
+    !state.taskReviewAlertUserEnabled
+    || !isAdminProfile()
+    || state.taskReviewAlertPendingCount <= 0
+  ) {
     stopTaskReviewAlertSound();
     return;
   }
@@ -436,7 +454,7 @@ function syncTaskReviewAlertSound() {
   state.taskReviewAlertPendingCount = pendingCount;
   updateTaskReviewAlertEnableButtons();
 
-  if (pendingCount <= 0) {
+  if (!state.taskReviewAlertUserEnabled || pendingCount <= 0) {
     stopTaskReviewAlertSound();
     state.taskReviewAlertNeedsGestureToastShown = false;
     return;
@@ -449,7 +467,7 @@ function syncTaskReviewAlertSound() {
     if (!state.taskReviewAlertNeedsGestureToastShown) {
       state.taskReviewAlertNeedsGestureToastShown = true;
       toast(
-        `Có ${pendingCount} công việc đang chờ xác nhận. Hãy nhấn “Bật âm báo” một lần để điện thoại cho phép phát chuông liên tục.`,
+        `Có ${pendingCount} công việc đang chờ xác nhận. Hãy nhấn nút “Bật âm báo” để điện thoại cho phép phát chuông liên tục.`,
         "info"
       );
     }
@@ -457,7 +475,13 @@ function syncTaskReviewAlertSound() {
 }
 
 function primeTaskReviewAlertMediaFromGesture() {
-  if (!state.user || !isAdminProfile() || state.taskReviewAlertMediaUnlocked || state.taskReviewAlertUnlockInFlight) {
+  if (
+    !state.taskReviewAlertUserEnabled
+    || !state.user
+    || !isAdminProfile()
+    || state.taskReviewAlertMediaUnlocked
+    || state.taskReviewAlertUnlockInFlight
+  ) {
     updateTaskReviewAlertEnableButtons();
     return;
   }
@@ -479,7 +503,7 @@ function primeTaskReviewAlertMediaFromGesture() {
       state.taskReviewAlertNeedsGestureToastShown = false;
       audio.volume = 1;
 
-      if (state.taskReviewAlertPendingCount <= 0) {
+      if (!state.taskReviewAlertUserEnabled || state.taskReviewAlertPendingCount <= 0) {
         audio.pause();
         audio.currentTime = 0;
       }
@@ -495,18 +519,24 @@ function primeTaskReviewAlertMediaFromGesture() {
 
     playResult.then(finish).catch((error) => {
       state.taskReviewAlertUnlockInFlight = false;
+      state.taskReviewAlertUserEnabled = false;
       console.warn("Không thể mở khóa file âm báo trên thiết bị:", error);
+      stopTaskReviewAlertSound();
       updateTaskReviewAlertEnableButtons();
+      toast("Thiết bị chưa cho phép phát âm báo. Hãy thử bật lại sau khi mở ứng dụng.", "error");
     });
   } catch (error) {
     state.taskReviewAlertUnlockInFlight = false;
+    state.taskReviewAlertUserEnabled = false;
     console.warn("Không thể khởi tạo file âm báo:", error);
+    stopTaskReviewAlertSound();
     updateTaskReviewAlertEnableButtons();
+    toast("Không thể bật âm báo trên thiết bị này.", "error");
   }
 }
 
 function unlockTaskReviewAlertAudio() {
-  if (!state.user || !isAdminProfile()) return;
+  if (!state.taskReviewAlertUserEnabled || !state.user || !isAdminProfile()) return;
 
   // Phải gọi play() trực tiếp trong thao tác chạm/click để iOS và Android
   // cấp quyền phát âm thanh cho chính phần tử Audio này.
@@ -522,7 +552,7 @@ function unlockTaskReviewAlertAudio() {
 
     const audioContext = state.taskReviewAlertAudioContext;
     const finishUnlock = () => {
-      if (audioContext.state !== "running") return;
+      if (!state.taskReviewAlertUserEnabled || audioContext.state !== "running") return;
 
       const oscillator = audioContext.createOscillator();
       const gain = audioContext.createGain();
@@ -549,26 +579,40 @@ function unlockTaskReviewAlertAudio() {
   }
 }
 
+function setTaskReviewAlertEnabled(enabled) {
+  if (!state.user || !isAdminProfile()) return;
+
+  const nextEnabled = enabled === true;
+  state.taskReviewAlertUserEnabled = nextEnabled;
+  state.taskReviewAlertNeedsGestureToastShown = false;
+
+  if (!nextEnabled) {
+    state.taskReviewAlertUnlockInFlight = false;
+    stopTaskReviewAlertSound();
+    updateTaskReviewAlertEnableButtons();
+    toast("Đã tắt âm báo chờ duyệt.", "info");
+    return;
+  }
+
+  updateTaskReviewAlertEnableButtons();
+  unlockTaskReviewAlertAudio();
+}
+
 function bindTaskReviewAlertUnlockEvents() {
   if (state.taskReviewAlertGestureBound) return;
   state.taskReviewAlertGestureBound = true;
 
-  const unlock = () => unlockTaskReviewAlertAudio();
-  document.addEventListener("pointerdown", unlock, { capture: true, passive: true });
-  document.addEventListener("touchend", unlock, { capture: true, passive: true });
-  document.addEventListener("click", unlock, { capture: true, passive: true });
-  document.addEventListener("keydown", unlock, { capture: true });
-
   [els.enableTaskReviewAlertBtn, els.mobileEnableTaskReviewAlertBtn].forEach((button) => {
     button?.addEventListener("click", (event) => {
       event.preventDefault();
-      unlockTaskReviewAlertAudio();
+      event.stopPropagation();
+      setTaskReviewAlertEnabled(!state.taskReviewAlertUserEnabled);
       toggleMobileTopbarMenu(false);
     });
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
+    if (!document.hidden && state.taskReviewAlertUserEnabled) {
       syncTaskReviewAlertSound();
     }
   });
@@ -584,6 +628,7 @@ function resetTaskReviewAlertSound() {
   stopTaskReviewAlertSound();
   state.taskReviewAlertPendingCount = 0;
   state.taskReviewAlertUnlocked = false;
+  state.taskReviewAlertUserEnabled = false;
   state.taskReviewAlertMediaUnlocked = false;
   state.taskReviewAlertUnlockInFlight = false;
   state.taskReviewAlertNeedsGestureToastShown = false;
