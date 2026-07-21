@@ -942,8 +942,29 @@ function isPhotoCapturedBeforeTaskAssignment(capturedAt, task) {
   return capturedDate.getTime() + PHOTO_CAPTURE_BEFORE_ASSIGNMENT_TOLERANCE_MS < assignmentDate.getTime();
 }
 
+function isTruthyPhotoValidationFlag(value) {
+  if (value === true || value === 1) return true;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
 function isPreAssignmentPhoto(photo) {
-  return Boolean(photo?.capturedBeforeAssignment || photo?.takenBeforeDispatch);
+  return isTruthyPhotoValidationFlag(photo?.capturedBeforeAssignment)
+    || isTruthyPhotoValidationFlag(photo?.takenBeforeDispatch);
+}
+
+function isInvalidReportPhoto(photo) {
+  const validationStatus = String(photo?.validationStatus || photo?.validity || "").trim().toLowerCase();
+  return isPreAssignmentPhoto(photo)
+    || photo?.invalid === true
+    || photo?.isInvalid === true
+    || validationStatus === "invalid";
+}
+
+function getInvalidReportPhotoReason(photo) {
+  if (isPreAssignmentPhoto(photo)) return "Ảnh chụp trước khi giao việc";
+  return String(photo?.invalidReason || photo?.validationMessage || "Ảnh báo cáo không hợp lệ").trim()
+    || "Ảnh báo cáo không hợp lệ";
 }
 
 function getOptimizedImageFileName(fileName = "image.jpg") {
@@ -1090,6 +1111,18 @@ function getTaskPhotoCount(task) {
   return Number.isFinite(count) ? count : 0;
 }
 
+function getTaskInvalidPhotos(task) {
+  return getTaskPhotos(task).filter((photo) => isInvalidReportPhoto(photo));
+}
+
+function getTaskInvalidPhotoCount(task) {
+  return getTaskInvalidPhotos(task).length;
+}
+
+function getTaskValidPhotoCount(task) {
+  return Math.max(0, getTaskPhotoCount(task) - getTaskInvalidPhotoCount(task));
+}
+
 function taskRequiresPhotos(task) {
   return Boolean(task?.photoRequired);
 }
@@ -1100,9 +1133,40 @@ function getTaskRequiredPhotoCount(task) {
   return Number.isFinite(count) && count > 0 ? count : 1;
 }
 
+function getTaskPhotoCompletionState(task) {
+  const required = taskRequiresPhotos(task);
+  const requiredCount = getTaskRequiredPhotoCount(task);
+  const totalCount = getTaskPhotoCount(task);
+  const invalidCount = getTaskInvalidPhotoCount(task);
+  const validCount = Math.max(0, totalCount - invalidCount);
+  const enoughValidPhotos = !required || validCount >= requiredCount;
+  const ready = !required || (enoughValidPhotos && invalidCount === 0);
+
+  return {
+    required,
+    requiredCount,
+    totalCount,
+    validCount,
+    invalidCount,
+    enoughValidPhotos,
+    ready
+  };
+}
+
+function getTaskPhotoCompletionBlockedMessage(task) {
+  const photoState = getTaskPhotoCompletionState(task);
+  if (!photoState.required || photoState.ready) return "";
+
+  if (photoState.invalidCount > 0) {
+    return `Có ${photoState.invalidCount} ảnh báo cáo không hợp lệ. Vui lòng xóa ảnh không hợp lệ và đăng ảnh mới trước khi hoàn thành.`;
+  }
+
+  const missingCount = Math.max(0, photoState.requiredCount - photoState.validCount);
+  return `Cần đăng thêm ${missingCount} ảnh báo cáo hợp lệ trước khi hoàn thành.`;
+}
+
 function hasEnoughRequiredPhotos(task) {
-  if (!taskRequiresPhotos(task)) return true;
-  return getTaskPhotoCount(task) >= getTaskRequiredPhotoCount(task);
+  return getTaskPhotoCompletionState(task).ready;
 }
 
 const LUNCH_BREAK_MAX_MINUTES_PER_DAY = 30;
@@ -10178,11 +10242,10 @@ function toggleTaskMobileDetails(button) {
 }
 
 function renderDesktopTaskSummary(task, mode, employeeName, initialCountdownText) {
-  const photoCount = getTaskPhotoCount(task);
-  const requiredPhotoCount = getTaskRequiredPhotoCount(task);
-  const photoText = taskRequiresPhotos(task)
-    ? `${photoCount}/${requiredPhotoCount} hình`
-    : `${photoCount} hình`;
+  const photoState = getTaskPhotoCompletionState(task);
+  const photoText = photoState.required
+    ? `${photoState.validCount}/${photoState.requiredCount} hợp lệ${photoState.invalidCount ? ` • ${photoState.invalidCount} không hợp lệ` : ""}`
+    : `${photoState.totalCount} hình`;
 
   return `
     <div class="task-desktop-summary" aria-label="Tóm tắt công việc trên desktop">
@@ -10287,17 +10350,18 @@ function renderTaskCard(task, mode) {
   const mobileDetailsId = `task-mobile-details-${String(task.id || "task").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
   const initialCountdownText = getInitialCountdownText(task);
-  const mobilePhotoCount = getTaskPhotoCount(task);
+  const mobilePhotoState = getTaskPhotoCompletionState(task);
+  const mobilePhotoCount = mobilePhotoState.totalCount;
   const canViewMobilePhotos = mobilePhotoCount > 0 && (mode === "admin" || mode === "employee");
   const mobilePhotoQuickAction = canViewMobilePhotos
     ? `
       <button
-        class="task-mobile-photo-action"
+        class="task-mobile-photo-action ${mobilePhotoState.invalidCount > 0 ? "has-invalid-photos" : ""}"
         data-action="view-task-photos"
         data-task-id="${escapeHtml(task.id)}"
         type="button"
       >
-        Xem hình (${mobilePhotoCount})
+        Xem hình (${mobilePhotoCount}${mobilePhotoState.invalidCount > 0 ? ` • ${mobilePhotoState.invalidCount} không hợp lệ` : ""})
       </button>
     `
     : "";
@@ -10316,13 +10380,18 @@ function renderTaskCard(task, mode) {
     `
     : "";
 
+  const photoCompletionState = getTaskPhotoCompletionState(task);
   const taskActions = renderTaskActions(task, {
     canEmployeeSubmit,
     canAdminReview,
     canAdminEndLunchBreak: canAdminEndLunchBreak(task, mode),
     canAdminExtendTime: canAdminExtendTaskTime(task, mode),
     canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
-    submitPhotoReady: hasEnoughRequiredPhotos(task)
+    submitPhotoReady: photoCompletionState.ready,
+    submitPhotoBlockedReason: getTaskPhotoCompletionBlockedMessage(task),
+    submitInvalidPhotoCount: photoCompletionState.required && !photoCompletionState.ready
+      ? photoCompletionState.invalidCount
+      : 0
   });
 
   return `
@@ -10537,17 +10606,25 @@ function renderLunchBreakHistoryBox(task) {
 }
 
 function renderPhotoReportBox(task, mode) {
-  const photoCount = getTaskPhotoCount(task);
-  const required = taskRequiresPhotos(task);
-  const requiredCount = getTaskRequiredPhotoCount(task);
-  const enough = hasEnoughRequiredPhotos(task);
+  const photoState = getTaskPhotoCompletionState(task);
+  const photoCount = photoState.totalCount;
+  const required = photoState.required;
+  const requiredCount = photoState.requiredCount;
+  const enough = photoState.ready;
   const summary = required
-    ? `Bắt buộc ${requiredCount} hình • đã đăng ${photoCount}/${requiredCount}`
+    ? `Bắt buộc ${requiredCount} ảnh hợp lệ • đã đăng ${photoCount} ảnh (${photoState.validCount} hợp lệ, ${photoState.invalidCount} không hợp lệ)`
     : `Không bắt buộc đăng hình • đã đăng ${photoCount} hình`;
 
-  const statusText = required
-    ? (enough ? "Đã đủ hình báo cáo" : `Còn thiếu ${Math.max(0, requiredCount - photoCount)} hình`)
-    : "Nhân viên có thể hoàn thành mà không cần đăng hình";
+  let statusText = "Nhân viên có thể hoàn thành mà không cần đăng hình";
+  if (photoState.invalidCount > 0) {
+    statusText = required
+      ? `Có ${photoState.invalidCount} ảnh báo cáo không hợp lệ. Hãy xóa hoặc thay ảnh này trước khi hoàn thành.`
+      : `Có ${photoState.invalidCount} ảnh báo cáo không hợp lệ; công việc này không bắt buộc ảnh.`;
+  } else if (required) {
+    statusText = photoState.enoughValidPhotos
+      ? "Đã đủ ảnh báo cáo hợp lệ"
+      : `Còn thiếu ${Math.max(0, requiredCount - photoState.validCount)} ảnh hợp lệ`;
+  }
 
   const canView = photoCount > 0 && (mode === "admin" || mode === "employee");
   const editableByAdmin = hasPermission("managePhotoRequirements") && !["completed"].includes(task.status);
@@ -10557,12 +10634,13 @@ function renderPhotoReportBox(task, mode) {
 
   return `
     <div
-      class="photo-report-box ${required && !enough ? "is-missing" : ""} ${editableByAdmin ? "is-admin-editable" : ""}"
+      class="photo-report-box ${required && !enough ? "is-missing" : ""} ${photoState.invalidCount > 0 ? "has-invalid-photos" : ""} ${editableByAdmin ? "is-admin-editable" : ""}"
       ${editableByAdmin ? `data-action="edit-photo-requirement" data-task-id="${escapeHtml(task.id)}" role="button" tabindex="0" title="${escapeHtml(titleText)}"` : ""}
     >
       <div>
         <strong>Ảnh báo cáo</strong>
         <span>${escapeHtml(summary)} • ${escapeHtml(statusText)}</span>
+        ${required && photoState.invalidCount > 0 ? `<small class="photo-report-invalid-note">⚠ ${photoState.invalidCount} ảnh không hợp lệ không được tính vào số lượng bắt buộc và đang khóa nút “Hoàn thành”.</small>` : ""}
         ${editableByAdmin ? `<small class="photo-report-hint">Admin bấm vào ô này hoặc nút “Chỉnh số ảnh” để sửa số lượng ảnh bắt buộc.</small>` : ""}
       </div>
       ${(editableByAdmin || canView) ? `
@@ -10933,12 +11011,16 @@ function renderTaskActions(task, permissions) {
 
   if (permissions.canEmployeeSubmit) {
     const disabled = permissions.submitPhotoReady ? "" : " disabled";
-    const title = permissions.submitPhotoReady ? "" : " title=\"Cần đăng đủ số lượng hình theo quy định trước khi hoàn thành\"";
+    const blockedReason = permissions.submitPhotoBlockedReason || "Cần đăng đủ số lượng ảnh hợp lệ theo quy định trước khi hoàn thành";
+    const title = permissions.submitPhotoReady ? "" : ` title="${escapeHtml(blockedReason)}"`;
 
     buttons.push(`
       <button class="btn primary" data-action="submit-task" data-task-id="${escapeHtml(task.id)}"${disabled}${title}>
         Hoàn thành
       </button>
+      ${Number(permissions.submitInvalidPhotoCount || 0) > 0
+        ? `<span class="task-photo-block-message">⚠ ${Number(permissions.submitInvalidPhotoCount || 0)} ảnh không hợp lệ</span>`
+        : ""}
     `);
   }
 
@@ -11797,7 +11879,7 @@ function updatePhotoViewerContent(options = {}) {
     els.photoViewerName.textContent = displayName;
   }
 
-  const capturedBeforeAssignment = isPreAssignmentPhoto(photo);
+  const invalidPhoto = isInvalidReportPhoto(photo);
   const capturedAtText = photo.capturedAt ? formatFullDateTime(photo.capturedAt) : "";
 
   if (els.photoViewerMeta) {
@@ -11805,7 +11887,7 @@ function updatePhotoViewerContent(options = {}) {
     els.photoViewerMeta.textContent = `${uploader} • ${uploadedAt} • ${sizeText}${captureText}`;
   }
 
-  els.photoViewerStage?.classList.toggle("is-pre-assignment-photo", capturedBeforeAssignment);
+  els.photoViewerStage?.classList.toggle("is-pre-assignment-photo", invalidPhoto);
 
   if (els.photoViewerOpenOriginal) {
     els.photoViewerOpenOriginal.href = photo.url;
@@ -12853,18 +12935,20 @@ function renderPhotoReportPageContent(task) {
 
   if (els.photoReportSummary) {
     const employeeName = task.assignedToName || getEmployeeDisplayNameByUid(task.assignedToUid, "Nhân viên");
-    const requiredCount = getTaskRequiredPhotoCount(task);
-    const requiresPhotos = taskRequiresPhotos(task);
-    const hasEnoughPhotos = !requiresPhotos || photos.length >= requiredCount;
-    const requirementText = requiresPhotos
-      ? `${photos.length}/${requiredCount} ảnh`
+    const photoState = getTaskPhotoCompletionState(task);
+    const requirementText = photoState.required
+      ? `${photoState.validCount}/${photoState.requiredCount} ảnh hợp lệ`
       : "Không bắt buộc";
-    const statusText = requiresPhotos
-      ? (hasEnoughPhotos ? "Đã đủ ảnh" : "Còn thiếu ảnh")
-      : "Ảnh tự chọn";
-    const statusClass = requiresPhotos
-      ? (hasEnoughPhotos ? "is-success" : "is-warning")
-      : "is-neutral";
+    const statusText = photoState.invalidCount > 0
+      ? `${photoState.invalidCount} ảnh không hợp lệ`
+      : (photoState.required
+        ? (photoState.ready ? "Đã đủ ảnh" : "Còn thiếu ảnh")
+        : "Ảnh tự chọn");
+    const statusClass = photoState.invalidCount > 0
+      ? "is-danger"
+      : (photoState.required
+        ? (photoState.ready ? "is-success" : "is-warning")
+        : "is-neutral");
 
     els.photoReportSummary.innerHTML = `
       <span class="photo-report-meta-chip">👤 ${escapeHtml(employeeName)}</span>
@@ -12882,11 +12966,12 @@ function renderPhotoReportPageContent(task) {
         const photoKey = getPhotoStableKey(photo, index);
         const selected = isManager && state.photoReportSelectedKeys.has(photoKey);
         const displayName = photo.name || `Ảnh ${index + 1}`;
-        const capturedBeforeAssignment = isPreAssignmentPhoto(photo);
+        const invalidPhoto = isInvalidReportPhoto(photo);
+        const invalidReason = getInvalidReportPhotoReason(photo);
 
         return `
           <article
-            class="photo-report-item ${selected ? "is-selected" : ""} ${capturedBeforeAssignment ? "is-pre-assignment-photo" : ""}"
+            class="photo-report-item ${selected ? "is-selected" : ""} ${invalidPhoto ? "is-pre-assignment-photo" : ""}"
             data-photo-key="${escapeHtml(photoKey)}"
           >
             <button
@@ -12897,7 +12982,7 @@ function renderPhotoReportPageContent(task) {
             >
               <span class="photo-report-image-wrap">
                 <img src="${escapeHtml(photo.url)}" alt="Ảnh báo cáo ${index + 1}" loading="lazy" />
-                ${capturedBeforeAssignment ? `<span class="photo-capture-warning">Ảnh chụp trước khi giao việc</span>` : ""}
+                ${invalidPhoto ? `<span class="photo-capture-warning">Ảnh không hợp lệ<br>${escapeHtml(invalidReason)}</span>` : ""}
               </span>
               <div>
                 <strong>${escapeHtml(displayName)}</strong>
@@ -13106,7 +13191,7 @@ async function openPhotoUploadPicker(taskId, button) {
         : "";
       const preAssignmentCount = uploadedPhotos.filter((photo) => photo.capturedBeforeAssignment).length;
       const warningText = preAssignmentCount > 0
-        ? ` Có ${preAssignmentCount} ảnh được phát hiện chụp trước khi giao việc và đã được đánh dấu.`
+        ? ` Có ${preAssignmentCount} ảnh không hợp lệ do được phát hiện chụp trước khi giao việc. Ảnh vẫn được lưu nhưng không được tính vào số lượng bắt buộc; hãy xóa hoặc thay ảnh trước khi bấm Hoàn thành.`
         : "";
       toast(`Đã đăng thành công ${uploadedPhotos.length} hình.${savedText}${warningText}`, preAssignmentCount > 0 ? "warning" : "success");
     } catch (error) {
@@ -13773,13 +13858,22 @@ async function submitTask(taskId, button) {
   setButtonLoading(button, true, "Đang gửi...");
 
   try {
-    const task = state.tasks.find((item) => item.id === taskId);
+    const taskRef = doc(db, "tasks", taskId);
+    const taskSnap = await getDoc(taskRef);
+    const task = taskSnap.exists()
+      ? { id: taskSnap.id, ...taskSnap.data() }
+      : state.tasks.find((item) => item.id === taskId);
 
     if (!task || task.assignedToUid !== state.user.uid) {
       throw new Error("Bạn không có quyền hoàn thành công việc này.");
     }
 
-    await updateDoc(doc(db, "tasks", taskId), {
+    const photoBlockedMessage = getTaskPhotoCompletionBlockedMessage(task);
+    if (photoBlockedMessage) {
+      throw new Error(photoBlockedMessage);
+    }
+
+    await updateDoc(taskRef, {
       status: "submitted",
       submittedAt: serverTimestamp()
     });

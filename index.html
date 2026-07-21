@@ -486,6 +486,11 @@
       border-color: #fed7aa;
       background: #fff7ed;
     }
+    .photo-report-box.has-invalid-photos {
+      border-color: #f43f5e;
+      background: linear-gradient(135deg, #fff1f2 0%, #faf5ff 100%);
+      box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.08);
+    }
     .photo-report-box.is-admin-editable {
       cursor: pointer;
       transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
@@ -501,6 +506,31 @@
       color: #2563eb;
       font-size: 12px;
       font-weight: 800;
+    }
+    .photo-report-invalid-note {
+      display: block;
+      margin-top: 7px;
+      color: #be123c;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.45;
+    }
+
+    .task-photo-block-message {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      padding: 5px 9px;
+      border: 1px solid #fecdd3;
+      border-radius: 10px;
+      background: #fff1f2;
+      color: #be123c;
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1.2;
+      text-align: center;
+      white-space: nowrap;
     }
 
     .photo-report-actions {
@@ -1007,7 +1037,8 @@
     }
 
     .photo-viewer-stage.is-pre-assignment-photo::after {
-      content: "Ảnh chụp trước khi giao việc";
+      content: "Ảnh báo cáo không hợp lệ\A Chụp trước khi giao việc";
+      white-space: pre-line;
       position: absolute;
       left: 50%;
       top: 50%;
@@ -1322,6 +1353,12 @@
       border-color: #fed7aa;
       background: #fff7ed;
       color: #c2410c;
+    }
+
+    .photo-report-meta-chip.is-danger {
+      border-color: #fecdd3;
+      background: #fff1f2;
+      color: #be123c;
     }
 
     .photo-report-meta-chip.is-neutral {
@@ -3025,6 +3062,12 @@
         -webkit-tap-highlight-color: transparent;
       }
 
+      .task-mobile-photo-action.has-invalid-photos {
+        border-color: #fda4af;
+        background: #fff1f2;
+        color: #be123c;
+      }
+
       .task-mobile-photo-action:active {
         transform: translateY(1px);
       }
@@ -3247,6 +3290,12 @@
       .task-actions .btn:only-child,
       .task-actions .btn:last-child:nth-child(odd) {
         grid-column: 1 / -1;
+      }
+
+      .task-actions .task-photo-block-message {
+        grid-column: 1 / -1;
+        width: 100%;
+        white-space: normal;
       }
 
       .floating-create-task-btn {
