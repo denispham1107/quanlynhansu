@@ -1101,6 +1101,170 @@ function getOptimizationSummary(results = []) {
   };
 }
 
+const REPORT_PHOTO_CONTENT_HASH_ALGORITHM = "sha256-v1";
+const REPORT_PHOTO_VISUAL_HASH_ALGORITHM = "dhash64-v1";
+
+function bytesToHex(bytes = []) {
+  return Array.from(bytes, (value) => Number(value || 0).toString(16).padStart(2, "0")).join("");
+}
+
+function createFallbackBinaryHash(buffer) {
+  const bytes = new Uint8Array(buffer || new ArrayBuffer(0));
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    hash ^= bytes[index];
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+
+  return `fnv32-${hash.toString(16).padStart(8, "0")}-${bytes.length}`;
+}
+
+async function createReportPhotoContentHash(blob) {
+  const buffer = await blob.arrayBuffer();
+
+  if (globalThis.crypto?.subtle?.digest) {
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
+    return bytesToHex(new Uint8Array(digest));
+  }
+
+  return createFallbackBinaryHash(buffer);
+}
+
+function getPixelGrayValue(pixelData, offset) {
+  return Math.round(
+    Number(pixelData[offset] || 0) * 0.299
+    + Number(pixelData[offset + 1] || 0) * 0.587
+    + Number(pixelData[offset + 2] || 0) * 0.114
+  );
+}
+
+async function createReportPhotoVisualHash(blob) {
+  const image = await loadImageElementFromFile(blob);
+  const sourceWidth = Number(image.naturalWidth || image.width || 0);
+  const sourceHeight = Number(image.naturalHeight || image.height || 0);
+
+  if (!sourceWidth || !sourceHeight) {
+    return { visualHash: "", aspectRatio: 0 };
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 9;
+  canvas.height = 8;
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return { visualHash: "", aspectRatio: sourceWidth / sourceHeight };
+
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let bitText = "";
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width - 1; x += 1) {
+      const leftOffset = (y * canvas.width + x) * 4;
+      const rightOffset = (y * canvas.width + x + 1) * 4;
+      bitText += getPixelGrayValue(imageData, leftOffset) > getPixelGrayValue(imageData, rightOffset)
+        ? "1"
+        : "0";
+    }
+  }
+
+  let visualHash = "";
+  for (let index = 0; index < bitText.length; index += 4) {
+    visualHash += Number.parseInt(bitText.slice(index, index + 4), 2).toString(16);
+  }
+
+  return {
+    visualHash: visualHash.padStart(16, "0"),
+    aspectRatio: sourceWidth / sourceHeight
+  };
+}
+
+async function createReportPhotoFingerprint(blob) {
+  const contentHash = await createReportPhotoContentHash(blob);
+  let visualInfo = { visualHash: "", aspectRatio: 0 };
+
+  try {
+    visualInfo = await createReportPhotoVisualHash(blob);
+  } catch (error) {
+    console.warn("Không tạo được dấu vân tay hình ảnh, sẽ kiểm tra trùng bằng nội dung file:", error);
+  }
+
+  return {
+    contentHash,
+    contentHashAlgorithm: REPORT_PHOTO_CONTENT_HASH_ALGORITHM,
+    visualHash: visualInfo.visualHash,
+    visualHashAlgorithm: REPORT_PHOTO_VISUAL_HASH_ALGORITHM,
+    aspectRatio: Number(visualInfo.aspectRatio || 0)
+  };
+}
+
+function getStoredReportPhotoFingerprint(photo = {}) {
+  return {
+    contentHash: String(photo.contentHash || photo.binaryHash || "").trim().toLowerCase(),
+    contentHashAlgorithm: String(photo.contentHashAlgorithm || "").trim(),
+    visualHash: String(photo.visualHash || photo.perceptualHash || "").trim().toLowerCase(),
+    visualHashAlgorithm: String(photo.visualHashAlgorithm || "").trim(),
+    aspectRatio: Number(photo.aspectRatio || 0)
+  };
+}
+
+function areReportPhotoFingerprintsDuplicate(first = {}, second = {}) {
+  const firstContentHash = String(first.contentHash || "").trim().toLowerCase();
+  const secondContentHash = String(second.contentHash || "").trim().toLowerCase();
+  if (firstContentHash && secondContentHash && firstContentHash === secondContentHash) return true;
+
+  const firstVisualHash = String(first.visualHash || "").trim().toLowerCase();
+  const secondVisualHash = String(second.visualHash || "").trim().toLowerCase();
+  if (!firstVisualHash || !secondVisualHash || firstVisualHash !== secondVisualHash) return false;
+
+  const firstRatio = Number(first.aspectRatio || 0);
+  const secondRatio = Number(second.aspectRatio || 0);
+  if (!firstRatio || !secondRatio) return true;
+
+  return Math.abs(firstRatio - secondRatio) <= 0.015;
+}
+
+async function getReportPhotoBlob(photo) {
+  const path = String(photo?.storagePath || "").trim();
+  if (path) return getBlob(storageRef(storage, path));
+
+  const url = String(photo?.url || "").trim();
+  if (!url) throw new Error("Ảnh báo cáo không có đường dẫn để kiểm tra trùng lặp.");
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Không đọc được ảnh đã đăng (${response.status}).`);
+  return response.blob();
+}
+
+async function getExistingReportPhotoFingerprints(task, button) {
+  const photos = getTaskPhotos(task);
+  const fingerprints = [];
+
+  for (let index = 0; index < photos.length; index += 1) {
+    const photo = photos[index];
+    let fingerprint = getStoredReportPhotoFingerprint(photo);
+
+    if (!fingerprint.contentHash && !fingerprint.visualHash) {
+      try {
+        if (button) button.textContent = `Đang đối chiếu ảnh cũ ${index + 1}/${photos.length}...`;
+        const blob = await getReportPhotoBlob(photo);
+        fingerprint = await createReportPhotoFingerprint(blob);
+      } catch (error) {
+        console.warn("Không tạo được dấu vân tay cho ảnh báo cáo cũ:", photo, error);
+      }
+    }
+
+    if (fingerprint.contentHash || fingerprint.visualHash) fingerprints.push(fingerprint);
+  }
+
+  return fingerprints;
+}
+
+function findMatchingReportPhotoFingerprint(fingerprint, knownFingerprints = []) {
+  return knownFingerprints.find((item) => areReportPhotoFingerprintsDuplicate(fingerprint, item)) || null;
+}
+
 
 function getTaskPhotos(task) {
   return Array.isArray(task?.photos) ? task.photos.filter((item) => item?.url) : [];
@@ -1158,7 +1322,11 @@ function getTaskPhotoCompletionBlockedMessage(task) {
   if (!photoState.required || photoState.ready) return "";
 
   if (photoState.invalidCount > 0) {
-    return `Có ${photoState.invalidCount} ảnh báo cáo không hợp lệ. Vui lòng xóa ảnh không hợp lệ và đăng ảnh mới trước khi hoàn thành.`;
+    const missingCount = Math.max(0, photoState.requiredCount - photoState.validCount);
+    const replacementText = missingCount > 0
+      ? ` Bạn cần đăng lại ít nhất ${missingCount} ảnh hợp lệ để đủ số lượng.`
+      : ` Hãy xóa ${photoState.invalidCount} ảnh này trước khi hoàn thành.`;
+    return `Có ${photoState.invalidCount} ảnh báo cáo không hợp lệ.${replacementText}`;
   }
 
   const missingCount = Math.max(0, photoState.requiredCount - photoState.validCount);
@@ -13078,6 +13246,16 @@ function validateSelectedPhotoFiles(files) {
   return null;
 }
 
+async function cleanupUncommittedReportPhotos(photos = []) {
+  const uniquePaths = Array.from(new Set(
+    photos.map((photo) => String(photo?.storagePath || "").trim()).filter(Boolean)
+  ));
+
+  await Promise.allSettled(
+    uniquePaths.map((path) => deleteObject(storageRef(storage, path)))
+  );
+}
+
 async function openPhotoUploadPicker(taskId, button) {
   const task = state.tasks.find((item) => item.id === taskId);
 
@@ -13108,24 +13286,49 @@ async function openPhotoUploadPicker(taskId, button) {
       return;
     }
 
-    setButtonLoading(button, true, "Đang tối ưu hình...");
+    setButtonLoading(button, true, "Đang kiểm tra ảnh trùng...");
+
+    const uploadedPhotos = [];
+    let committedPhotoIds = new Set();
 
     try {
       const now = new Date();
-      const uploadedPhotos = [];
       const optimizedResults = [];
+      const duplicateFiles = [];
+      const knownFingerprints = await getExistingReportPhotoFingerprints(task, button);
 
       for (let index = 0; index < files.length; index += 1) {
-        if (button) button.textContent = `Đang kiểm tra ${index + 1}/${files.length}...`;
-        const captureInfo = await readPhotoCapturedAt(files[index]);
+        const originalFile = files[index];
+        if (button) button.textContent = `Đang kiểm tra ảnh ${index + 1}/${files.length}...`;
+
+        const fingerprint = await createReportPhotoFingerprint(originalFile);
+        const duplicateFingerprint = findMatchingReportPhotoFingerprint(fingerprint, knownFingerprints);
+
+        if (duplicateFingerprint) {
+          duplicateFiles.push(originalFile);
+          continue;
+        }
+
+        knownFingerprints.push(fingerprint);
+        const captureInfo = await readPhotoCapturedAt(originalFile);
         if (button) button.textContent = `Đang tối ưu ${index + 1}/${files.length}...`;
-        const optimizedItem = await optimizePhotoFileForUpload(files[index]);
+        const optimizedItem = await optimizePhotoFileForUpload(originalFile);
+
         optimizedResults.push({
           ...optimizedItem,
+          ...fingerprint,
           capturedAtDate: captureInfo.date,
           captureTimeSource: captureInfo.source,
           capturedBeforeAssignment: isPhotoCapturedBeforeTaskAssignment(captureInfo.date, task)
         });
+      }
+
+      if (!optimizedResults.length) {
+        toast(
+          `Không có hình mới để đăng. Hệ thống đã bỏ qua ${duplicateFiles.length} hình trùng lặp; vui lòng chọn hình khác.`,
+          "warning"
+        );
+        return;
       }
 
       const optimizationSummary = getOptimizationSummary(optimizedResults);
@@ -13150,7 +13353,12 @@ async function openPhotoUploadPicker(taskId, button) {
             originalSize: String(item.originalSize || file.size || 0),
             capturedAt: item.capturedAtDate?.toISOString?.() || "",
             captureTimeSource: item.captureTimeSource || "unavailable",
-            capturedBeforeAssignment: item.capturedBeforeAssignment ? "true" : "false"
+            capturedBeforeAssignment: item.capturedBeforeAssignment ? "true" : "false",
+            contentHash: item.contentHash || "",
+            contentHashAlgorithm: item.contentHashAlgorithm || REPORT_PHOTO_CONTENT_HASH_ALGORITHM,
+            visualHash: item.visualHash || "",
+            visualHashAlgorithm: item.visualHashAlgorithm || REPORT_PHOTO_VISUAL_HASH_ALGORITHM,
+            aspectRatio: String(item.aspectRatio || 0)
           }
         });
 
@@ -13168,6 +13376,11 @@ async function openPhotoUploadPicker(taskId, button) {
           optimized: Boolean(item.optimized),
           width: Number(item.width || 0),
           height: Number(item.height || 0),
+          contentHash: item.contentHash || "",
+          contentHashAlgorithm: item.contentHashAlgorithm || REPORT_PHOTO_CONTENT_HASH_ALGORITHM,
+          visualHash: item.visualHash || "",
+          visualHashAlgorithm: item.visualHashAlgorithm || REPORT_PHOTO_VISUAL_HASH_ALGORITHM,
+          aspectRatio: Number(item.aspectRatio || 0),
           uploadedAt: Timestamp.fromDate(now),
           capturedAt: item.capturedAtDate ? Timestamp.fromDate(item.capturedAtDate) : null,
           captureTimeSource: item.captureTimeSource || "unavailable",
@@ -13178,23 +13391,81 @@ async function openPhotoUploadPicker(taskId, button) {
         });
       }
 
-      if (!uploadedPhotos.length) return;
+      const taskRef = doc(db, "tasks", task.id);
+      let transactionResult = { committedPhotos: [], duplicatePhotos: [] };
 
-      await updateDoc(doc(db, "tasks", task.id), {
-        photos: arrayUnion(...uploadedPhotos),
-        photoCount: increment(uploadedPhotos.length),
-        lastPhotoUploadedAt: serverTimestamp()
+      await runTransaction(db, async (transaction) => {
+        const latestTaskSnap = await transaction.get(taskRef);
+        if (!latestTaskSnap.exists()) throw new Error("Không tìm thấy công việc cần đăng hình.");
+
+        const latestTask = { id: latestTaskSnap.id, ...latestTaskSnap.data() };
+        if (latestTask.assignedToUid !== state.user.uid) {
+          throw new Error("Bạn không còn là nhân viên phụ trách công việc này.");
+        }
+
+        const latestPhotos = getTaskPhotos(latestTask);
+        const latestFingerprints = latestPhotos
+          .map((photo) => getStoredReportPhotoFingerprint(photo))
+          .filter((fingerprint) => fingerprint.contentHash || fingerprint.visualHash);
+        const committedPhotos = [];
+        const duplicatePhotos = [];
+
+        uploadedPhotos.forEach((photo) => {
+          const fingerprint = getStoredReportPhotoFingerprint(photo);
+          if (findMatchingReportPhotoFingerprint(fingerprint, latestFingerprints)) {
+            duplicatePhotos.push(photo);
+            return;
+          }
+
+          latestFingerprints.push(fingerprint);
+          committedPhotos.push(photo);
+        });
+
+        if (committedPhotos.length) {
+          const nextPhotos = [...latestPhotos, ...committedPhotos];
+          transaction.update(taskRef, {
+            photos: nextPhotos,
+            photoCount: nextPhotos.length,
+            lastPhotoUploadedAt: serverTimestamp()
+          });
+        }
+
+        transactionResult = { committedPhotos, duplicatePhotos };
       });
+
+      committedPhotoIds = new Set(transactionResult.committedPhotos.map((photo) => photo.id));
+      await cleanupUncommittedReportPhotos(transactionResult.duplicatePhotos);
+
+      const duplicateCount = duplicateFiles.length + transactionResult.duplicatePhotos.length;
+      const committedPhotos = transactionResult.committedPhotos;
+
+      if (!committedPhotos.length) {
+        toast(
+          `Không có hình mới được đăng. Hệ thống đã bỏ qua ${duplicateCount} hình trùng lặp; vui lòng chọn ${duplicateCount} hình khác.`,
+          "warning"
+        );
+        return;
+      }
 
       const savedText = optimizationSummary.savedBytes > 0
         ? ` Đã tối ưu giảm khoảng ${formatFileSize(optimizationSummary.savedBytes)}.`
         : "";
-      const preAssignmentCount = uploadedPhotos.filter((photo) => photo.capturedBeforeAssignment).length;
-      const warningText = preAssignmentCount > 0
-        ? ` Có ${preAssignmentCount} ảnh không hợp lệ do được phát hiện chụp trước khi giao việc. Ảnh vẫn được lưu nhưng không được tính vào số lượng bắt buộc; hãy xóa hoặc thay ảnh trước khi bấm Hoàn thành.`
+      const preAssignmentCount = committedPhotos.filter((photo) => photo.capturedBeforeAssignment).length;
+      const invalidText = preAssignmentCount > 0
+        ? ` Có ${preAssignmentCount} ảnh không hợp lệ cần xử lý hoặc đăng lại trước khi bấm Hoàn thành.`
         : "";
-      toast(`Đã đăng thành công ${uploadedPhotos.length} hình.${savedText}${warningText}`, preAssignmentCount > 0 ? "warning" : "success");
+      const duplicateText = duplicateCount > 0
+        ? ` Đã bỏ qua ${duplicateCount} hình trùng lặp và không tải chúng lên; hãy chọn ${duplicateCount} hình khác nếu vẫn chưa đủ số lượng.`
+        : "";
+      const toastType = preAssignmentCount > 0 || duplicateCount > 0 ? "warning" : "success";
+
+      toast(
+        `Đã đăng thành công ${committedPhotos.length} hình.${savedText}${invalidText}${duplicateText}`,
+        toastType
+      );
     } catch (error) {
+      const uncommittedPhotos = uploadedPhotos.filter((photo) => !committedPhotoIds.has(photo.id));
+      await cleanupUncommittedReportPhotos(uncommittedPhotos);
       console.error(error);
       toast(error.message || "Không đăng được hình. Kiểm tra Firebase Storage Rules hoặc kết nối mạng.", "error");
     } finally {
