@@ -218,7 +218,12 @@ const state = {
   chatReadRequestsInFlight: new Set(),
   chatUsersLoading: false,
   chatConversationFallbackTimer: null,
-  chatConversationListenerWarningShown: false
+  chatConversationListenerWarningShown: false,
+  taskReviewAlertAudio: null,
+  taskReviewAlertPendingCount: 0,
+  taskReviewAlertUnlocked: false,
+  taskReviewAlertEnableInFlight: false,
+  taskReviewAlertNeedsGestureToastShown: false
 };
 
 
@@ -258,6 +263,193 @@ function isSupervisorProfile(profile = state.profile) {
 function isManagementProfile(profile = state.profile) {
   return isAdminProfile(profile) || isSupervisorProfile(profile);
 }
+
+// =========================
+// Âm báo lặp khi có công việc chờ Admin xác nhận
+// =========================
+const TASK_REVIEW_ALERT_FILE = "./task-review-alert-max.wav";
+
+function getPendingTaskReviewCount(excludedTaskId = "") {
+  const excludedId = String(excludedTaskId || "").trim();
+  return state.tasks.filter((task) => (
+    task?.status === "submitted"
+    && (!excludedId || task.id !== excludedId)
+  )).length;
+}
+
+function getTaskReviewAlertButtons() {
+  return [els.taskReviewAlertEnableBtn, els.mobileTaskReviewAlertEnableBtn].filter(Boolean);
+}
+
+function updateTaskReviewAlertControls() {
+  const isAdmin = Boolean(state.user && isAdminProfile());
+  getTaskReviewAlertButtons().forEach((button) => {
+    button.classList.toggle("hidden", !isAdmin);
+    button.classList.toggle("is-enabled", isAdmin && state.taskReviewAlertUnlocked);
+    button.disabled = !isAdmin || state.taskReviewAlertEnableInFlight || state.taskReviewAlertUnlocked;
+
+    if (!isAdmin) {
+      button.textContent = "🔊 Bật âm báo";
+      return;
+    }
+
+    if (state.taskReviewAlertEnableInFlight) {
+      button.textContent = "Đang bật âm báo...";
+    } else if (state.taskReviewAlertUnlocked) {
+      button.textContent = "🔊 Âm báo đã bật";
+    } else {
+      button.textContent = "🔊 Bật âm báo";
+    }
+  });
+}
+
+function ensureTaskReviewAlertAudio() {
+  if (state.taskReviewAlertAudio) return state.taskReviewAlertAudio;
+
+  const audio = new Audio(TASK_REVIEW_ALERT_FILE);
+  audio.preload = "auto";
+  audio.loop = true;
+  audio.volume = 1;
+  audio.setAttribute("playsinline", "");
+  audio.setAttribute("webkit-playsinline", "");
+  state.taskReviewAlertAudio = audio;
+  return audio;
+}
+
+function stopTaskReviewAlertSound({ rewind = true } = {}) {
+  const audio = state.taskReviewAlertAudio;
+  if (!audio) return;
+
+  audio.pause();
+  audio.loop = true;
+  if (rewind) {
+    try {
+      audio.currentTime = 0;
+    } catch (_) {
+      // Một số trình duyệt chưa cho đặt currentTime khi file chưa tải xong.
+    }
+  }
+}
+
+async function startTaskReviewAlertSound() {
+  if (!state.user || !isAdminProfile() || !state.taskReviewAlertUnlocked) return false;
+  if (state.taskReviewAlertPendingCount <= 0) {
+    stopTaskReviewAlertSound();
+    return false;
+  }
+
+  const audio = ensureTaskReviewAlertAudio();
+  audio.loop = true;
+  audio.volume = 1;
+
+  try {
+    await audio.play();
+    return true;
+  } catch (error) {
+    console.warn("Trình duyệt chưa cho phép phát âm báo chờ duyệt:", error);
+    state.taskReviewAlertUnlocked = false;
+    updateTaskReviewAlertControls();
+    if (!state.taskReviewAlertNeedsGestureToastShown) {
+      state.taskReviewAlertNeedsGestureToastShown = true;
+      toast("Thiết bị đang chặn âm thanh. Admin hãy bấm “Bật âm báo” để cho phép phát chuông.", "error");
+    }
+    return false;
+  }
+}
+
+function syncTaskReviewAlertSound() {
+  const pendingCount = state.user && isAdminProfile()
+    ? getPendingTaskReviewCount()
+    : 0;
+  state.taskReviewAlertPendingCount = pendingCount;
+
+  if (pendingCount <= 0) {
+    stopTaskReviewAlertSound();
+    state.taskReviewAlertNeedsGestureToastShown = false;
+    return;
+  }
+
+  if (!state.taskReviewAlertUnlocked) {
+    if (!state.taskReviewAlertNeedsGestureToastShown) {
+      state.taskReviewAlertNeedsGestureToastShown = true;
+      toast(
+        `Có ${pendingCount} công việc đang chờ xác nhận. Admin hãy bấm “Bật âm báo” để phát chuông liên tục.`,
+        "info"
+      );
+    }
+    return;
+  }
+
+  startTaskReviewAlertSound();
+}
+
+async function enableTaskReviewAlertFromUserGesture() {
+  if (!state.user || !isAdminProfile() || state.taskReviewAlertEnableInFlight) return;
+  if (state.taskReviewAlertUnlocked) return;
+
+  state.taskReviewAlertEnableInFlight = true;
+  updateTaskReviewAlertControls();
+  setMobileTopbarMenuOpen(false);
+
+  const audio = ensureTaskReviewAlertAudio();
+  audio.volume = 1;
+
+  try {
+    // Phát ngay trong thao tác bấm của Admin để mở khóa âm thanh trên iOS/Android.
+    audio.loop = state.taskReviewAlertPendingCount > 0;
+    audio.currentTime = 0;
+    await audio.play();
+
+    state.taskReviewAlertUnlocked = true;
+    state.taskReviewAlertNeedsGestureToastShown = false;
+    toast("Đã bật âm báo ở mức lớn nhất mà trình duyệt cho phép.", "success");
+
+    if (state.taskReviewAlertPendingCount <= 0) {
+      window.setTimeout(() => {
+        if (state.taskReviewAlertPendingCount <= 0) stopTaskReviewAlertSound();
+      }, 650);
+    } else {
+      audio.loop = true;
+    }
+  } catch (error) {
+    console.error("Không bật được âm báo:", error);
+    state.taskReviewAlertUnlocked = false;
+    toast(
+      "Thiết bị chưa cho phép phát âm thanh. Hãy tăng âm lượng thiết bị, tắt chế độ im lặng nếu có rồi bấm Bật âm báo lại.",
+      "error"
+    );
+  } finally {
+    state.taskReviewAlertEnableInFlight = false;
+    updateTaskReviewAlertControls();
+    syncTaskReviewAlertSound();
+  }
+}
+
+function markTaskReviewDecisionLocally(taskId, nextStatus) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (task) task.status = nextStatus;
+  syncTaskReviewAlertSound();
+}
+
+function resetTaskReviewAlertSound() {
+  stopTaskReviewAlertSound();
+  if (state.taskReviewAlertAudio) {
+    state.taskReviewAlertAudio.src = "";
+    state.taskReviewAlertAudio.load();
+  }
+  state.taskReviewAlertAudio = null;
+  state.taskReviewAlertPendingCount = 0;
+  state.taskReviewAlertUnlocked = false;
+  state.taskReviewAlertEnableInFlight = false;
+  state.taskReviewAlertNeedsGestureToastShown = false;
+  updateTaskReviewAlertControls();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && state.taskReviewAlertUnlocked) {
+    syncTaskReviewAlertSound();
+  }
+});
 
 function normalizeSupervisorPermissions(value = {}) {
   const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -509,6 +701,8 @@ const els = {
   statHotel: $("#statHotel"),
   statCompleted: $("#statCompleted"),
   enableNotificationsBtn: $("#enableNotificationsBtn"),
+  taskReviewAlertEnableBtn: $("#taskReviewAlertEnableBtn"),
+  mobileTaskReviewAlertEnableBtn: $("#mobileTaskReviewAlertEnableBtn"),
   notificationBellBtn: $("#notificationBellBtn"),
   notificationPanel: $("#notificationPanel"),
   notificationList: $("#notificationList"),
@@ -1872,6 +2066,8 @@ async function showSystemNotification(notification) {
 }
 
 els.enableNotificationsBtn?.addEventListener("click", requestNotificationPermission);
+els.taskReviewAlertEnableBtn?.addEventListener("click", enableTaskReviewAlertFromUserGesture);
+els.mobileTaskReviewAlertEnableBtn?.addEventListener("click", enableTaskReviewAlertFromUserGesture);
 
 function queuePushTaskOpen(taskId) {
   const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
@@ -4393,6 +4589,7 @@ els.logoutBtn.addEventListener("click", async () => {
 onAuthStateChanged(auth, async (user) => {
   cleanupSubscriptions();
   cleanupChatFeature();
+  resetTaskReviewAlertSound();
 
   state.user = user;
   state.profile = null;
@@ -4493,6 +4690,7 @@ function showApp() {
 
   els.currentUserText.textContent = `${state.profile.name || state.user.email} • ${roleText}`;
   updateNotificationPermissionButton();
+  updateTaskReviewAlertControls();
 }
 
 function cleanupSubscriptions() {
@@ -4785,6 +4983,7 @@ function setupAdminDashboard() {
     async (snapshot) => {
       state.tasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       renderAdminTasks();
+      syncTaskReviewAlertSound();
 
       // Chỉ tài khoản Admin tự đồng bộ trạng thái quá hạn vào database.
       // Giám sát vẫn nhìn thấy trạng thái tính toán realtime nhưng không tự ghi dữ liệu nếu không phải Admin.
@@ -14204,6 +14403,10 @@ async function approveTask(taskId, button) {
       differencePercent: result.differencePercent
     });
 
+    // Dừng ngay công việc vừa xử lý khỏi danh sách chờ phát chuông.
+    // Nếu vẫn còn công việc khác chờ xác nhận, âm báo tiếp tục phát.
+    markTaskReviewDecisionLocally(taskId, "completed");
+
     await reflowQueuedTasksForEmployee(task.assignedToUid, taskId);
 
     const resultText = taskResultShortText(result);
@@ -14362,6 +14565,10 @@ async function requestRedo(taskId, button) {
       lastRedoRequestedByUid: requestedByUid,
       lastRedoRequestedByName: requestedByName
     });
+
+    // Dừng ngay công việc vừa bị yêu cầu làm lại khỏi danh sách chờ phát chuông.
+    // Nếu còn công việc khác chờ xác nhận, chuông vẫn tiếp tục.
+    markTaskReviewDecisionLocally(taskId, "redo");
 
     if (task) {
       await createNotifications([
