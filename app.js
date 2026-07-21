@@ -287,7 +287,6 @@ function ensureTaskReviewAlertAudioElement() {
   audio.setAttribute("playsinline", "");
   audio.setAttribute("webkit-playsinline", "");
   audio.setAttribute("x-webkit-airplay", "deny");
-  audio.load();
 
   state.taskReviewAlertAudioElement = audio;
   return audio;
@@ -326,7 +325,7 @@ function updateTaskReviewAlertEnableButtons() {
 
 function playTaskReviewAlertPattern() {
   const audioContext = state.taskReviewAlertAudioContext;
-  if (!audioContext || audioContext.state !== "running") return;
+  if (!audioContext || audioContext.state !== "running") return false;
 
   const startAt = audioContext.currentTime + 0.02;
   const tones = [
@@ -352,6 +351,8 @@ function playTaskReviewAlertPattern() {
     oscillator.start(toneStart);
     oscillator.stop(toneEnd + 0.03);
   });
+
+  return true;
 }
 
 function stopTaskReviewAlertFallbackSound() {
@@ -397,6 +398,50 @@ function stopTaskReviewAlertSound() {
   }
 }
 
+function startTaskReviewAlertHtmlAudioFallback() {
+  if (
+    !state.taskReviewAlertUserEnabled
+    || !isAdminProfile()
+    || state.taskReviewAlertPendingCount <= 0
+  ) return;
+
+  const audio = ensureTaskReviewAlertAudioElement();
+  audio.loop = true;
+  audio.volume = 1;
+
+  if (!audio.paused) {
+    state.taskReviewAlertMediaUnlocked = true;
+    return;
+  }
+
+  if (state.taskReviewAlertMediaPlayPromise) return;
+
+  try {
+    const playResult = audio.play();
+    if (!playResult || typeof playResult.then !== "function") {
+      state.taskReviewAlertMediaUnlocked = true;
+      return;
+    }
+
+    state.taskReviewAlertMediaPlayPromise = playResult;
+    playResult.then(() => {
+      state.taskReviewAlertMediaPlayPromise = null;
+      state.taskReviewAlertMediaUnlocked = true;
+      state.taskReviewAlertNeedsGestureToastShown = false;
+      updateTaskReviewAlertEnableButtons();
+    }).catch((error) => {
+      state.taskReviewAlertMediaPlayPromise = null;
+      state.taskReviewAlertMediaUnlocked = false;
+      console.warn("Không phát được file âm báo dự phòng:", error);
+      // Không tự tắt lựa chọn của Admin. Web Audio vẫn có thể hoạt động bình thường.
+      updateTaskReviewAlertEnableButtons();
+    });
+  } catch (error) {
+    state.taskReviewAlertMediaUnlocked = false;
+    console.warn("Không thể phát file âm báo dự phòng:", error);
+  }
+}
+
 function startTaskReviewAlertSound() {
   if (
     !state.taskReviewAlertUserEnabled
@@ -408,45 +453,29 @@ function startTaskReviewAlertSound() {
   }
 
   usePlaybackAudioSessionWhenAvailable();
-  const audio = ensureTaskReviewAlertAudioElement();
-  audio.loop = true;
-  audio.volume = 1;
 
-  if (!audio.paused) {
-    state.taskReviewAlertMediaUnlocked = true;
-    updateTaskReviewAlertEnableButtons();
-    stopTaskReviewAlertFallbackSound();
+  // Ưu tiên Web Audio vì cơ chế này ổn định trên Chrome, Safari, iOS và Android
+  // sau khi Admin đã bấm trực tiếp nút Bật âm báo.
+  if (
+    state.taskReviewAlertUnlocked
+    && state.taskReviewAlertAudioContext
+    && state.taskReviewAlertAudioContext.state === "running"
+  ) {
+    const audio = state.taskReviewAlertAudioElement;
+    if (audio && !audio.paused) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch (_) {
+        // Bỏ qua lỗi dừng file dự phòng.
+      }
+    }
+    startTaskReviewAlertFallbackSound();
     return;
   }
 
-  if (state.taskReviewAlertMediaPlayPromise) return;
-
-  try {
-    const playResult = audio.play();
-    if (!playResult || typeof playResult.then !== "function") {
-      state.taskReviewAlertMediaUnlocked = true;
-      updateTaskReviewAlertEnableButtons();
-      stopTaskReviewAlertFallbackSound();
-      return;
-    }
-
-    state.taskReviewAlertMediaPlayPromise = playResult;
-    playResult.then(() => {
-      state.taskReviewAlertMediaPlayPromise = null;
-      state.taskReviewAlertMediaUnlocked = true;
-      state.taskReviewAlertNeedsGestureToastShown = false;
-      updateTaskReviewAlertEnableButtons();
-      stopTaskReviewAlertFallbackSound();
-    }).catch((error) => {
-      state.taskReviewAlertMediaPlayPromise = null;
-      console.warn("Trình duyệt chưa cho phép phát âm báo:", error);
-      updateTaskReviewAlertEnableButtons();
-      startTaskReviewAlertFallbackSound();
-    });
-  } catch (error) {
-    console.warn("Không thể phát file âm báo:", error);
-    startTaskReviewAlertFallbackSound();
-  }
+  // Chỉ dùng file WAV khi thiết bị không hỗ trợ hoặc chưa mở được Web Audio.
+  startTaskReviewAlertHtmlAudioFallback();
 }
 
 function syncTaskReviewAlertSound() {
@@ -474,108 +503,115 @@ function syncTaskReviewAlertSound() {
   }
 }
 
-function primeTaskReviewAlertMediaFromGesture() {
-  if (
-    !state.taskReviewAlertUserEnabled
-    || !state.user
-    || !isAdminProfile()
-    || state.taskReviewAlertMediaUnlocked
-    || state.taskReviewAlertUnlockInFlight
-  ) {
-    updateTaskReviewAlertEnableButtons();
-    return;
-  }
+async function unlockTaskReviewAlertAudio() {
+  if (!state.taskReviewAlertUserEnabled || !state.user || !isAdminProfile()) return false;
+  if (state.taskReviewAlertUnlockInFlight) return false;
 
-  const audio = ensureTaskReviewAlertAudioElement();
-  usePlaybackAudioSessionWhenAvailable();
   state.taskReviewAlertUnlockInFlight = true;
+  state.taskReviewAlertNeedsGestureToastShown = false;
   updateTaskReviewAlertEnableButtons();
+  usePlaybackAudioSessionWhenAvailable();
 
-  try {
-    audio.loop = true;
-    audio.volume = 0.001;
-    audio.currentTime = 0;
-    const playResult = audio.play();
-
-    const finish = () => {
-      state.taskReviewAlertUnlockInFlight = false;
-      state.taskReviewAlertMediaUnlocked = true;
-      state.taskReviewAlertNeedsGestureToastShown = false;
-      audio.volume = 1;
-
-      if (!state.taskReviewAlertUserEnabled || state.taskReviewAlertPendingCount <= 0) {
-        audio.pause();
-        audio.currentTime = 0;
-      }
-
-      updateTaskReviewAlertEnableButtons();
-      syncTaskReviewAlertSound();
-    };
-
-    if (!playResult || typeof playResult.then !== "function") {
-      finish();
-      return;
-    }
-
-    playResult.then(finish).catch((error) => {
-      state.taskReviewAlertUnlockInFlight = false;
-      state.taskReviewAlertUserEnabled = false;
-      console.warn("Không thể mở khóa file âm báo trên thiết bị:", error);
-      stopTaskReviewAlertSound();
-      updateTaskReviewAlertEnableButtons();
-      toast("Thiết bị chưa cho phép phát âm báo. Hãy thử bật lại sau khi mở ứng dụng.", "error");
-    });
-  } catch (error) {
-    state.taskReviewAlertUnlockInFlight = false;
-    state.taskReviewAlertUserEnabled = false;
-    console.warn("Không thể khởi tạo file âm báo:", error);
-    stopTaskReviewAlertSound();
-    updateTaskReviewAlertEnableButtons();
-    toast("Không thể bật âm báo trên thiết bị này.", "error");
-  }
-}
-
-function unlockTaskReviewAlertAudio() {
-  if (!state.taskReviewAlertUserEnabled || !state.user || !isAdminProfile()) return;
-
-  // Phải gọi play() trực tiếp trong thao tác chạm/click để iOS và Android
-  // cấp quyền phát âm thanh cho chính phần tử Audio này.
-  primeTaskReviewAlertMediaFromGesture();
+  let webAudioReady = false;
+  let htmlAudioReady = false;
+  let lastError = null;
 
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextClass) return;
 
+  // Gọi resume() ngay trong sự kiện click/touch để giữ quyền user activation.
+  let resumePromise = null;
   try {
-    if (!state.taskReviewAlertAudioContext || state.taskReviewAlertAudioContext.state === "closed") {
-      state.taskReviewAlertAudioContext = new AudioContextClass();
-    }
-
-    const audioContext = state.taskReviewAlertAudioContext;
-    const finishUnlock = () => {
-      if (!state.taskReviewAlertUserEnabled || audioContext.state !== "running") return;
-
-      const oscillator = audioContext.createOscillator();
-      const gain = audioContext.createGain();
-      const now = audioContext.currentTime;
-      gain.gain.setValueAtTime(0.0001, now);
-      oscillator.connect(gain);
-      gain.connect(audioContext.destination);
-      oscillator.start(now);
-      oscillator.stop(now + 0.02);
-
-      state.taskReviewAlertUnlocked = true;
-      state.taskReviewAlertNeedsGestureToastShown = false;
-      updateTaskReviewAlertEnableButtons();
-      syncTaskReviewAlertSound();
-    };
-
-    if (audioContext.state === "running") {
-      finishUnlock();
-    } else {
-      audioContext.resume().then(finishUnlock).catch(() => undefined);
+    if (AudioContextClass) {
+      if (!state.taskReviewAlertAudioContext || state.taskReviewAlertAudioContext.state === "closed") {
+        state.taskReviewAlertAudioContext = new AudioContextClass();
+      }
+      const audioContext = state.taskReviewAlertAudioContext;
+      resumePromise = audioContext.state === "running"
+        ? Promise.resolve()
+        : audioContext.resume();
     }
   } catch (error) {
-    console.warn("Không thể mở khóa âm báo chờ duyệt:", error);
+    lastError = error;
+    console.warn("Không thể khởi tạo Web Audio:", error);
+  }
+
+  // Khởi động file WAV song song như phương án dự phòng. Nếu file lỗi/404 thì
+  // không được tự tắt nút vì Web Audio vẫn có thể phát tốt.
+  let mediaPromise = null;
+  try {
+    const audio = ensureTaskReviewAlertAudioElement();
+    audio.loop = false;
+    audio.volume = 0.01;
+    audio.currentTime = 0;
+    const playResult = audio.play();
+    mediaPromise = playResult && typeof playResult.then === "function"
+      ? playResult
+      : Promise.resolve();
+  } catch (error) {
+    lastError = error;
+    console.warn("Không thể khởi động file âm báo dự phòng:", error);
+  }
+
+  try {
+    if (resumePromise) {
+      try {
+        await resumePromise;
+        const audioContext = state.taskReviewAlertAudioContext;
+        if (audioContext?.state === "running") {
+          state.taskReviewAlertUnlocked = true;
+          webAudioReady = true;
+        }
+      } catch (error) {
+        lastError = error;
+        console.warn("Trình duyệt chưa mở được Web Audio:", error);
+      }
+    }
+
+    if (mediaPromise) {
+      try {
+        await mediaPromise;
+        state.taskReviewAlertMediaUnlocked = true;
+        htmlAudioReady = true;
+      } catch (error) {
+        lastError = error;
+        state.taskReviewAlertMediaUnlocked = false;
+        console.warn("Trình duyệt không phát được file WAV dự phòng:", error);
+      } finally {
+        const audio = state.taskReviewAlertAudioElement;
+        if (audio) {
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.loop = true;
+            audio.volume = 1;
+          } catch (_) {
+            // Không ảnh hưởng đến Web Audio.
+          }
+        }
+      }
+    }
+
+    if (!webAudioReady && !htmlAudioReady) {
+      state.taskReviewAlertUserEnabled = false;
+      stopTaskReviewAlertSound();
+      toast("Thiết bị chưa cho phép phát âm báo. Hãy chạm trực tiếp nút Bật âm báo rồi thử lại.", "error");
+      if (lastError) console.warn("Chi tiết lỗi mở âm báo:", lastError);
+      return false;
+    }
+
+    state.taskReviewAlertNeedsGestureToastShown = false;
+
+    // Phát một tiếng kiểm tra ngay sau khi bật để Admin biết thiết bị đã cấp quyền.
+    if (webAudioReady) {
+      playTaskReviewAlertPattern();
+    }
+
+    toast("Đã bật âm báo chờ duyệt.", "success");
+    return true;
+  } finally {
+    state.taskReviewAlertUnlockInFlight = false;
+    updateTaskReviewAlertEnableButtons();
+    syncTaskReviewAlertSound();
   }
 }
 
@@ -583,10 +619,10 @@ function setTaskReviewAlertEnabled(enabled) {
   if (!state.user || !isAdminProfile()) return;
 
   const nextEnabled = enabled === true;
-  state.taskReviewAlertUserEnabled = nextEnabled;
   state.taskReviewAlertNeedsGestureToastShown = false;
 
   if (!nextEnabled) {
+    state.taskReviewAlertUserEnabled = false;
     state.taskReviewAlertUnlockInFlight = false;
     stopTaskReviewAlertSound();
     updateTaskReviewAlertEnableButtons();
@@ -594,8 +630,9 @@ function setTaskReviewAlertEnabled(enabled) {
     return;
   }
 
+  state.taskReviewAlertUserEnabled = true;
   updateTaskReviewAlertEnableButtons();
-  unlockTaskReviewAlertAudio();
+  void unlockTaskReviewAlertAudio();
 }
 
 function bindTaskReviewAlertUnlockEvents() {
@@ -606,6 +643,8 @@ function bindTaskReviewAlertUnlockEvents() {
     button?.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+
+      if (state.taskReviewAlertUnlockInFlight) return;
       setTaskReviewAlertEnabled(!state.taskReviewAlertUserEnabled);
       toggleMobileTopbarMenu(false);
     });
