@@ -82,6 +82,19 @@
     }
 
 
+    .task-review-alert-enable-btn {
+      border-color: #fb7185 !important;
+      background: linear-gradient(135deg, #fff7ed, #fdf2f8) !important;
+      color: #9f1239 !important;
+      font-weight: 900 !important;
+      box-shadow: 0 8px 20px rgba(225, 29, 72, 0.12);
+    }
+
+    .task-review-alert-enable-btn:disabled {
+      cursor: wait;
+      opacity: 0.68;
+    }
+
     @media (max-width: 768px) {
       html,
       body {
@@ -103,6 +116,10 @@
         font-size: 12px;
         line-height: 1.25;
         white-space: normal;
+      }
+
+      #enableTaskReviewAlertBtn {
+        display: none !important;
       }
 
       .notification-wrap {
@@ -486,11 +503,6 @@
       border-color: #fed7aa;
       background: #fff7ed;
     }
-    .photo-report-box.has-invalid-photos {
-      border-color: #f43f5e;
-      background: linear-gradient(135deg, #fff1f2 0%, #faf5ff 100%);
-      box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.08);
-    }
     .photo-report-box.is-admin-editable {
       cursor: pointer;
       transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
@@ -506,31 +518,6 @@
       color: #2563eb;
       font-size: 12px;
       font-weight: 800;
-    }
-    .photo-report-invalid-note {
-      display: block;
-      margin-top: 7px;
-      color: #be123c;
-      font-size: 12px;
-      font-weight: 900;
-      line-height: 1.45;
-    }
-
-    .task-photo-block-message {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 30px;
-      padding: 5px 9px;
-      border: 1px solid #fecdd3;
-      border-radius: 10px;
-      background: #fff1f2;
-      color: #be123c;
-      font-size: 11px;
-      font-weight: 900;
-      line-height: 1.2;
-      text-align: center;
-      white-space: nowrap;
     }
 
     .photo-report-actions {
@@ -1037,8 +1024,7 @@
     }
 
     .photo-viewer-stage.is-pre-assignment-photo::after {
-      content: "Ảnh báo cáo không hợp lệ\A Chụp trước khi giao việc";
-      white-space: pre-line;
+      content: "Ảnh chụp trước khi giao việc";
       position: absolute;
       left: 50%;
       top: 50%;
@@ -1353,12 +1339,6 @@
       border-color: #fed7aa;
       background: #fff7ed;
       color: #c2410c;
-    }
-
-    .photo-report-meta-chip.is-danger {
-      border-color: #fecdd3;
-      background: #fff1f2;
-      color: #be123c;
     }
 
     .photo-report-meta-chip.is-neutral {
@@ -3062,12 +3042,6 @@
         -webkit-tap-highlight-color: transparent;
       }
 
-      .task-mobile-photo-action.has-invalid-photos {
-        border-color: #fda4af;
-        background: #fff1f2;
-        color: #be123c;
-      }
-
       .task-mobile-photo-action:active {
         transform: translateY(1px);
       }
@@ -3290,12 +3264,6 @@
       .task-actions .btn:only-child,
       .task-actions .btn:last-child:nth-child(odd) {
         grid-column: 1 / -1;
-      }
-
-      .task-actions .task-photo-block-message {
-        grid-column: 1 / -1;
-        width: 100%;
-        white-space: normal;
       }
 
       .floating-create-task-btn {
@@ -8199,14 +8167,8 @@
       right: 18px;
       z-index: 3200;
       width: min(390px, calc(100vw - 28px));
-      height: min(680px, calc(100vh - 96px));
-      height: min(680px, calc(100dvh - 96px));
-      max-height: calc(100vh - 96px);
-      max-height: calc(100dvh - 96px);
-      display: flex;
-      flex-direction: column;
+      max-height: min(680px, calc(100vh - 100px));
       overflow: hidden;
-      overscroll-behavior: contain;
       border: 1px solid #bfdbfe;
       border-radius: 22px;
       background: #fff;
@@ -8216,11 +8178,8 @@
     .culao-chat-directory-view,
     .culao-chat-mobile-conversation {
       min-height: 0;
-      height: 100%;
-      flex: 1 1 auto;
       display: flex;
       flex-direction: column;
-      overflow: hidden;
     }
 
     .culao-chat-directory-head,
@@ -8234,7 +8193,6 @@
     }
 
     .culao-chat-directory-head {
-      flex: 0 0 auto;
       padding: 18px 18px 12px;
       border-bottom: 1px solid #e2e8f0;
     }
@@ -8276,7 +8234,6 @@
 
     .culao-chat-search-wrap,
     .culao-chat-admin-toolbar {
-      flex: 0 0 auto;
       margin: 12px 16px 8px;
       display: flex;
       align-items: center;
@@ -8333,7 +8290,6 @@
     }
 
     .culao-chat-tabs {
-      flex: 0 0 auto;
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 6px;
@@ -8357,15 +8313,10 @@
     }
 
     .culao-chat-directory-list {
-      min-height: 0;
-      max-height: none;
-      flex: 1 1 auto;
-      overflow-x: hidden;
+      min-height: 150px;
+      max-height: 470px;
       overflow-y: auto;
       overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-gutter: stable;
-      touch-action: pan-y;
       padding: 6px 8px;
     }
 
@@ -8462,7 +8413,6 @@
     }
 
     .culao-chat-admin-open {
-      flex: 0 0 auto;
       margin: 8px 16px 16px;
       min-height: 42px;
       border: 1px solid #c4b5fd;
@@ -9190,6 +9140,7 @@
       </div>
       <div class="topbar-actions">
         <button id="enableNotificationsBtn" class="btn ghost notify-permission-btn" type="button">Bật thông báo</button>
+        <button id="enableTaskReviewAlertBtn" class="btn ghost task-review-alert-enable-btn hidden" type="button">🔊 Bật âm báo</button>
         <div class="culao-chat-wrap">
           <button id="chatToggleBtn" class="culao-chat-topbar-btn" type="button" aria-label="Chat" aria-controls="chatDirectoryPanel" aria-expanded="false">
             <span aria-hidden="true">💬</span>
@@ -9280,6 +9231,7 @@
           >☰</button>
           <div id="mobileTopbarMenu" class="mobile-topbar-menu" aria-hidden="true">
             <button id="mobileNotificationPermissionBtn" type="button">🔔 Bật thông báo</button>
+            <button id="mobileEnableTaskReviewAlertBtn" class="hidden" type="button">🔊 Bật âm báo</button>
             <button id="mobileLogoutBtn" class="is-danger" type="button">Đăng xuất</button>
           </div>
         </div>

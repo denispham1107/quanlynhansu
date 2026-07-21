@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260721-task-review-sound-v14";
+const CACHE_NAME = "culao-task-shell-v20260721-task-review-sound-mobile-loud-v15";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,7 +7,8 @@ const APP_SHELL = [
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
-  "./notification-badge.png"
+  "./notification-badge.png",
+  "./task-review-alert.wav"
 ];
 
 self.addEventListener("install", (event) => {
