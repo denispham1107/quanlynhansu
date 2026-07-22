@@ -223,7 +223,9 @@ const state = {
   taskReviewAlertPendingCount: 0,
   taskReviewAlertUnlocked: false,
   taskReviewAlertEnableInFlight: false,
-  taskReviewAlertNeedsGestureToastShown: false
+  taskReviewAlertNeedsGestureToastShown: false,
+  taskReviewAlertAutoEnablePending: false,
+  taskReviewAlertAutoEnableAttempted: false
 };
 
 
@@ -348,10 +350,11 @@ async function startTaskReviewAlertSound() {
   } catch (error) {
     console.warn("Trình duyệt chưa cho phép phát âm báo chờ duyệt:", error);
     state.taskReviewAlertUnlocked = false;
+    state.taskReviewAlertAutoEnablePending = true;
     updateTaskReviewAlertControls();
     if (!state.taskReviewAlertNeedsGestureToastShown) {
       state.taskReviewAlertNeedsGestureToastShown = true;
-      toast("Thiết bị đang chặn âm thanh. Admin hãy bấm “Bật âm báo” để cho phép phát chuông.", "error");
+      toast("Thiết bị đang chặn phát âm thanh tự động. Hãy chạm vào trang một lần để mở khóa âm báo.", "info");
     }
     return false;
   }
@@ -373,7 +376,7 @@ function syncTaskReviewAlertSound() {
     if (!state.taskReviewAlertNeedsGestureToastShown) {
       state.taskReviewAlertNeedsGestureToastShown = true;
       toast(
-        `Có ${pendingCount} công việc đang chờ xác nhận. Admin hãy bấm “Bật âm báo” để phát chuông liên tục.`,
+        `Có ${pendingCount} công việc đang chờ xác nhận. Âm báo sẽ tự bật ngay khi Admin chạm vào trang.`,
         "info"
       );
     }
@@ -383,47 +386,104 @@ function syncTaskReviewAlertSound() {
   startTaskReviewAlertSound();
 }
 
-async function enableTaskReviewAlertFromUserGesture() {
-  if (!state.user || !isAdminProfile() || state.taskReviewAlertEnableInFlight) return;
-  if (state.taskReviewAlertUnlocked) return;
+async function enableTaskReviewAlertFromUserGesture({ automatic = false, silentFailure = false } = {}) {
+  if (!state.user || !isAdminProfile() || state.taskReviewAlertEnableInFlight) return false;
+  if (state.taskReviewAlertUnlocked) return true;
 
   state.taskReviewAlertEnableInFlight = true;
+  state.taskReviewAlertAutoEnableAttempted = true;
   updateTaskReviewAlertControls();
-  setMobileTopbarMenuOpen(false);
+  if (!automatic) setMobileTopbarMenuOpen(false);
 
   const audio = ensureTaskReviewAlertAudio();
-  audio.volume = 1;
+  const hasPendingReview = state.taskReviewAlertPendingCount > 0;
 
   try {
-    // Phát ngay trong thao tác bấm của Admin để mở khóa âm thanh trên iOS/Android.
-    audio.loop = state.taskReviewAlertPendingCount > 0;
-    audio.currentTime = 0;
+    // Gọi play() ngay trong thao tác người dùng để mở khóa âm thanh trên iOS/Android.
+    // Nếu chưa có việc chờ duyệt, chỉ phát một đoạn rất ngắn và nhỏ để mở khóa,
+    // sau đó âm báo thật vẫn luôn phát ở volume = 1 khi có việc chờ xác nhận.
+    audio.loop = hasPendingReview;
+    audio.volume = hasPendingReview ? 1 : (automatic ? 0.08 : 0.35);
+    try {
+      audio.currentTime = 0;
+    } catch (_) {
+      // File có thể chưa nạp xong ở lần mở đầu tiên.
+    }
+
     await audio.play();
 
     state.taskReviewAlertUnlocked = true;
+    state.taskReviewAlertAutoEnablePending = false;
     state.taskReviewAlertNeedsGestureToastShown = false;
-    toast("Đã bật âm báo ở mức lớn nhất mà trình duyệt cho phép.", "success");
 
-    if (state.taskReviewAlertPendingCount <= 0) {
+    if (!automatic) {
+      toast("Đã bật âm báo ở mức lớn nhất mà trình duyệt cho phép.", "success");
+    }
+
+    if (!hasPendingReview) {
       window.setTimeout(() => {
-        if (state.taskReviewAlertPendingCount <= 0) stopTaskReviewAlertSound();
-      }, 650);
+        if (state.taskReviewAlertPendingCount <= 0) {
+          stopTaskReviewAlertSound();
+          const currentAudio = state.taskReviewAlertAudio;
+          if (currentAudio) currentAudio.volume = 1;
+        }
+      }, automatic ? 140 : 420);
     } else {
       audio.loop = true;
+      audio.volume = 1;
     }
+
+    return true;
   } catch (error) {
-    console.error("Không bật được âm báo:", error);
+    console.warn("Thiết bị chưa mở khóa âm báo:", error);
     state.taskReviewAlertUnlocked = false;
-    toast(
-      "Thiết bị chưa cho phép phát âm thanh. Hãy tăng âm lượng thiết bị, tắt chế độ im lặng nếu có rồi bấm Bật âm báo lại.",
-      "error"
-    );
+    state.taskReviewAlertAutoEnablePending = true;
+
+    if (!silentFailure && !automatic) {
+      toast(
+        "Thiết bị chưa cho phép phát âm thanh. Hãy tăng âm lượng thiết bị, tắt chế độ im lặng nếu có rồi bấm Bật âm báo lại.",
+        "error"
+      );
+    }
+    return false;
   } finally {
     state.taskReviewAlertEnableInFlight = false;
     updateTaskReviewAlertControls();
     syncTaskReviewAlertSound();
   }
 }
+
+function scheduleTaskReviewAlertAutoEnable() {
+  if (!state.user || !isAdminProfile()) return;
+
+  state.taskReviewAlertAutoEnablePending = true;
+  updateTaskReviewAlertControls();
+
+  // Thử tự bật ngay khi trang Admin khởi động. Desktop có thể cho phép ngay.
+  // Trên iOS/Android, nếu autoplay bị chặn thì lần chạm đầu tiên vào bất kỳ
+  // vị trí nào trong ứng dụng sẽ tự mở khóa âm báo, không cần bấm riêng nút.
+  window.setTimeout(() => {
+    if (!state.taskReviewAlertUnlocked) {
+      void enableTaskReviewAlertFromUserGesture({ automatic: true, silentFailure: true });
+    }
+  }, 0);
+}
+
+function handleTaskReviewAlertAutoEnableGesture() {
+  if (
+    !state.taskReviewAlertAutoEnablePending
+    || state.taskReviewAlertUnlocked
+    || state.taskReviewAlertEnableInFlight
+    || !state.user
+    || !isAdminProfile()
+  ) return;
+
+  void enableTaskReviewAlertFromUserGesture({ automatic: true, silentFailure: true });
+}
+
+document.addEventListener("pointerdown", handleTaskReviewAlertAutoEnableGesture, { capture: true });
+document.addEventListener("touchstart", handleTaskReviewAlertAutoEnableGesture, { capture: true, passive: true });
+document.addEventListener("keydown", handleTaskReviewAlertAutoEnableGesture, { capture: true });
 
 function markTaskReviewDecisionLocally(taskId, nextStatus) {
   const task = state.tasks.find((item) => item.id === taskId);
@@ -442,6 +502,8 @@ function resetTaskReviewAlertSound() {
   state.taskReviewAlertUnlocked = false;
   state.taskReviewAlertEnableInFlight = false;
   state.taskReviewAlertNeedsGestureToastShown = false;
+  state.taskReviewAlertAutoEnablePending = false;
+  state.taskReviewAlertAutoEnableAttempted = false;
   updateTaskReviewAlertControls();
 }
 
@@ -4691,6 +4753,7 @@ function showApp() {
   els.currentUserText.textContent = `${state.profile.name || state.user.email} • ${roleText}`;
   updateNotificationPermissionButton();
   updateTaskReviewAlertControls();
+  scheduleTaskReviewAlertAutoEnable();
 }
 
 function cleanupSubscriptions() {
@@ -14773,7 +14836,7 @@ function getGoogleCalendarSuggestedRange(mode) {
 }
 
 function syncGoogleCalendarRangeUI() {
-  const mode = els.googleCalendarRangeMode?.value || "month";
+  const mode = els.googleCalendarRangeMode?.value || "today";
   const isCustom = mode === "custom";
   els.googleCalendarCustomRange?.classList.toggle("hidden", !isCustom);
   if (!isCustom) {
@@ -14840,7 +14903,7 @@ function openGoogleCalendarImportModal() {
   // overflow hoặc stacking context trên Safari iOS và Chrome Android.
   if (modal.parentNode !== document.body) document.body.appendChild(modal);
 
-  if (els.googleCalendarRangeMode) els.googleCalendarRangeMode.value = "month";
+  if (els.googleCalendarRangeMode) els.googleCalendarRangeMode.value = "today";
   syncGoogleCalendarRangeUI();
   setMobileTaskPanelMenuOpen(false);
   modal.classList.remove("hidden");
@@ -14884,7 +14947,7 @@ els.googleCalendarImportForm?.addEventListener("submit", async (event) => {
 
   const calendarId = String(els.googleCalendarIdInput?.value || "").trim();
   const apiKey = String(els.googleCalendarApiKeyInput?.value || "").trim();
-  const mode = els.googleCalendarRangeMode?.value || "month";
+  const mode = els.googleCalendarRangeMode?.value || "today";
   const range = getGoogleCalendarSuggestedRange(mode);
 
   // Có thể để trống khi Cloud Function đã lưu cấu hình từ lần trước.

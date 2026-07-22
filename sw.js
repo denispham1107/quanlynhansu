@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260722-task-review-max-alert-v18";
+const CACHE_NAME = "culao-task-shell-v20260722-auto-audio-calendar-today-v19";
 const APP_SHELL = [
   "./",
   "./index.html",
