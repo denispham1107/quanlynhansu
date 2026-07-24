@@ -95,6 +95,10 @@ const getEmployeeUnassignedTaskCountCallable = httpsCallable(
   functions,
   "getEmployeeUnassignedTaskCount"
 );
+const processWorkSupervisionNowCallable = httpsCallable(
+  functions,
+  "processWorkSupervisionNow"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -190,9 +194,12 @@ const state = {
   workOrderControlSettings: {
     maxExtendMinutes: null,
     preventWorkOrderDeletion: false,
-    allowOverdueTimeExtension: false
+    allowOverdueTimeExtension: false,
+    workSupervisionEnabled: false
   },
   workOrderControlSettingsReady: false,
+  workSupervisionState: null,
+  workSupervisionProcessRequestedCycleId: "",
   workOrderSettingsAuthorizationToken: "",
   workOrderSettingsAuthorizationExpiresAt: 0,
   pushServiceWorkerRegistration: null,
@@ -552,7 +559,8 @@ function normalizeWorkOrderControlSettings(value = {}) {
   return {
     maxExtendMinutes: WORK_ORDER_EXTENSION_LIMIT_OPTIONS.includes(parsedMax) ? parsedMax : null,
     preventWorkOrderDeletion: input.preventWorkOrderDeletion === true,
-    allowOverdueTimeExtension: input.allowOverdueTimeExtension === true
+    allowOverdueTimeExtension: input.allowOverdueTimeExtension === true,
+    workSupervisionEnabled: input.workSupervisionEnabled === true
   };
 }
 
@@ -685,7 +693,14 @@ const els = {
   maxExtendMinutesOptions: $("#maxExtendMinutesOptions"),
   preventWorkOrderDeletion: $("#preventWorkOrderDeletion"),
   allowOverdueTimeExtension: $("#allowOverdueTimeExtension"),
+  enableWorkSupervision: $("#enableWorkSupervision"),
   saveWorkOrderSettingsBtn: $("#saveWorkOrderSettingsBtn"),
+  adminWorkSupervisionBanner: $("#adminWorkSupervisionBanner"),
+  adminWorkSupervisionMessage: $("#adminWorkSupervisionMessage"),
+  adminWorkSupervisionCountdown: $("#adminWorkSupervisionCountdown"),
+  employeeWorkSupervisionBanner: $("#employeeWorkSupervisionBanner"),
+  employeeWorkSupervisionMessage: $("#employeeWorkSupervisionMessage"),
+  employeeWorkSupervisionCountdown: $("#employeeWorkSupervisionCountdown"),
   extendTimeLimitNote: $("#extendTimeLimitNote"),
   destructiveConfirmModal: $("#destructiveConfirmModal"),
   destructiveConfirmBackdrop: $("#destructiveConfirmBackdrop"),
@@ -4675,6 +4690,9 @@ onAuthStateChanged(auth, async (user) => {
   state.notificationsReady = false;
   state.workOrderControlSettings = normalizeWorkOrderControlSettings({});
   state.workOrderControlSettingsReady = false;
+  state.workSupervisionState = null;
+  state.workSupervisionProcessRequestedCycleId = "";
+  renderWorkSupervisionCountdown();
   state.workOrderSettingsAuthorizationToken = "";
   state.workOrderSettingsAuthorizationExpiresAt = 0;
   state.pushToken = localStorage.getItem(PUSH_TOKEN_STORAGE_KEY) || "";
@@ -5130,6 +5148,8 @@ function setupAdminDashboard() {
     }
   );
 
+  const unsubWorkSupervision = setupWorkSupervisionListener();
+
   state.unsubs.push(
     unsubUsers,
     unsubTasks,
@@ -5137,7 +5157,8 @@ function setupAdminDashboard() {
     unsubWorkTemplates,
     unsubTimeExtensionReasons,
     unsubHotelDailyReports,
-    unsubWorkOrderControlSettings
+    unsubWorkOrderControlSettings,
+    unsubWorkSupervision
   );
 }
 
@@ -8517,6 +8538,9 @@ function openWorkOrderSettingsModal() {
   if (els.allowOverdueTimeExtension) {
     els.allowOverdueTimeExtension.checked = settings.allowOverdueTimeExtension;
   }
+  if (els.enableWorkSupervision) {
+    els.enableWorkSupervision.checked = settings.workSupervisionEnabled;
+  }
 
   const selectedValue = String(settings.maxExtendMinutes || 20);
   els.maxExtendMinutesOptions?.querySelectorAll('input[name="maxExtendMinutes"]').forEach((input) => {
@@ -8649,7 +8673,8 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       authorizationToken: state.workOrderSettingsAuthorizationToken,
       maxExtendMinutes: limitEnabled ? selectedLimit : null,
       preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true,
-      allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true
+      allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true,
+      workSupervisionEnabled: els.enableWorkSupervision?.checked === true
     });
 
     const savedSettings = normalizeWorkOrderControlSettings(result?.data?.settings || {});
@@ -9222,6 +9247,109 @@ async function syncOverdueTasksByAdmin() {
 }
 
 // =========================
+// Giám sát công việc - bộ đếm 5 phút realtime
+// =========================
+function setupWorkSupervisionListener() {
+  return onSnapshot(
+    doc(db, "workSupervision", "current"),
+    (snapshot) => {
+      state.workSupervisionState = snapshot.exists() ? snapshot.data() : null;
+      renderWorkSupervisionCountdown();
+    },
+    (error) => {
+      console.error("Không đọc được trạng thái Giám sát công việc:", error);
+      state.workSupervisionState = null;
+      renderWorkSupervisionCountdown();
+      toast("Không đọc được bộ đếm Giám sát công việc. Hãy deploy Firestore Rules mới.", "error");
+    }
+  );
+}
+
+function getWorkSupervisionParticipantNames(data = {}) {
+  const names = data.participantNames && typeof data.participantNames === "object"
+    ? data.participantNames
+    : {};
+  const uids = Array.isArray(data.participantUids) ? data.participantUids : [];
+  return uids.map((uid) => names[uid]).filter(Boolean);
+}
+
+function isCurrentEmployeeStillFreeForSupervision() {
+  if (state.profile?.role !== "employee" || !isEmployeeWorking(state.profile)) return false;
+  return !state.tasks.some((task) => isTaskBlockingEmployeeForSummary(task));
+}
+
+function formatWorkSupervisionCountdown(ms) {
+  const safeMs = Math.max(0, Number(ms || 0));
+  const totalSeconds = Math.ceil(safeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+async function requestWorkSupervisionProcessing(data = {}) {
+  const cycleId = String(data.cycleId || "").trim();
+  if (!cycleId || state.workSupervisionProcessRequestedCycleId === cycleId) return;
+
+  state.workSupervisionProcessRequestedCycleId = cycleId;
+  try {
+    await processWorkSupervisionNowCallable({ cycleId });
+  } catch (error) {
+    console.warn("Chưa xử lý được mốc hết giờ Giám sát công việc:", error);
+    // Cho phép thử lại sau một khoảng ngắn nếu mạng tạm thời gián đoạn.
+    window.setTimeout(() => {
+      if (state.workSupervisionProcessRequestedCycleId === cycleId) {
+        state.workSupervisionProcessRequestedCycleId = "";
+      }
+    }, 10000);
+  }
+}
+
+function renderWorkSupervisionCountdown() {
+  const data = state.workSupervisionState || {};
+  const active = data.active === true && data.status === "counting";
+  const endsAt = timestampToDate(data.endsAt);
+  const remainingMs = endsAt ? endsAt.getTime() - Date.now() : 0;
+  const countdownText = formatWorkSupervisionCountdown(remainingMs);
+  const waitingForServer = active && remainingMs <= 0;
+  const participantUids = Array.isArray(data.participantUids) ? data.participantUids : [];
+  if (!active) {
+    state.workSupervisionProcessRequestedCycleId = "";
+  } else if (waitingForServer) {
+    void requestWorkSupervisionProcessing(data);
+  }
+  const participantNames = getWorkSupervisionParticipantNames(data);
+
+  const showAdmin = active && isAdminProfile();
+  els.adminWorkSupervisionBanner?.classList.toggle("hidden", !showAdmin);
+  if (showAdmin) {
+    if (els.adminWorkSupervisionCountdown) els.adminWorkSupervisionCountdown.textContent = countdownText;
+    if (els.adminWorkSupervisionMessage) {
+      const namesText = participantNames.length ? ` (${participantNames.join(", ")})` : "";
+      els.adminWorkSupervisionMessage.textContent = waitingForServer
+        ? `Đã hết 5 phút. Hệ thống đang kiểm tra lần cuối và tạo Phiếu nghỉ trưa cho ${participantUids.length} nhân viên${namesText}.`
+        : `${participantUids.length} nhân viên đang chưa được giao việc${namesText}. Nếu hết thời gian mà toàn bộ nhóm vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa và tính sẵn 5 phút.`;
+    }
+  }
+
+  const employeeIncluded = participantUids.includes(state.user?.uid || "");
+  const showEmployee = active
+    && state.profile?.role === "employee"
+    && employeeIncluded
+    && isCurrentEmployeeStillFreeForSupervision();
+  els.employeeWorkSupervisionBanner?.classList.toggle("hidden", !showEmployee);
+  if (showEmployee) {
+    if (els.employeeWorkSupervisionCountdown) els.employeeWorkSupervisionCountdown.textContent = countdownText;
+    if (els.employeeWorkSupervisionMessage) {
+      els.employeeWorkSupervisionMessage.textContent = waitingForServer
+        ? "Đã hết 5 phút. Hệ thống đang kiểm tra và tạo Phiếu nghỉ trưa tự động."
+        : "Nếu hết 5 phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn 5 phút đã chờ.";
+    }
+  }
+}
+
+setInterval(renderWorkSupervisionCountdown, 1000);
+
+// =========================
 // Employee dashboard
 // =========================
 function setupEmployeeDashboard() {
@@ -9238,6 +9366,7 @@ function setupEmployeeDashboard() {
       if (snapshot.exists()) {
         state.profile = { id: snapshot.id, ...snapshot.data() };
         renderEmployeeEmploymentStatusBanner();
+        renderWorkSupervisionCountdown();
       }
     },
     handleSnapshotError
@@ -9265,6 +9394,7 @@ function setupEmployeeDashboard() {
 
       renderEmployeeEmploymentStatusBanner();
       renderEmployeeTasks();
+      renderWorkSupervisionCountdown();
     },
     handleSnapshotError
   );
@@ -9292,7 +9422,8 @@ function setupEmployeeDashboard() {
     }
   );
 
-  state.unsubs.push(unsubOwnProfile, unsubTasks, unsubEmployeeWorkOrders);
+  const unsubWorkSupervision = setupWorkSupervisionListener();
+  state.unsubs.push(unsubOwnProfile, unsubTasks, unsubEmployeeWorkOrders, unsubWorkSupervision);
 }
 
 // =========================
@@ -10912,6 +11043,7 @@ function renderTaskCard(task, mode) {
         ${renderHotelInfoBox(task)}
         ${renderTimeExtensionBox(task)}
         ${renderAssigneeHistoryBox(task)}
+        ${renderWorkSupervisionLunchCreditBox(task)}
         ${renderLunchBreakHistoryBox(task)}
         ${renderResultBox(task)}
       </div>
@@ -11010,6 +11142,20 @@ function getLunchBreakActualMinutes(task) {
   } catch (error) {
     return 0;
   }
+}
+
+function renderWorkSupervisionLunchCreditBox(task) {
+  const initialMinutes = Math.max(0, Number(task?.workSupervisionInitialMinutes || 0));
+  if (!isLunchBreakTask(task) || initialMinutes <= 0) return "";
+
+  return `
+    <div class="work-supervision-lunch-credit-box">
+      <strong>⏱ Đã tính sẵn ${initialMinutes} phút nghỉ</strong>
+      <span>${task.status === "completed"
+        ? `Tổng thời gian nghỉ thực tế đã bao gồm ${initialMinutes} phút đếm ngược trước khi Phiếu được tạo.`
+        : `Khi bấm “Hoàn thành” hoặc khi Admin kết thúc Phiếu, hệ thống sẽ cộng thêm ${initialMinutes} phút đã đếm ngược vào tổng thời gian nghỉ.`}</span>
+    </div>
+  `;
 }
 
 function renderLunchBreakHistoryBox(task) {
@@ -14455,7 +14601,13 @@ async function approveTask(taskId, button) {
     // Như vậy khi task đang ở trạng thái "Chờ Admin xác nhận", đồng hồ vẫn chạy bình thường
     // cho đến lúc Admin duyệt và kết quả nhanh/chậm phản ánh đúng thời gian duyệt thực tế.
     const approvedDate = new Date();
-    const result = calculateResultAt(task, approvedDate);
+    // Riêng Phiếu nghỉ trưa tự động của “Giám sát công việc”, thời gian thực tế
+    // phải chốt tại lúc nhân viên bấm “Hoàn thành”, đồng thời cộng thêm 5 phút
+    // đã được ghi trong accumulatedWorkedMs. Không cộng thêm thời gian chờ Admin duyệt.
+    const resultCalculatedAt = isLunchBreakTask(task) && Number(task.workSupervisionInitialMinutes || 0) > 0
+      ? (timestampToDate(task.submittedAt) || approvedDate)
+      : approvedDate;
+    const result = calculateResultAt(task, resultCalculatedAt);
 
     await updateDoc(doc(db, "tasks", taskId), {
       status: "completed",
