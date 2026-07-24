@@ -5379,10 +5379,16 @@ function renderEmployeeEmploymentStatusBanner() {
   }
 
   const hasAssignedWork = employeeHasCurrentAssignedWork();
+  const unassignedScopeKey = getEmployeeUnassignedDateScopeKey();
+  const unassignedTaskCount = state.employeeUnassignedTaskCountCache.get(unassignedScopeKey);
+  const hasNoNewUnassignedWork = Number.isFinite(unassignedTaskCount) && unassignedTaskCount === 0;
+
   assignmentBanner.className = `employee-assignment-status-banner ${hasAssignedWork ? "has-assigned-work" : "has-no-assigned-work"}`;
   assignmentBanner.innerHTML = hasAssignedWork
     ? `<strong>Đã nhận công việc</strong>`
-    : `<strong>Chưa có việc được giao:</strong><span>Xuống bán hàng nhận công việc mới</span>`;
+    : hasNoNewUnassignedWork
+      ? `<strong>Chưa có công việc mới, có thể nghỉ ngơi và vẫn được tính công lương</strong>`
+      : `<strong>Chưa có việc được giao:</strong><span>Xuống bán hàng nhận công việc mới</span>`;
   banner.insertAdjacentElement("afterend", assignmentBanner);
 }
 
@@ -10738,6 +10744,11 @@ function updateEmployeeUnassignedTaskCountDisplay(value, options = {}) {
       : `Hiện còn ${text} công việc chưa được giao trong thời gian đang chọn`;
     els.employeeUnassignedWorkOrderCard.setAttribute("aria-label", ariaLabel);
   }
+
+  // Dòng hướng dẫn ngay dưới trạng thái làm việc phụ thuộc trực tiếp vào
+  // số "Chưa giao việc" của phạm vi ngày đang chọn. Cập nhật lại ngay khi
+  // số đếm thay đổi để nhân viên không phải tải lại trang.
+  renderEmployeeEmploymentStatusBanner();
 }
 
 async function refreshEmployeeUnassignedTaskCount() {
