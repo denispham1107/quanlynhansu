@@ -207,6 +207,8 @@ const state = {
   workOrderControlSettingsReady: false,
   workSupervisionState: null,
   workSupervisionProcessRequestedCycleId: "",
+  workSupervisionEmployeeNotificationCycleId: "",
+  workSupervisionEmployeeNotificationSlot: -1,
   workOrderSettingsAuthorizationToken: "",
   workOrderSettingsAuthorizationExpiresAt: 0,
   pushServiceWorkerRegistration: null,
@@ -4721,6 +4723,8 @@ onAuthStateChanged(auth, async (user) => {
   state.workOrderControlSettingsReady = false;
   state.workSupervisionState = null;
   state.workSupervisionProcessRequestedCycleId = "";
+  state.workSupervisionEmployeeNotificationCycleId = "";
+  state.workSupervisionEmployeeNotificationSlot = -1;
   renderWorkSupervisionCountdown();
   state.workOrderSettingsAuthorizationToken = "";
   state.workOrderSettingsAuthorizationExpiresAt = 0;
@@ -9400,6 +9404,44 @@ function formatWorkSupervisionCountdown(ms) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function resetWorkSupervisionEmployeeNotificationState() {
+  state.workSupervisionEmployeeNotificationCycleId = "";
+  state.workSupervisionEmployeeNotificationSlot = -1;
+}
+
+function notifyWorkSupervisionEmployeeEvery15Seconds(data = {}, remainingMs = 0, countdownMinutes = 5) {
+  const cycleId = String(data.cycleId || "").trim();
+  const startedAt = timestampToDate(data.startedAt);
+  const endsAt = timestampToDate(data.endsAt);
+  const nowMs = Date.now();
+
+  if (!cycleId || !endsAt || remainingMs <= 0) {
+    resetWorkSupervisionEmployeeNotificationState();
+    return;
+  }
+
+  const fallbackStartedAtMs = endsAt.getTime() - countdownMinutes * 60 * 1000;
+  const startedAtMs = startedAt?.getTime() || fallbackStartedAtMs;
+  const elapsedMs = Math.max(0, nowMs - startedAtMs);
+  const notificationSlot = Math.floor(elapsedMs / 15000);
+
+  if (state.workSupervisionEmployeeNotificationCycleId !== cycleId) {
+    state.workSupervisionEmployeeNotificationCycleId = cycleId;
+    // Thông báo đầu tiên của chu kỳ được tạo phía máy chủ trong collection
+    // notifications. Các thông báo nổi lặp lại bắt đầu từ mốc 15 giây.
+    state.workSupervisionEmployeeNotificationSlot = 0;
+  }
+
+  if (notificationSlot < 1 || notificationSlot <= state.workSupervisionEmployeeNotificationSlot) return;
+
+  state.workSupervisionEmployeeNotificationSlot = notificationSlot;
+  const remainingText = formatWorkSupervisionCountdown(remainingMs);
+  toast(
+    `Bạn đang được Giám sát công việc. Còn ${remainingText}. Nếu hết thời gian mà vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa tự động và tính sẵn ${countdownMinutes} phút.`,
+    "warning"
+  );
+}
+
 async function requestWorkSupervisionProcessing(data = {}) {
   const cycleId = String(data.cycleId || "").trim();
   if (!cycleId || state.workSupervisionProcessRequestedCycleId === cycleId) return;
@@ -9461,6 +9503,13 @@ function renderWorkSupervisionCountdown() {
         ? `Đã hết ${countdownMinutes} phút. Hệ thống đang kiểm tra và tạo Phiếu nghỉ trưa tự động.`
         : `Nếu hết ${countdownMinutes} phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn ${countdownMinutes} phút đã chờ.`;
     }
+    if (!waitingForServer) {
+      notifyWorkSupervisionEmployeeEvery15Seconds(data, remainingMs, countdownMinutes);
+    } else {
+      resetWorkSupervisionEmployeeNotificationState();
+    }
+  } else {
+    resetWorkSupervisionEmployeeNotificationState();
   }
 }
 
