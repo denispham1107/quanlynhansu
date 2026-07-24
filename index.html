@@ -7542,6 +7542,84 @@
       background: linear-gradient(145deg, #fff1f2, #fff7ed 58%, #ffffff);
     }
 
+    .work-supervision-setting-controls {
+      display: grid;
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: 14px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px dashed #fdba74;
+    }
+
+    .work-supervision-setting-controls.is-disabled {
+      opacity: 0.56;
+    }
+
+    .work-supervision-setting-field {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+      color: #0f172a;
+    }
+
+    .work-supervision-setting-field > span {
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .work-supervision-setting-field input,
+    .work-supervision-setting-field select {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid #fdba74;
+      border-radius: 13px;
+      background: #ffffff;
+      color: #0f172a;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 800;
+      outline: none;
+    }
+
+    .work-supervision-setting-field input:focus,
+    .work-supervision-setting-field select:focus {
+      border-color: #f97316;
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.13);
+    }
+
+    .work-supervision-setting-field select {
+      padding: 0 12px;
+    }
+
+    .work-supervision-setting-field small {
+      color: #7c2d12;
+      font-size: 11.5px;
+      line-height: 1.45;
+    }
+
+    .work-supervision-minute-input-wrap {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .work-supervision-minute-input-wrap input {
+      padding: 0 12px;
+    }
+
+    .work-supervision-minute-input-wrap strong {
+      padding-right: 4px;
+      color: #c2410c;
+      font-size: 13px;
+    }
+
+    @media (max-width: 640px) {
+      .work-supervision-setting-controls {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .work-order-setting-toggle-row {
       display: flex;
       align-items: flex-start;
@@ -9488,7 +9566,7 @@
           <strong>⏱ Giám sát công việc đang đếm ngược</strong>
           <span id="adminWorkSupervisionMessage">Các nhân viên chưa được giao việc sẽ được tạo Phiếu nghỉ trưa tự động nếu vẫn chưa nhận việc mới.</span>
         </div>
-        <strong id="adminWorkSupervisionCountdown" class="work-supervision-countdown-value">05:00</strong>
+        <strong id="adminWorkSupervisionCountdown" class="work-supervision-countdown-value">00:00</strong>
       </section>
 
       <section class="panel task-panel">
@@ -9796,9 +9874,9 @@
       <section id="employeeWorkSupervisionBanner" class="work-supervision-countdown-banner hidden" role="status" aria-live="polite">
         <div class="work-supervision-countdown-copy">
           <strong>⏱ Bạn đang được giám sát thời gian chờ việc</strong>
-          <span id="employeeWorkSupervisionMessage">Nếu hết 5 phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và tính sẵn 5 phút.</span>
+          <span id="employeeWorkSupervisionMessage">Nếu hết thời gian đã cài đặt mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và tính sẵn thời gian đã chờ.</span>
         </div>
-        <strong id="employeeWorkSupervisionCountdown" class="work-supervision-countdown-value">05:00</strong>
+        <strong id="employeeWorkSupervisionCountdown" class="work-supervision-countdown-value">00:00</strong>
       </section>
 
       <section class="panel task-panel employee-task-panel">
@@ -10247,11 +10325,31 @@
           <label class="work-order-setting-toggle-row" for="enableWorkSupervision">
             <span class="work-order-setting-toggle-copy">
               <strong>Giám sát công việc</strong>
-              <span>Khi có hơn 1 nhân viên đang chưa được giao việc và vẫn còn Phiếu “Chưa giao việc”, hệ thống đếm ngược 5 phút rồi tự tạo Phiếu nghỉ trưa nếu nhóm này vẫn chưa nhận việc mới.</span>
+              <span>Khi tổng số nhân viên đang chưa được giao việc lớn hơn 1 và vẫn còn Phiếu “Chưa giao việc”, hệ thống bắt đầu đếm ngược rồi tự tạo Phiếu nghỉ trưa cho những nhân viên thuộc nhóm giám sát nếu họ vẫn chưa nhận việc mới.</span>
             </span>
             <input id="enableWorkSupervision" type="checkbox" />
           </label>
-          <p class="work-order-setting-help">Bộ đếm màu đỏ hiển thị trên trang Admin và đúng các nhân viên đang được giám sát. Phiếu nghỉ trưa tự động được tính sẵn 5 phút.</p>
+
+          <div id="workSupervisionSettingControls" class="work-supervision-setting-controls">
+            <label class="work-supervision-setting-field" for="workSupervisionCountdownMinutes">
+              <span>Thời gian đếm ngược</span>
+              <div class="work-supervision-minute-input-wrap">
+                <input id="workSupervisionCountdownMinutes" type="number" min="1" max="30" step="1" inputmode="numeric" value="5" />
+                <strong>phút</strong>
+              </div>
+              <small>Nhập từ 1 đến 30 phút. Số phút này cũng được tính sẵn vào Phiếu nghỉ trưa tự động.</small>
+            </label>
+
+            <label class="work-supervision-setting-field" for="workSupervisionExcludedEmployeeUid">
+              <span>Nhân viên không bị giám sát</span>
+              <select id="workSupervisionExcludedEmployeeUid">
+                <option value="">Không miễn trừ nhân viên nào</option>
+              </select>
+              <small>Chọn tối đa 1 nhân viên trong danh sách đang chưa được giao việc. Người này không thấy bộ đếm và không bị tạo Phiếu nghỉ trưa tự động.</small>
+            </label>
+          </div>
+
+          <p id="workSupervisionSettingHelp" class="work-order-setting-help">Bộ đếm màu đỏ hiển thị trên trang Admin và đúng các nhân viên thuộc nhóm giám sát.</p>
         </section>
 
         <section class="work-order-setting-section is-danger-setting">
