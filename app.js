@@ -10813,6 +10813,7 @@ function employeeHasUnfinishedTask(employeeUid, ignoredTaskId = "") {
 function getAvailableReplacementEmployees(task) {
   return state.employees.filter((employee) => (
     employee.uid
+    && isEmployeeWorking(employee)
     && employee.uid !== task.assignedToUid
     && !employeeHasUnfinishedTask(employee.uid, task.id)
   ));
@@ -14094,6 +14095,10 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
       }
     } else {
       if (!newEmployee) throw new Error("Vui lòng chọn nhân viên thay thế hợp lệ.");
+      if (!isEmployeeWorking(newEmployee)) {
+        renderReassignEmployeeOptions(task.id);
+        throw new Error("Nhân viên này đang ở trạng thái Đang Off và không thể nhận công việc. Vui lòng chọn nhân viên khác.");
+      }
       if (employeeHasUnfinishedTask(newEmployee.uid, task.id)) {
         throw new Error("Nhân viên này đang có công việc chưa hoàn thành. Vui lòng chọn nhân viên chưa được giao việc.");
       }
