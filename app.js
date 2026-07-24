@@ -72,6 +72,10 @@ const importGoogleCalendarEventsCallable = httpsCallable(
   functions,
   "importGoogleCalendarEvents"
 );
+const previewGoogleCalendarEventsCallable = httpsCallable(
+  functions,
+  "previewGoogleCalendarEvents"
+);
 const getGoogleCalendarImportSettingsCallable = httpsCallable(
   functions,
   "getGoogleCalendarImportSettings"
@@ -664,6 +668,13 @@ const els = {
   googleCalendarToDate: $("#googleCalendarToDate"),
   googleCalendarCustomRange: $("#googleCalendarCustomRange"),
   googleCalendarSavedStatus: $("#googleCalendarSavedStatus"),
+  googleCalendarSetupSection: $("#googleCalendarSetupSection"),
+  googleCalendarPreviewSection: $("#googleCalendarPreviewSection"),
+  googleCalendarPreviewSummary: $("#googleCalendarPreviewSummary"),
+  googleCalendarPreviewList: $("#googleCalendarPreviewList"),
+  googleCalendarSelectAll: $("#googleCalendarSelectAll"),
+  googleCalendarSelectedCount: $("#googleCalendarSelectedCount"),
+  googleCalendarSecondaryBtn: $("#googleCalendarSecondaryBtn"),
   syncGoogleCalendarBtn: $("#syncGoogleCalendarBtn"),
   mobileDataActionsGroup: $("#mobileDataActionsGroup"),
   mobileDataMenuBtn: $("#mobileDataMenuBtn"),
@@ -15067,6 +15078,8 @@ function getFriendlyFirebaseError(error) {
 // Calendar ID và API Key được lưu phía máy chủ qua Cloud Function.
 // API Key không được trả ngược về frontend; khi đã lưu, Admin có thể để trống ô API Key.
 // =========================
+let googleCalendarPreviewState = null;
+
 function getLocalIsoDate(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -15128,6 +15141,145 @@ function setGoogleCalendarSavedStatus({ hasApiKey = false, calendarId = "" } = {
   }
 }
 
+function setGoogleCalendarPrimaryButtonLabel(label = "Xuất lịch") {
+  if (!els.syncGoogleCalendarBtn) return;
+  els.syncGoogleCalendarBtn.textContent = label;
+  els.syncGoogleCalendarBtn.dataset.originalText = label;
+}
+
+function resetGoogleCalendarPreview() {
+  googleCalendarPreviewState = null;
+  els.googleCalendarSetupSection?.classList.remove("hidden");
+  els.googleCalendarPreviewSection?.classList.add("hidden");
+  if (els.googleCalendarPreviewList) els.googleCalendarPreviewList.innerHTML = "";
+  if (els.googleCalendarPreviewSummary) els.googleCalendarPreviewSummary.textContent = "";
+  if (els.googleCalendarSelectAll) {
+    els.googleCalendarSelectAll.checked = false;
+    els.googleCalendarSelectAll.indeterminate = false;
+  }
+  if (els.googleCalendarSelectedCount) els.googleCalendarSelectedCount.textContent = "Đã chọn 0 phiếu";
+  if (els.googleCalendarSecondaryBtn) els.googleCalendarSecondaryBtn.textContent = "Hủy";
+  setGoogleCalendarPrimaryButtonLabel("Xuất lịch");
+}
+
+function getGoogleCalendarPreviewCheckboxes() {
+  return Array.from(
+    els.googleCalendarPreviewList?.querySelectorAll('input[type="checkbox"][data-calendar-selection-id]:not(:disabled)') || []
+  );
+}
+
+function getSelectedGoogleCalendarEventIds() {
+  return getGoogleCalendarPreviewCheckboxes()
+    .filter((checkbox) => checkbox.checked)
+    .map((checkbox) => String(checkbox.dataset.calendarSelectionId || ""))
+    .filter(Boolean);
+}
+
+function updateGoogleCalendarPreviewSelectionUI() {
+  const checkboxes = getGoogleCalendarPreviewCheckboxes();
+  const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+  if (els.googleCalendarSelectedCount) {
+    els.googleCalendarSelectedCount.textContent = `Đã chọn ${selectedCount}/${checkboxes.length} phiếu`;
+  }
+  if (els.googleCalendarSelectAll) {
+    els.googleCalendarSelectAll.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+    els.googleCalendarSelectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+    els.googleCalendarSelectAll.disabled = checkboxes.length === 0;
+  }
+  setGoogleCalendarPrimaryButtonLabel(selectedCount > 0 ? `Xuất lịch (${selectedCount})` : "Xuất lịch");
+}
+
+function formatCalendarPreviewDateTime(value, allDay = false) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "Không có thời gian";
+  if (allDay) {
+    return new Intl.DateTimeFormat("vi-VN", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric"
+    }).format(date);
+  }
+  return new Intl.DateTimeFormat("vi-VN", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function renderGoogleCalendarPreview(result = {}) {
+  const items = Array.isArray(result.items) ? result.items : [];
+  const selectableCount = items.filter((item) => item?.selectable).length;
+  const existingCount = items.filter((item) => item?.wasImported).length;
+  const disabledCount = items.filter((item) => !item?.selectable).length;
+
+  if (els.googleCalendarPreviewSummary) {
+    els.googleCalendarPreviewSummary.textContent = [
+      `${items.length} sự kiện trong khoảng đã chọn`,
+      `${selectableCount} phiếu có thể xuất`,
+      existingCount ? `${existingCount} phiếu đã từng nạp` : "",
+      disabledCount ? `${disabledCount} sự kiện không thể chọn` : ""
+    ].filter(Boolean).join(" • ");
+  }
+
+  if (els.googleCalendarPreviewList) {
+    if (!items.length) {
+      els.googleCalendarPreviewList.innerHTML = `
+        <div class="google-calendar-preview-empty">
+          Không có sự kiện Google Calendar nào trong khoảng thời gian đã chọn.
+        </div>`;
+    } else {
+      els.googleCalendarPreviewList.innerHTML = items.map((item, index) => {
+        const selectable = Boolean(item?.selectable);
+        const selectionId = escapeHtml(item?.selectionId || "");
+        const workOrderName = escapeHtml(item?.workOrderName || "Phiếu chưa đặt tên");
+        const summary = escapeHtml(item?.summary || "(Sự kiện không có tựa đề)");
+        const location = escapeHtml(item?.location || "");
+        const description = escapeHtml(item?.description || "");
+        const startLabel = escapeHtml(formatCalendarPreviewDateTime(item?.startAt, item?.allDay));
+        const endLabel = item?.endAt && !item?.allDay
+          ? escapeHtml(formatCalendarPreviewDateTime(item.endAt, item?.allDay))
+          : "";
+        const statusLabel = escapeHtml(item?.statusLabel || "Chưa nạp");
+        const statusClass = escapeHtml(item?.statusClass || "is-new");
+        const checkboxId = `googleCalendarPreviewItem_${index}`;
+        return `
+          <article class="google-calendar-preview-item ${selectable ? "" : "is-disabled"}">
+            <label class="google-calendar-preview-check" for="${checkboxId}">
+              <input
+                id="${checkboxId}"
+                type="checkbox"
+                data-calendar-selection-id="${selectionId}"
+                ${selectable ? "" : "disabled"}
+              />
+              <span aria-hidden="true"></span>
+            </label>
+            <div class="google-calendar-preview-content">
+              <div class="google-calendar-preview-title-row">
+                <strong>${workOrderName}</strong>
+                <span class="google-calendar-preview-status ${statusClass}">${statusLabel}</span>
+              </div>
+              <div class="google-calendar-preview-task">${summary}</div>
+              <div class="google-calendar-preview-meta">
+                <span>🗓 ${startLabel}${endLabel ? ` → ${endLabel}` : ""}</span>
+                ${location ? `<span>📍 ${location}</span>` : ""}
+              </div>
+              ${description ? `<div class="google-calendar-preview-description">${description}</div>` : ""}
+            </div>
+          </article>`;
+      }).join("");
+    }
+  }
+
+  els.googleCalendarSetupSection?.classList.add("hidden");
+  els.googleCalendarPreviewSection?.classList.remove("hidden");
+  if (els.googleCalendarSecondaryBtn) els.googleCalendarSecondaryBtn.textContent = "Quay lại";
+  updateGoogleCalendarPreviewSelectionUI();
+}
+
 async function loadGoogleCalendarImportSettings() {
   setGoogleCalendarSavedStatus();
   try {
@@ -15153,6 +15305,7 @@ function closeGoogleCalendarImportModal() {
   els.googleCalendarImportModal?.classList.add("hidden");
   document.body.classList.remove("google-calendar-import-open");
   if (els.googleCalendarApiKeyInput) els.googleCalendarApiKeyInput.value = "";
+  resetGoogleCalendarPreview();
 }
 
 function openGoogleCalendarImportModal() {
@@ -15171,6 +15324,7 @@ function openGoogleCalendarImportModal() {
   // overflow hoặc stacking context trên Safari iOS và Chrome Android.
   if (modal.parentNode !== document.body) document.body.appendChild(modal);
 
+  resetGoogleCalendarPreview();
   if (els.googleCalendarRangeMode) els.googleCalendarRangeMode.value = "today";
   syncGoogleCalendarRangeUI();
   setMobileTaskPanelMenuOpen(false);
@@ -15194,6 +15348,34 @@ els.openGoogleCalendarImportMobileBtn?.addEventListener("click", (event) => {
   window.setTimeout(openGoogleCalendarImportModal, 0);
 });
 els.googleCalendarRangeMode?.addEventListener("change", syncGoogleCalendarRangeUI);
+els.googleCalendarSecondaryBtn?.addEventListener("click", () => {
+  if (googleCalendarPreviewState) {
+    resetGoogleCalendarPreview();
+    window.setTimeout(() => els.googleCalendarRangeMode?.focus({ preventScroll: true }), 50);
+    return;
+  }
+  closeGoogleCalendarImportModal();
+});
+els.googleCalendarSelectAll?.addEventListener("change", () => {
+  const shouldCheck = Boolean(els.googleCalendarSelectAll?.checked);
+  getGoogleCalendarPreviewCheckboxes().forEach((checkbox) => {
+    checkbox.checked = shouldCheck;
+  });
+  updateGoogleCalendarPreviewSelectionUI();
+});
+els.googleCalendarPreviewList?.addEventListener("change", (event) => {
+  if (event.target.matches('input[type="checkbox"][data-calendar-selection-id]')) {
+    updateGoogleCalendarPreviewSelectionUI();
+  }
+});
+els.googleCalendarPreviewList?.addEventListener("click", (event) => {
+  if (event.target.closest(".google-calendar-preview-check")) return;
+  const item = event.target.closest(".google-calendar-preview-item");
+  const checkbox = item?.querySelector('input[type="checkbox"][data-calendar-selection-id]:not(:disabled)');
+  if (!checkbox) return;
+  checkbox.checked = !checkbox.checked;
+  updateGoogleCalendarPreviewSelectionUI();
+});
 els.googleCalendarImportModal?.addEventListener("click", (event) => {
   if (event.target.matches("[data-close-google-calendar-import], .google-calendar-import-backdrop")) {
     closeGoogleCalendarImportModal();
@@ -15213,42 +15395,82 @@ els.googleCalendarImportForm?.addEventListener("submit", async (event) => {
     return;
   }
 
-  const calendarId = String(els.googleCalendarIdInput?.value || "").trim();
-  const apiKey = String(els.googleCalendarApiKeyInput?.value || "").trim();
-  const mode = els.googleCalendarRangeMode?.value || "today";
-  const range = getGoogleCalendarSuggestedRange(mode);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Ho_Chi_Minh";
 
-  // Có thể để trống khi Cloud Function đã lưu cấu hình từ lần trước.
-  // Nếu nhập giá trị mới, Cloud Function sẽ cập nhật cấu hình mới nhất trong Firestore.
-  if (!range.from || !range.to || range.from > range.to) {
-    toast("Khoảng ngày nạp lịch không hợp lệ.", "error");
+  if (!googleCalendarPreviewState) {
+    const calendarId = String(els.googleCalendarIdInput?.value || "").trim();
+    const apiKey = String(els.googleCalendarApiKeyInput?.value || "").trim();
+    const mode = els.googleCalendarRangeMode?.value || "today";
+    const range = getGoogleCalendarSuggestedRange(mode);
+
+    // Có thể để trống khi Cloud Function đã lưu cấu hình từ lần trước.
+    // Nếu nhập giá trị mới, Cloud Function sẽ cập nhật cấu hình mới nhất trong Firestore.
+    if (!range.from || !range.to || range.from > range.to) {
+      toast("Khoảng ngày nạp lịch không hợp lệ.", "error");
+      return;
+    }
+
+    setButtonLoading(els.syncGoogleCalendarBtn, true, "Đang lấy danh sách...");
+    try {
+      const response = await previewGoogleCalendarEventsCallable({
+        calendarId,
+        apiKey,
+        fromDate: range.from,
+        toDate: range.to,
+        timeZone
+      });
+      const result = response?.data || {};
+      googleCalendarPreviewState = {
+        calendarId: String(result.calendarId || calendarId || ""),
+        fromDate: range.from,
+        toDate: range.to,
+        timeZone
+      };
+      // API Key đã được lưu mã hóa phía máy chủ ở bước xem trước.
+      if (els.googleCalendarApiKeyInput) els.googleCalendarApiKeyInput.value = "";
+      renderGoogleCalendarPreview(result);
+      window.setTimeout(() => els.googleCalendarPreviewSection?.scrollIntoView({ block: "start" }), 30);
+    } catch (error) {
+      console.error("Google Calendar preview failed:", error);
+      const message = String(error?.message || "Không thể lấy danh sách Google Calendar.")
+        .replace(/^FirebaseError:\s*/i, "");
+      toast(message, "error", 9000);
+    } finally {
+      setButtonLoading(els.syncGoogleCalendarBtn, false);
+      if (googleCalendarPreviewState) updateGoogleCalendarPreviewSelectionUI();
+    }
     return;
   }
 
-  setButtonLoading(els.syncGoogleCalendarBtn, true, "Đang nạp lịch...");
+  const selectedEventIds = getSelectedGoogleCalendarEventIds();
+  if (!selectedEventIds.length) {
+    toast("Hãy chọn ít nhất một Phiếu cần xuất lịch.", "error");
+    return;
+  }
+
+  setButtonLoading(els.syncGoogleCalendarBtn, true, "Đang xuất lịch...");
   try {
     const response = await importGoogleCalendarEventsCallable({
-      calendarId,
-      apiKey,
-      fromDate: range.from,
-      toDate: range.to,
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Ho_Chi_Minh"
+      calendarId: googleCalendarPreviewState.calendarId,
+      fromDate: googleCalendarPreviewState.fromDate,
+      toDate: googleCalendarPreviewState.toDate,
+      timeZone: googleCalendarPreviewState.timeZone,
+      selectedEventIds
     });
     const result = response?.data || {};
     closeGoogleCalendarImportModal();
     toast(
-      `Nạp lịch hoàn tất: ${Number(result.created || 0)} Phiếu mới, ${Number(result.updated || 0)} Phiếu cập nhật, ${Number(result.cancelled || 0)} Phiếu được đánh dấu khách hủy, ${Number(result.skipped || 0)} sự kiện bỏ qua.`,
+      `Xuất lịch hoàn tất: ${Number(result.created || 0)} Phiếu mới, ${Number(result.updated || 0)} Phiếu cập nhật, ${Number(result.cancelled || 0)} Phiếu được đánh dấu khách hủy, ${Number(result.skipped || 0)} sự kiện bỏ qua.`,
       "success",
       8500
     );
   } catch (error) {
     console.error("Google Calendar import failed:", error);
-    const message = String(error?.message || "Không thể nạp Google Calendar.")
+    const message = String(error?.message || "Không thể xuất lịch Google Calendar.")
       .replace(/^FirebaseError:\s*/i, "");
     toast(message, "error", 9000);
   } finally {
-    // Không giữ API Key trong DOM sau khi yêu cầu kết thúc.
-    if (els.googleCalendarApiKeyInput) els.googleCalendarApiKeyInput.value = "";
     setButtonLoading(els.syncGoogleCalendarBtn, false);
+    if (googleCalendarPreviewState) updateGoogleCalendarPreviewSelectionUI();
   }
 });
