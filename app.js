@@ -15175,9 +15175,16 @@ function getSelectedGoogleCalendarEventIds() {
     .filter(Boolean);
 }
 
-function updateGoogleCalendarPreviewSelectionUI() {
+function updateGoogleCalendarPreviewSelectionUI({ preserveScroll = true } = {}) {
+  const scroller = els.googleCalendarImportModal?.querySelector(".google-calendar-import-scroll");
+  const previousScrollTop = preserveScroll && scroller ? scroller.scrollTop : null;
   const checkboxes = getGoogleCalendarPreviewCheckboxes();
   const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+
+  checkboxes.forEach((checkbox) => {
+    checkbox.closest(".google-calendar-preview-item")?.classList.toggle("is-selected", checkbox.checked);
+  });
+
   if (els.googleCalendarSelectedCount) {
     els.googleCalendarSelectedCount.textContent = `Đã chọn ${selectedCount}/${checkboxes.length} phiếu`;
   }
@@ -15187,6 +15194,15 @@ function updateGoogleCalendarPreviewSelectionUI() {
     els.googleCalendarSelectAll.disabled = checkboxes.length === 0;
   }
   setGoogleCalendarPrimaryButtonLabel(selectedCount > 0 ? `Xuất lịch (${selectedCount})` : "Xuất lịch");
+
+  // Một số Safari/Chrome mobile có thể tự cuộn sai vị trí khi checkbox đổi trạng thái.
+  // Giữ nguyên vị trí hiện tại để Admin có thể tiếp tục chọn các Phiếu kế tiếp.
+  if (scroller && previousScrollTop !== null) {
+    scroller.scrollTop = previousScrollTop;
+    window.requestAnimationFrame(() => {
+      scroller.scrollTop = previousScrollTop;
+    });
+  }
 }
 
 function formatCalendarPreviewDateTime(value, allDay = false) {
@@ -15248,15 +15264,15 @@ function renderGoogleCalendarPreview(result = {}) {
         const checkboxId = `googleCalendarPreviewItem_${index}`;
         return `
           <article class="google-calendar-preview-item ${selectable ? "" : "is-disabled"}">
-            <label class="google-calendar-preview-check" for="${checkboxId}">
+            <div class="google-calendar-preview-check">
               <input
                 id="${checkboxId}"
                 type="checkbox"
                 data-calendar-selection-id="${selectionId}"
+                aria-label="Chọn Phiếu ${workOrderName}"
                 ${selectable ? "" : "disabled"}
               />
-              <span aria-hidden="true"></span>
-            </label>
+            </div>
             <div class="google-calendar-preview-content">
               <div class="google-calendar-preview-title-row">
                 <strong>${workOrderName}</strong>
@@ -15369,12 +15385,13 @@ els.googleCalendarPreviewList?.addEventListener("change", (event) => {
   }
 });
 els.googleCalendarPreviewList?.addEventListener("click", (event) => {
-  if (event.target.closest(".google-calendar-preview-check")) return;
+  if (event.target.closest('input[type="checkbox"]')) return;
   const item = event.target.closest(".google-calendar-preview-item");
   const checkbox = item?.querySelector('input[type="checkbox"][data-calendar-selection-id]:not(:disabled)');
   if (!checkbox) return;
+  event.preventDefault();
   checkbox.checked = !checkbox.checked;
-  updateGoogleCalendarPreviewSelectionUI();
+  checkbox.dispatchEvent(new Event("change", { bubbles: true }));
 });
 els.googleCalendarImportModal?.addEventListener("click", (event) => {
   if (event.target.matches("[data-close-google-calendar-import], .google-calendar-import-backdrop")) {

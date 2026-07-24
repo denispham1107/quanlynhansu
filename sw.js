@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260725-calendar-preview-select-v23";
+const CACHE_NAME = "culao-task-shell-v20260725-calendar-preview-selection-fix-v24";
 const APP_SHELL = [
   "./",
   "./index.html",

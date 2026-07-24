@@ -10473,7 +10473,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260725-calendar-preview-select-v23"></script>
+  <script type="module" src="app.js?v=20260725-calendar-preview-selection-fix-v24"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -10613,17 +10613,14 @@
     .google-calendar-preview-selection-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 12px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; color:#334155; }
     .google-calendar-preview-selection-bar span { font-size:13px; font-weight:900; }
     .google-calendar-preview-selection-bar small { color:#64748b; font-size:11.5px; text-align:right; }
-    .google-calendar-preview-list { display:grid; gap:10px; min-width:0; }
+    .google-calendar-preview-list { display:grid; gap:10px; min-width:0; overflow-anchor:none; }
     .google-calendar-preview-empty { padding:28px 18px; border:1px dashed #cbd5e1; border-radius:16px; background:#f8fafc; color:#64748b; text-align:center; line-height:1.5; }
-    .google-calendar-preview-item { display:grid; grid-template-columns:34px minmax(0,1fr); gap:10px; padding:13px; border:1px solid #cbd5e1; border-radius:16px; background:#fff; box-shadow:0 6px 18px rgba(15,23,42,.05); cursor:pointer; }
-    .google-calendar-preview-item:has(input:checked) { border-color:#3b82f6; background:#eff6ff; box-shadow:0 0 0 3px rgba(59,130,246,.10); }
+    .google-calendar-preview-item { display:grid; grid-template-columns:34px minmax(0,1fr); gap:10px; padding:13px; border:1px solid #cbd5e1; border-radius:16px; background:#fff; box-shadow:0 6px 18px rgba(15,23,42,.05); cursor:pointer; overflow-anchor:none; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+    .google-calendar-preview-item.is-selected { border-color:#3b82f6; background:#eff6ff; box-shadow:0 0 0 3px rgba(59,130,246,.10); }
     .google-calendar-preview-item.is-disabled { opacity:.66; background:#f8fafc; box-shadow:none; cursor:not-allowed; }
-    .google-calendar-preview-check { display:flex; align-items:flex-start; justify-content:center; padding-top:2px; cursor:pointer; }
-    .google-calendar-preview-check input { position:absolute; opacity:0; pointer-events:none; }
-    .google-calendar-preview-check span { position:relative; width:23px; height:23px; border:2px solid #94a3b8; border-radius:7px; background:#fff; }
-    .google-calendar-preview-check input:checked + span { border-color:#2563eb; background:#2563eb; }
-    .google-calendar-preview-check input:checked + span::after { content:"✓"; position:absolute; inset:0; display:grid; place-items:center; color:#fff; font-size:15px; font-weight:1000; }
-    .google-calendar-preview-check input:disabled + span { border-color:#cbd5e1; background:#e2e8f0; cursor:not-allowed; }
+    .google-calendar-preview-check { display:flex; align-items:flex-start; justify-content:center; padding-top:2px; }
+    .google-calendar-preview-check input { box-sizing:border-box; position:static; -webkit-appearance:checkbox; appearance:checkbox; width:23px; height:23px; min-width:23px; margin:0; opacity:1; accent-color:#2563eb; cursor:pointer; pointer-events:auto; }
+    .google-calendar-preview-check input:disabled { cursor:not-allowed; }
     .google-calendar-preview-content { min-width:0; }
     .google-calendar-preview-title-row { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
     .google-calendar-preview-title-row strong { min-width:0; color:#0f172a; font-size:15px; line-height:1.35; }
@@ -10655,7 +10652,7 @@
         border:1px solid #bbf7d0;
         border-radius:24px;
         overflow:hidden;
-        clip-path:inset(0 round 24px);
+        clip-path:none;
       }
       .google-calendar-import-scroll {
         height:100%;
