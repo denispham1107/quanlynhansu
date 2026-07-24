@@ -209,6 +209,7 @@ const state = {
   workSupervisionProcessRequestedCycleId: "",
   workSupervisionEmployeeNotificationCycleId: "",
   workSupervisionEmployeeNotificationSlot: -1,
+  workSupervisionEmployeeNotificationTimer: null,
   workOrderSettingsAuthorizationToken: "",
   workOrderSettingsAuthorizationExpiresAt: 0,
   pushServiceWorkerRegistration: null,
@@ -4723,8 +4724,7 @@ onAuthStateChanged(auth, async (user) => {
   state.workOrderControlSettingsReady = false;
   state.workSupervisionState = null;
   state.workSupervisionProcessRequestedCycleId = "";
-  state.workSupervisionEmployeeNotificationCycleId = "";
-  state.workSupervisionEmployeeNotificationSlot = -1;
+  resetWorkSupervisionEmployeeNotificationState();
   renderWorkSupervisionCountdown();
   state.workOrderSettingsAuthorizationToken = "";
   state.workOrderSettingsAuthorizationExpiresAt = 0;
@@ -9405,43 +9405,114 @@ function formatWorkSupervisionCountdown(ms) {
 }
 
 function resetWorkSupervisionEmployeeNotificationState() {
+  if (state.workSupervisionEmployeeNotificationTimer) {
+    window.clearInterval(state.workSupervisionEmployeeNotificationTimer);
+  }
+  state.workSupervisionEmployeeNotificationTimer = null;
   state.workSupervisionEmployeeNotificationCycleId = "";
   state.workSupervisionEmployeeNotificationSlot = -1;
 }
 
-function notifyWorkSupervisionEmployeeEvery15Seconds(data = {}, remainingMs = 0, countdownMinutes = 5) {
+function getWorkSupervisionEmployeeReminderContext() {
+  const data = state.workSupervisionState || {};
   const cycleId = String(data.cycleId || "").trim();
-  const startedAt = timestampToDate(data.startedAt);
+  const participantUids = Array.isArray(data.participantUids) ? data.participantUids : [];
+  const currentUid = String(state.user?.uid || "").trim();
   const endsAt = timestampToDate(data.endsAt);
-  const nowMs = Date.now();
+  const active = data.active === true && data.status === "counting";
 
-  if (!cycleId || !endsAt || remainingMs <= 0) {
-    resetWorkSupervisionEmployeeNotificationState();
-    return;
+  if (
+    !active
+    || !cycleId
+    || !currentUid
+    || state.profile?.role !== "employee"
+    || !participantUids.includes(currentUid)
+    || !endsAt
+  ) {
+    return null;
   }
 
+  const countdownMinutes = Math.min(30, Math.max(1, Math.trunc(Number(
+    data.countdownMinutes || getWorkOrderControlSettings().workSupervisionCountdownMinutes || 5
+  ))));
+  const startedAt = timestampToDate(data.startedAt);
   const fallbackStartedAtMs = endsAt.getTime() - countdownMinutes * 60 * 1000;
   const startedAtMs = startedAt?.getTime() || fallbackStartedAtMs;
-  const elapsedMs = Math.max(0, nowMs - startedAtMs);
-  const notificationSlot = Math.floor(elapsedMs / 15000);
+  const remainingMs = endsAt.getTime() - Date.now();
 
-  if (state.workSupervisionEmployeeNotificationCycleId !== cycleId) {
-    state.workSupervisionEmployeeNotificationCycleId = cycleId;
-    // Thông báo đầu tiên của chu kỳ được tạo phía máy chủ trong collection
-    // notifications. Các thông báo nổi lặp lại bắt đầu từ mốc 15 giây.
-    state.workSupervisionEmployeeNotificationSlot = 0;
-  }
+  if (remainingMs <= 0) return null;
 
-  if (notificationSlot < 1 || notificationSlot <= state.workSupervisionEmployeeNotificationSlot) return;
+  return {
+    data,
+    cycleId,
+    countdownMinutes,
+    startedAtMs,
+    remainingMs
+  };
+}
 
-  state.workSupervisionEmployeeNotificationSlot = notificationSlot;
-  const remainingText = formatWorkSupervisionCountdown(remainingMs);
+function showWorkSupervisionEmployeeReminder(context) {
+  if (!context || context.remainingMs <= 0) return;
+  const remainingText = formatWorkSupervisionCountdown(context.remainingMs);
   toast(
-    `Bạn đang được Giám sát công việc. Còn ${remainingText}. Nếu hết thời gian mà vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa tự động và tính sẵn ${countdownMinutes} phút.`,
+    `Bạn đang được Giám sát công việc. Còn ${remainingText}. Nếu hết thời gian mà vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa tự động và tính sẵn ${context.countdownMinutes} phút.`,
     "warning"
   );
 }
 
+function runWorkSupervisionEmployeeReminderTick() {
+  const context = getWorkSupervisionEmployeeReminderContext();
+  if (!context) {
+    resetWorkSupervisionEmployeeNotificationState();
+    return;
+  }
+
+  if (state.workSupervisionEmployeeNotificationCycleId !== context.cycleId) {
+    state.workSupervisionEmployeeNotificationCycleId = context.cycleId;
+    // Thông báo chính thức lúc bắt đầu đã được máy chủ tạo. Nhắc lại đầu tiên
+    // chỉ xuất hiện khi chu kỳ đi qua mốc 15 giây.
+    state.workSupervisionEmployeeNotificationSlot = 0;
+  }
+
+  const elapsedMs = Math.max(0, Date.now() - context.startedAtMs);
+  const notificationSlot = Math.floor(elapsedMs / 15000);
+  if (notificationSlot < 1 || notificationSlot <= state.workSupervisionEmployeeNotificationSlot) return;
+
+  state.workSupervisionEmployeeNotificationSlot = notificationSlot;
+  showWorkSupervisionEmployeeReminder(context);
+}
+
+function ensureWorkSupervisionEmployeeReminderTimer() {
+  const context = getWorkSupervisionEmployeeReminderContext();
+  if (!context) {
+    resetWorkSupervisionEmployeeNotificationState();
+    return;
+  }
+
+  if (state.workSupervisionEmployeeNotificationCycleId !== context.cycleId) {
+    if (state.workSupervisionEmployeeNotificationTimer) {
+      window.clearInterval(state.workSupervisionEmployeeNotificationTimer);
+      state.workSupervisionEmployeeNotificationTimer = null;
+    }
+    state.workSupervisionEmployeeNotificationCycleId = context.cycleId;
+    state.workSupervisionEmployeeNotificationSlot = 0;
+  }
+
+  // Chạy ngay để bù một lần nhắc nếu trình duyệt vừa quay lại từ trạng thái nền.
+  runWorkSupervisionEmployeeReminderTick();
+  if (state.workSupervisionEmployeeNotificationTimer) return;
+
+  // Timer riêng, không phụ thuộc vào quá trình render giao diện. Cách này tránh
+  // việc listener task hoặc render dashboard làm mất nhịp nhắc 15 giây.
+  state.workSupervisionEmployeeNotificationTimer = window.setInterval(
+    runWorkSupervisionEmployeeReminderTick,
+    1000
+  );
+}
+
+function notifyWorkSupervisionEmployeeEvery15Seconds() {
+  ensureWorkSupervisionEmployeeReminderTimer();
+}
 async function requestWorkSupervisionProcessing(data = {}) {
   const cycleId = String(data.cycleId || "").trim();
   if (!cycleId || state.workSupervisionProcessRequestedCycleId === cycleId) return;
@@ -9504,16 +9575,27 @@ function renderWorkSupervisionCountdown() {
         : `Nếu hết ${countdownMinutes} phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn ${countdownMinutes} phút đã chờ.`;
     }
     if (!waitingForServer) {
-      notifyWorkSupervisionEmployeeEvery15Seconds(data, remainingMs, countdownMinutes);
+      notifyWorkSupervisionEmployeeEvery15Seconds();
     } else {
       resetWorkSupervisionEmployeeNotificationState();
     }
+  } else if (active && employeeIncluded && state.profile?.role === "employee") {
+    // Danh sách participant do máy chủ tạo là nguồn sự thật. Vẫn duy trì nhắc
+    // 15 giây nếu dữ liệu task cục bộ đang tải chậm hoặc chưa đồng bộ xong.
+    notifyWorkSupervisionEmployeeEvery15Seconds();
   } else {
     resetWorkSupervisionEmployeeNotificationState();
   }
 }
 
 setInterval(renderWorkSupervisionCountdown, 1000);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    ensureWorkSupervisionEmployeeReminderTimer();
+  }
+});
+window.addEventListener("focus", ensureWorkSupervisionEmployeeReminderTimer);
 
 // =========================
 // Employee dashboard
