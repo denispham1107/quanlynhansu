@@ -209,7 +209,8 @@ const state = {
   },
   workOrderControlSettingsReady: false,
   workSupervisionState: null,
-  workSupervisionProcessRequestedCycleId: "",
+  workSupervisionStates: [],
+  workSupervisionProcessRequestedCycleIds: new Set(),
   workSupervisionEmployeeNotificationCycleId: "",
   workSupervisionEmployeeNotificationSlot: -1,
   workSupervisionEmployeeNotificationTimer: null,
@@ -4759,7 +4760,8 @@ onAuthStateChanged(auth, async (user) => {
   state.workOrderControlSettings = normalizeWorkOrderControlSettings({});
   state.workOrderControlSettingsReady = false;
   state.workSupervisionState = null;
-  state.workSupervisionProcessRequestedCycleId = "";
+  state.workSupervisionStates = [];
+  state.workSupervisionProcessRequestedCycleIds = new Set();
   resetWorkSupervisionEmployeeNotificationState();
   renderWorkSupervisionCountdown();
   state.workOrderSettingsAuthorizationToken = "";
@@ -8838,8 +8840,8 @@ function syncWorkSupervisionSettingControls() {
       return input?.closest('.work-supervision-excluded-option')?.querySelector('.work-supervision-excluded-name')?.textContent?.trim() || uid;
     });
     els.workSupervisionSettingHelp.textContent = selectedNames.length
-      ? `Bộ đếm màu đỏ kéo dài ${minutes} phút. Đã miễn giám sát ${selectedNames.length} nhân viên: ${selectedNames.join(", ")}. Những người này không bị tạo Phiếu nghỉ trưa tự động.`
-      : `Bộ đếm màu đỏ kéo dài ${minutes} phút và hiển thị trên trang Admin cùng đúng các nhân viên thuộc nhóm giám sát.`;
+      ? `Mỗi nhân viên có một bộ đếm riêng kéo dài ${minutes} phút. Đã miễn giám sát ${selectedNames.length} nhân viên: ${selectedNames.join(", ")}. Những người này không bị tạo Phiếu nghỉ trưa tự động.`
+      : `Mỗi nhân viên thuộc diện giám sát có một bộ đếm riêng kéo dài ${minutes} phút. Trang Admin thấy toàn bộ bộ đếm; mỗi nhân viên chỉ thấy bộ đếm của chính mình.`;
   }
 }
 
@@ -9618,32 +9620,51 @@ async function syncOverdueTasksByAdmin() {
 // Giám sát công việc - bộ đếm realtime theo Cài đặt
 // =========================
 function setupWorkSupervisionListener() {
-  return onSnapshot(
-    doc(db, "workSupervision", "current"),
-    (snapshot) => {
-      state.workSupervisionState = snapshot.exists() ? snapshot.data() : null;
-      renderWorkSupervisionCountdown();
-    },
-    (error) => {
-      console.error("Không đọc được trạng thái Giám sát công việc:", error);
-      state.workSupervisionState = null;
-      renderWorkSupervisionCountdown();
-      toast("Không đọc được bộ đếm Giám sát công việc. Hãy deploy Firestore Rules mới.", "error");
-    }
-  );
-}
+  if (isAdminProfile()) {
+    return onSnapshot(
+      collection(db, "workSupervision"),
+      (snapshot) => {
+        state.workSupervisionStates = snapshot.docs
+          .filter((item) => item.id !== "current")
+          .map((item) => ({ id: item.id, ...item.data() }))
+          .filter((item) => item.scope === "employee" && String(item.employeeUid || item.id || "").trim())
+          .map((item) => ({
+            ...item,
+            employeeUid: String(item.employeeUid || item.id || "").trim(),
+            employeeName: String(item.employeeName || "Nhân viên").trim() || "Nhân viên"
+          }));
+        state.workSupervisionState = null;
+        renderWorkSupervisionCountdown();
+      },
+      (error) => {
+        console.error("Không đọc được trạng thái Giám sát công việc:", error);
+        state.workSupervisionStates = [];
+        renderWorkSupervisionCountdown();
+        toast("Không đọc được các bộ đếm Giám sát công việc. Hãy deploy Firestore Rules mới.", "error");
+      }
+    );
+  }
 
-function getWorkSupervisionParticipantNames(data = {}) {
-  const names = data.participantNames && typeof data.participantNames === "object"
-    ? data.participantNames
-    : {};
-  const uids = Array.isArray(data.participantUids) ? data.participantUids : [];
-  return uids.map((uid) => names[uid]).filter(Boolean);
-}
+  if (state.profile?.role === "employee" && state.user?.uid) {
+    return onSnapshot(
+      doc(db, "workSupervision", state.user.uid),
+      (snapshot) => {
+        state.workSupervisionState = snapshot.exists()
+          ? { id: snapshot.id, ...snapshot.data() }
+          : null;
+        state.workSupervisionStates = [];
+        renderWorkSupervisionCountdown();
+      },
+      (error) => {
+        console.error("Không đọc được bộ đếm Giám sát của nhân viên:", error);
+        state.workSupervisionState = null;
+        renderWorkSupervisionCountdown();
+        toast("Không đọc được bộ đếm Giám sát công việc của bạn. Hãy deploy Firestore Rules mới.", "error");
+      }
+    );
+  }
 
-function isCurrentEmployeeStillFreeForSupervision() {
-  if (state.profile?.role !== "employee" || !isEmployeeWorking(state.profile)) return false;
-  return !state.tasks.some((task) => isTaskBlockingEmployeeForSummary(task));
+  return () => undefined;
 }
 
 function formatWorkSupervisionCountdown(ms) {
@@ -9666,8 +9687,8 @@ function resetWorkSupervisionEmployeeNotificationState() {
 function getWorkSupervisionEmployeeReminderContext() {
   const data = state.workSupervisionState || {};
   const cycleId = String(data.cycleId || "").trim();
-  const participantUids = Array.isArray(data.participantUids) ? data.participantUids : [];
   const currentUid = String(state.user?.uid || "").trim();
+  const employeeUid = String(data.employeeUid || data.id || "").trim();
   const endsAt = timestampToDate(data.endsAt);
   const active = data.active === true && data.status === "counting";
 
@@ -9676,7 +9697,7 @@ function getWorkSupervisionEmployeeReminderContext() {
     || !cycleId
     || !currentUid
     || state.profile?.role !== "employee"
-    || !participantUids.includes(currentUid)
+    || employeeUid !== currentUid
     || !endsAt
   ) {
     return null;
@@ -9695,6 +9716,7 @@ function getWorkSupervisionEmployeeReminderContext() {
   return {
     data,
     cycleId,
+    employeeUid,
     countdownMinutes,
     startedAtMs,
     remainingMs
@@ -9705,7 +9727,7 @@ function showWorkSupervisionEmployeeReminder(context) {
   if (!context || context.remainingMs <= 0) return;
   const remainingText = formatWorkSupervisionCountdown(context.remainingMs);
   toast(
-    `Bạn đang được Giám sát công việc. Còn ${remainingText}. Nếu hết thời gian mà vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa tự động và tính sẵn ${context.countdownMinutes} phút.`,
+    `Bạn đang được Giám sát công việc. Bộ đếm riêng của bạn còn ${remainingText}. Nếu hết thời gian mà vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa tự động và tính sẵn ${context.countdownMinutes} phút.`,
     "warning"
   );
 }
@@ -9719,8 +9741,6 @@ function runWorkSupervisionEmployeeReminderTick() {
 
   if (state.workSupervisionEmployeeNotificationCycleId !== context.cycleId) {
     state.workSupervisionEmployeeNotificationCycleId = context.cycleId;
-    // Thông báo chính thức lúc bắt đầu đã được máy chủ tạo. Nhắc lại đầu tiên
-    // chỉ xuất hiện khi chu kỳ đi qua mốc 15 giây.
     state.workSupervisionEmployeeNotificationSlot = 0;
   }
 
@@ -9748,12 +9768,9 @@ function ensureWorkSupervisionEmployeeReminderTimer() {
     state.workSupervisionEmployeeNotificationSlot = 0;
   }
 
-  // Chạy ngay để bù một lần nhắc nếu trình duyệt vừa quay lại từ trạng thái nền.
   runWorkSupervisionEmployeeReminderTick();
   if (state.workSupervisionEmployeeNotificationTimer) return;
 
-  // Timer riêng, không phụ thuộc vào quá trình render giao diện. Cách này tránh
-  // việc listener task hoặc render dashboard làm mất nhịp nhắc 15 giây.
   state.workSupervisionEmployeeNotificationTimer = window.setInterval(
     runWorkSupervisionEmployeeReminderTick,
     1000
@@ -9763,76 +9780,112 @@ function ensureWorkSupervisionEmployeeReminderTimer() {
 function notifyWorkSupervisionEmployeeEvery15Seconds() {
   ensureWorkSupervisionEmployeeReminderTimer();
 }
+
 async function requestWorkSupervisionProcessing(data = {}) {
   const cycleId = String(data.cycleId || "").trim();
-  if (!cycleId || state.workSupervisionProcessRequestedCycleId === cycleId) return;
+  const employeeUid = String(data.employeeUid || data.id || "").trim();
+  if (!cycleId || !employeeUid || state.workSupervisionProcessRequestedCycleIds.has(cycleId)) return;
 
-  state.workSupervisionProcessRequestedCycleId = cycleId;
+  state.workSupervisionProcessRequestedCycleIds.add(cycleId);
   try {
-    await processWorkSupervisionNowCallable({ cycleId });
+    const response = await processWorkSupervisionNowCallable({ cycleId, employeeUid });
+    if (response?.data?.processed !== true) {
+      window.setTimeout(() => {
+        state.workSupervisionProcessRequestedCycleIds.delete(cycleId);
+      }, 3000);
+    }
   } catch (error) {
     console.warn("Chưa xử lý được mốc hết giờ Giám sát công việc:", error);
-    // Cho phép thử lại sau một khoảng ngắn nếu mạng tạm thời gián đoạn.
     window.setTimeout(() => {
-      if (state.workSupervisionProcessRequestedCycleId === cycleId) {
-        state.workSupervisionProcessRequestedCycleId = "";
-      }
+      state.workSupervisionProcessRequestedCycleIds.delete(cycleId);
     }, 10000);
   }
 }
 
+function getActiveAdminWorkSupervisionStates() {
+  return (Array.isArray(state.workSupervisionStates) ? state.workSupervisionStates : [])
+    .filter((item) => item?.active === true && item?.status === "counting")
+    .sort((a, b) => {
+      const aEnd = timestampToDate(a.endsAt)?.getTime() || Number.MAX_SAFE_INTEGER;
+      const bEnd = timestampToDate(b.endsAt)?.getTime() || Number.MAX_SAFE_INTEGER;
+      if (aEnd !== bEnd) return aEnd - bEnd;
+      return String(a.employeeName || "").localeCompare(String(b.employeeName || ""), "vi");
+    });
+}
+
 function renderWorkSupervisionCountdown() {
+  const adminStates = getActiveAdminWorkSupervisionStates();
+  const showAdmin = isAdminProfile() && adminStates.length > 0;
+  els.adminWorkSupervisionBanner?.classList.toggle("hidden", !showAdmin);
+
+  if (showAdmin) {
+    let waitingCount = 0;
+    adminStates.forEach((item) => {
+      const endsAt = timestampToDate(item.endsAt);
+      const remainingMs = endsAt ? endsAt.getTime() - Date.now() : 0;
+      if (remainingMs <= 0) {
+        waitingCount += 1;
+        void requestWorkSupervisionProcessing(item);
+      }
+    });
+
+    if (els.adminWorkSupervisionMessage) {
+      els.adminWorkSupervisionMessage.textContent = waitingCount > 0
+        ? `${adminStates.length} nhân viên đang có bộ đếm riêng; ${waitingCount} bộ đếm đã hết và đang được máy chủ xử lý.`
+        : `${adminStates.length} nhân viên đang được giám sát bằng các bộ đếm riêng. Nhân viên nào nhận việc mới thì chỉ bộ đếm của người đó dừng.`;
+    }
+
+    if (els.adminWorkSupervisionCountdown) {
+      els.adminWorkSupervisionCountdown.innerHTML = adminStates.map((item) => {
+        const endsAt = timestampToDate(item.endsAt);
+        const remainingMs = endsAt ? endsAt.getTime() - Date.now() : 0;
+        const waitingForServer = remainingMs <= 0;
+        return `
+          <span class="work-supervision-countdown-item${waitingForServer ? " is-waiting" : ""}">
+            <span class="work-supervision-countdown-employee">${escapeHtml(item.employeeName || "Nhân viên")}</span>
+            <strong>${waitingForServer ? "00:00" : formatWorkSupervisionCountdown(remainingMs)}</strong>
+          </span>
+        `;
+      }).join("");
+    }
+  } else if (els.adminWorkSupervisionCountdown) {
+    els.adminWorkSupervisionCountdown.innerHTML = "";
+  }
+
   const data = state.workSupervisionState || {};
   const active = data.active === true && data.status === "counting";
+  const currentUid = String(state.user?.uid || "").trim();
+  const employeeUid = String(data.employeeUid || data.id || "").trim();
   const endsAt = timestampToDate(data.endsAt);
   const remainingMs = endsAt ? endsAt.getTime() - Date.now() : 0;
-  const countdownText = formatWorkSupervisionCountdown(remainingMs);
   const waitingForServer = active && remainingMs <= 0;
-  const participantUids = Array.isArray(data.participantUids) ? data.participantUids : [];
-  if (!active) {
-    state.workSupervisionProcessRequestedCycleId = "";
-  } else if (waitingForServer) {
-    void requestWorkSupervisionProcessing(data);
-  }
-  const participantNames = getWorkSupervisionParticipantNames(data);
-  const countdownMinutes = Math.min(30, Math.max(1, Math.trunc(Number(
-    data.countdownMinutes || getWorkOrderControlSettings().workSupervisionCountdownMinutes || 5
-  ))));
-
-  const showAdmin = active && isAdminProfile();
-  els.adminWorkSupervisionBanner?.classList.toggle("hidden", !showAdmin);
-  if (showAdmin) {
-    if (els.adminWorkSupervisionCountdown) els.adminWorkSupervisionCountdown.textContent = countdownText;
-    if (els.adminWorkSupervisionMessage) {
-      const namesText = participantNames.length ? ` (${participantNames.join(", ")})` : "";
-      els.adminWorkSupervisionMessage.textContent = waitingForServer
-        ? `Đã hết ${countdownMinutes} phút. Hệ thống đang kiểm tra lần cuối và tạo Phiếu nghỉ trưa cho ${participantUids.length} nhân viên${namesText}.`
-        : `${participantUids.length} nhân viên đang chưa được giao việc${namesText}. Nếu hết ${countdownMinutes} phút mà toàn bộ nhóm vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa và tính sẵn ${countdownMinutes} phút.`;
-    }
-  }
-
-  const employeeIncluded = participantUids.includes(state.user?.uid || "");
-  const showEmployee = active
+  const employeeIncluded = active
     && state.profile?.role === "employee"
-    && employeeIncluded
-    && isCurrentEmployeeStillFreeForSupervision();
-  els.employeeWorkSupervisionBanner?.classList.toggle("hidden", !showEmployee);
-  if (showEmployee) {
-    if (els.employeeWorkSupervisionCountdown) els.employeeWorkSupervisionCountdown.textContent = countdownText;
+    && currentUid
+    && employeeUid === currentUid;
+
+  els.employeeWorkSupervisionBanner?.classList.toggle("hidden", !employeeIncluded);
+  if (employeeIncluded) {
+    const countdownMinutes = Math.min(30, Math.max(1, Math.trunc(Number(
+      data.countdownMinutes || getWorkOrderControlSettings().workSupervisionCountdownMinutes || 5
+    ))));
+    if (els.employeeWorkSupervisionCountdown) {
+      els.employeeWorkSupervisionCountdown.textContent = waitingForServer
+        ? "00:00"
+        : formatWorkSupervisionCountdown(remainingMs);
+    }
     if (els.employeeWorkSupervisionMessage) {
       els.employeeWorkSupervisionMessage.textContent = waitingForServer
-        ? `Đã hết ${countdownMinutes} phút. Hệ thống đang kiểm tra và tạo Phiếu nghỉ trưa tự động.`
-        : `Nếu hết ${countdownMinutes} phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn ${countdownMinutes} phút đã chờ.`;
+        ? `Bộ đếm riêng ${countdownMinutes} phút của bạn đã hết. Hệ thống đang kiểm tra và tạo Phiếu nghỉ trưa tự động.`
+        : `Đây là bộ đếm riêng của bạn. Nếu hết ${countdownMinutes} phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn ${countdownMinutes} phút đã chờ.`;
     }
-    if (!waitingForServer) {
-      notifyWorkSupervisionEmployeeEvery15Seconds();
-    } else {
+
+    if (waitingForServer) {
       resetWorkSupervisionEmployeeNotificationState();
+      void requestWorkSupervisionProcessing(data);
+    } else {
+      notifyWorkSupervisionEmployeeEvery15Seconds();
     }
-  } else if (active && employeeIncluded && state.profile?.role === "employee") {
-    // Danh sách participant do máy chủ tạo là nguồn sự thật. Vẫn duy trì nhắc
-    // 15 giây nếu dữ liệu task cục bộ đang tải chậm hoặc chưa đồng bộ xong.
-    notifyWorkSupervisionEmployeeEvery15Seconds();
   } else {
     resetWorkSupervisionEmployeeNotificationState();
   }

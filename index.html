@@ -8386,6 +8386,57 @@
       box-shadow: 0 8px 20px rgba(220, 38, 38, 0.24);
     }
 
+    .work-supervision-countdown-list {
+      flex: 0 1 520px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 9px;
+      min-width: 260px;
+      max-width: 620px;
+    }
+
+    .work-supervision-countdown-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+      padding: 9px 11px;
+      border: 1px solid #fca5a5;
+      border-radius: 13px;
+      background: rgba(255, 255, 255, 0.84);
+      box-shadow: 0 5px 14px rgba(220, 38, 38, 0.1);
+    }
+
+    .work-supervision-countdown-item.is-waiting {
+      background: #fee2e2;
+    }
+
+    .work-supervision-countdown-employee {
+      min-width: 0;
+      overflow: hidden;
+      color: #7f1d1d;
+      font-size: 13px;
+      font-weight: 900;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .work-supervision-countdown-item > strong {
+      flex: 0 0 auto;
+      min-width: 68px;
+      padding: 7px 8px;
+      border-radius: 10px;
+      background: #dc2626;
+      color: #fff;
+      font-size: 17px;
+      font-weight: 950;
+      line-height: 1;
+      letter-spacing: .5px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
     .work-supervision-lunch-credit-box {
       margin-top: 12px;
       padding: 13px 15px;
@@ -8425,6 +8476,14 @@
         width: 100%;
         min-width: 0;
         font-size: 25px;
+      }
+
+
+      .work-supervision-countdown-list {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -9739,7 +9798,7 @@
           <strong>⏱ Giám sát công việc đang đếm ngược</strong>
           <span id="adminWorkSupervisionMessage">Các nhân viên chưa được giao việc sẽ được tạo Phiếu nghỉ trưa tự động nếu vẫn chưa nhận việc mới.</span>
         </div>
-        <strong id="adminWorkSupervisionCountdown" class="work-supervision-countdown-value">00:00</strong>
+        <div id="adminWorkSupervisionCountdown" class="work-supervision-countdown-list" aria-label="Bộ đếm riêng của từng nhân viên"></div>
       </section>
 
       <section class="panel task-panel">
@@ -10499,7 +10558,7 @@
           <label class="work-order-setting-toggle-row" for="enableWorkSupervision">
             <span class="work-order-setting-toggle-copy">
               <strong>Giám sát công việc</strong>
-              <span>Khi tổng số nhân viên đang chưa được giao việc lớn hơn 1 và vẫn còn Phiếu “Chưa giao việc”, hệ thống bắt đầu đếm ngược rồi tự tạo Phiếu nghỉ trưa cho những nhân viên thuộc nhóm giám sát nếu họ vẫn chưa nhận việc mới.</span>
+              <span>Khi tổng số nhân viên đang chưa được giao việc lớn hơn 1 và vẫn còn Phiếu “Chưa giao việc” hoặc Phiếu “Chờ chọn người”, hệ thống bắt đầu một bộ đếm riêng cho từng nhân viên thuộc diện giám sát. Nhân viên nào vẫn chưa nhận việc mới khi bộ đếm riêng kết thúc sẽ được tạo một Phiếu nghỉ trưa riêng.</span>
             </span>
             <input id="enableWorkSupervision" type="checkbox" />
           </label>
@@ -10526,7 +10585,7 @@
             </div>
           </div>
 
-          <p id="workSupervisionSettingHelp" class="work-order-setting-help">Bộ đếm màu đỏ hiển thị trên trang Admin và đúng các nhân viên thuộc nhóm giám sát.</p>
+          <p id="workSupervisionSettingHelp" class="work-order-setting-help">Trang Admin hiển thị riêng từng bộ đếm; mỗi nhân viên chỉ nhìn thấy bộ đếm của chính mình.</p>
         </section>
 
         <section class="work-order-setting-section is-danger-setting">
