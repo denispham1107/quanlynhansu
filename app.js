@@ -5516,21 +5516,17 @@ function renderEmployees() {
 }
 
 function getHotelReportTimeStatusText(report, totalActualMinutes) {
-  const endPetCount = Number(report?.endPetCount || 0);
-  const allowedMinutes = Number(report?.allowedMinutes || 0);
+  const endPetCount = normalizeHotelPetCount(report?.endPetCount);
 
   if (!endPetCount) {
     return report?.timeStatusText || "Chưa nhập số lượng bé hotel cuối ngày";
   }
 
-  const dateKey = String(report?.date || report?.id || "");
-  const reportDayText = dateKey === todayInputValue()
-    ? "hôm nay"
-    : `ngày ${formatDateOnly(dateKey)}`;
+  const allowedMinutes = calculateHotelAllowedMinutes(endPetCount);
 
   return Number(totalActualMinutes || 0) <= allowedMinutes
-    ? `Các bạn ${reportDayText} làm đúng thời gian`
-    : `Các bạn ${reportDayText} làm không đúng thời gian`;
+    ? "Các bạn đã làm đúng thời gian quy định"
+    : "Các bạn đã làm lố thời gian quy định";
 }
 
 function hotelReportEntryBelongsToEmployee(entry, employee) {
@@ -5673,6 +5669,7 @@ async function deleteEmployeeData(employeeUid) {
       operations.push((batch) => batch.update(doc(db, "hotelDailyReports", item.id), {
         employeeTotals,
         totalActualMinutes,
+        allowedMinutes: calculateHotelAllowedMinutes(report.endPetCount),
         timeStatusText: getHotelReportTimeStatusText(report, totalActualMinutes),
         updatedAt: serverTimestamp()
       }));
@@ -6835,8 +6832,7 @@ const LEGACY_HOTEL_AUTO_TITLES = ["Hotel", HOTEL_AUTO_TITLE];
 const LEGACY_SHIP_AUTO_TITLES = [SHIP_AUTO_TITLE];
 const LEGACY_CLEANING_AUTO_TITLES = [CLEANING_AUTO_TITLE];
 const HOTEL_BASE_PET_COUNT = 10;
-const HOTEL_BASE_MINUTES = 30;
-const HOTEL_EXTRA_MINUTES_PER_PET = 2;
+const HOTEL_SECONDS_PER_PET = 4 * 60 + 30;
 
 function normalizeHotelPetCount(value) {
   const count = Math.floor(Number(value || 0));
@@ -6847,7 +6843,21 @@ function calculateHotelAllowedMinutes(petCount) {
   const count = normalizeHotelPetCount(petCount);
   if (!count) return 0;
 
-  return HOTEL_BASE_MINUTES + Math.max(0, count - HOTEL_BASE_PET_COUNT) * HOTEL_EXTRA_MINUTES_PER_PET;
+  return (count * HOTEL_SECONDS_PER_PET) / 60;
+}
+
+function formatHotelDuration(totalMinutes = 0) {
+  const totalSeconds = Math.max(0, Math.round((Number(totalMinutes) || 0) * 60));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
+
+  if (hours) parts.push(`${hours} giờ`);
+  if (minutes) parts.push(`${minutes} phút`);
+  if (seconds) parts.push(`${seconds} giây`);
+
+  return parts.join(" ") || "0 phút";
 }
 
 function applyHotelTimeFromPetCount(row) {
@@ -9977,16 +9987,10 @@ function buildAdminHotelDailyReportPayload() {
 
   const totalActualMinutes = employeeTotals.reduce((sum, item) => sum + Number(item.minutes || 0), 0);
 
-  let timeStatusText = "Chưa nhập số lượng bé hotel cuối ngày";
-  if (endPetCount) {
-    const reportDayText = dateKey === todayInputValue()
-      ? "hôm nay"
-      : `ngày ${formatDateOnly(dateKey)}`;
-
-    timeStatusText = totalActualMinutes <= allowedMinutes
-      ? `Các bạn ${reportDayText} làm đúng thời gian`
-      : `Các bạn ${reportDayText} làm không đúng thời gian`;
-  }
+  const timeStatusText = getHotelReportTimeStatusText(
+    { endPetCount },
+    totalActualMinutes
+  );
 
   return {
     dateKey,
@@ -10026,6 +10030,8 @@ async function saveAdminHotelDailyReport() {
     hygieneText: payload.hygieneText,
     endPetCount: Number(payload.endPetCount || 0),
     allowedMinutes: Number(payload.allowedMinutes || 0),
+    hotelSecondsPerPet: HOTEL_SECONDS_PER_PET,
+    hotelTimeRule: "pet_count_x_4m30s",
     totalActualMinutes: Number(payload.totalActualMinutes || 0),
     timeStatusText: payload.timeStatusText,
     employeeTotals: payload.employeeTotals.map((item) => ({
@@ -10062,8 +10068,10 @@ function renderAdminHotelReportControls() {
   const hygieneValue = draft.hygiene || "pending";
   const endPetCountRaw = draft.endPetCount ?? "";
   const savedEndPetCount = normalizeHotelPetCount(saved?.endPetCount);
-  const savedAllowedMinutes = Number(saved?.allowedMinutes || 0);
-  const savedTimeStatusText = saved?.timeStatusText || "Chưa lưu kết quả Hotel";
+  const savedAllowedMinutes = savedEndPetCount ? calculateHotelAllowedMinutes(savedEndPetCount) : 0;
+  const savedTimeStatusText = saved
+    ? getHotelReportTimeStatusText(saved, Number(saved?.totalActualMinutes || 0))
+    : "Chưa lưu kết quả Hotel";
   const savedHygieneText = saved?.hygieneText || getHotelHygieneStatusText(saved?.hygiene || "pending");
 
   return `
@@ -10082,7 +10090,7 @@ function renderAdminHotelReportControls() {
     <button type="button" class="hotel-report-ok-btn" data-admin-hotel-report-ok${disabledAttribute}>OK</button>
     ${canManageHotelReport ? "" : '<span class="small-note">Chỉ xem • Chưa được cấp quyền lưu Tổng kết Hotel</span>'}
     <span class="hotel-report-hygiene-status">${escapeHtml(savedHygieneText)}</span>
-    <span class="hotel-report-end-time">Thời gian làm hotel: ${savedEndPetCount ? escapeHtml(formatMinutes(savedAllowedMinutes)) : "--"}</span>
+    <span class="hotel-report-end-time">Thời gian quy định: ${savedEndPetCount ? escapeHtml(formatHotelDuration(savedAllowedMinutes)) : "--"}</span>
     <span class="hotel-report-time-status">${escapeHtml(savedTimeStatusText)}</span>
   `;
 }
