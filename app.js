@@ -7587,6 +7587,125 @@ function getEmployeeQueueEndMap(assignedToUids) {
   return map;
 }
 
+// Khi Admin giao một công việc mới cho nhân viên đang Nghỉ trưa, Phiếu Nghỉ trưa
+// phải được kết thúc ngay tại đúng thời điểm giao việc. Kết quả nghỉ trưa được tính
+// giống hệt thao tác Admin bấm “Kết thúc”: lưu số phút thực tế, kết quả và lịch sử.
+async function completeActiveLunchBreaksBeforeNewAssignment(employeeUids = [], completedAt = new Date()) {
+  const uniqueUids = Array.from(new Set(
+    employeeUids
+      .map((uid) => String(uid || "").trim())
+      .filter(Boolean)
+  ));
+
+  if (!uniqueUids.length) return [];
+
+  const uidSet = new Set(uniqueUids);
+  const localCandidates = state.tasks.filter((task) => (
+    uidSet.has(String(task.assignedToUid || ""))
+    && isLunchBreakTask(task)
+    && task.status === "lunch_break"
+  ));
+
+  if (!localCandidates.length) return [];
+
+  // Đọc lại từng Phiếu để tránh kết thúc nhầm khi dữ liệu realtime trên giao diện
+  // chưa kịp cập nhật sau thao tác từ thiết bị khác.
+  const freshTasks = [];
+  const snapshots = await Promise.all(
+    localCandidates.map((task) => getDoc(doc(db, "tasks", task.id)))
+  );
+
+  snapshots.forEach((snapshot) => {
+    if (!snapshot.exists()) return;
+    const task = { id: snapshot.id, ...snapshot.data() };
+    if (!uidSet.has(String(task.assignedToUid || ""))) return;
+    if (!isLunchBreakTask(task) || task.status !== "lunch_break") return;
+    freshTasks.push(task);
+  });
+
+  if (!freshTasks.length) return [];
+
+  const completedTimestamp = Timestamp.fromDate(completedAt);
+  const batch = writeBatch(db);
+  const completedRows = freshTasks.map((task) => {
+    const result = calculateResultAt(task, completedAt);
+
+    batch.update(doc(db, "tasks", task.id), {
+      status: "completed",
+      submittedAt: completedTimestamp,
+      approvedAt: completedTimestamp,
+      actualMinutes: result.actualMinutes,
+      resultType: result.resultType,
+      differenceMinutes: result.differenceMinutes,
+      differencePercent: result.differencePercent,
+      autoCompletedByNewAssignment: true,
+      autoCompletedAt: completedTimestamp,
+      autoCompletedByUid: state.user?.uid || "",
+      autoCompletedByName: state.profile?.name || state.profile?.email || "Admin"
+    });
+
+    return { task, result };
+  });
+
+  await batch.commit();
+
+  // Cập nhật ngay state cục bộ để việc mới không bị xếp hàng sau hạn nghỉ trưa cũ.
+  completedRows.forEach(({ task, result }) => {
+    const localTask = state.tasks.find((item) => item.id === task.id);
+    if (!localTask) return;
+    Object.assign(localTask, {
+      status: "completed",
+      submittedAt: completedTimestamp,
+      approvedAt: completedTimestamp,
+      actualMinutes: result.actualMinutes,
+      resultType: result.resultType,
+      differenceMinutes: result.differenceMinutes,
+      differencePercent: result.differencePercent,
+      autoCompletedByNewAssignment: true,
+      autoCompletedAt: completedTimestamp,
+      autoCompletedByUid: state.user?.uid || "",
+      autoCompletedByName: state.profile?.name || state.profile?.email || "Admin"
+    });
+  });
+
+  // Nếu trước đó đã có công việc chờ đến lượt phía sau Phiếu Nghỉ trưa, kéo các
+  // công việc đó lên đúng mốc hiện tại trước khi xếp thêm công việc mới.
+  for (const employeeUid of new Set(completedRows.map(({ task }) => task.assignedToUid).filter(Boolean))) {
+    await reflowQueuedTasksForEmployee(employeeUid, "", completedAt);
+  }
+
+  const notifications = [];
+  completedRows.forEach(({ task, result }) => {
+    const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+    notifications.push({
+      recipientUid: task.assignedToUid,
+      type: "lunch_break_auto_completed_for_new_assignment",
+      title: "Phiếu Nghỉ trưa đã tự động kết thúc",
+      message: `Admin đã giao công việc mới nên Phiếu Nghỉ trưa “${task.title}” được kết thúc tự động. Bạn đã nghỉ trưa được ${result.actualMinutes} phút.`,
+      taskId: task.id,
+      taskTitle: task.title
+    });
+    notifications.push({
+      recipientUid: state.user.uid,
+      type: "lunch_break_auto_completed_for_new_assignment_admin",
+      title: "Đã tự động kết thúc Nghỉ trưa",
+      message: `Khi giao công việc mới, hệ thống đã kết thúc Phiếu Nghỉ trưa của ${employeeName}. Thời gian nghỉ: ${result.actualMinutes} phút.`,
+      taskId: task.id,
+      taskTitle: task.title
+    });
+  });
+
+  try {
+    await createNotifications(notifications);
+  } catch (error) {
+    // Không để lỗi tạo thông báo làm hủy thao tác giao việc sau khi Phiếu Nghỉ trưa
+    // đã được kết thúc và lưu kết quả thành công.
+    console.warn("Không tạo được thông báo kết thúc Nghỉ trưa tự động", error);
+  }
+
+  return completedRows;
+}
+
 // Khi một task hoàn thành sớm, những task đang "Đang chờ đến lượt" của cùng nhân viên
 // cần được kéo lên sớm hơn. Nếu không, task mới/đang chờ vẫn bị kẹt tới mốc hạn cũ.
 async function reflowQueuedTasksForEmployee(employeeUid, completedTaskId = "", now = new Date()) {
@@ -7625,6 +7744,7 @@ async function reflowQueuedTasksForEmployee(employeeUid, completedTaskId = "", n
   let cursorMs = Math.max(nowMs, latestActiveEndMs);
   const batch = writeBatch(db);
   let changedCount = 0;
+  const localQueueUpdates = [];
 
   queuedTasks.forEach((task) => {
     const deadlineMinutes = Number(task.deadlineMinutes || 0);
@@ -7639,16 +7759,24 @@ async function reflowQueuedTasksForEmployee(employeeUid, completedTaskId = "", n
       return;
     }
 
+    const nextQueueStartAt = Timestamp.fromDate(new Date(newStartMs));
+    const nextDeadlineAt = Timestamp.fromDate(new Date(newEndMs));
+
     batch.update(doc(db, "tasks", task.id), {
-      queueStartAt: Timestamp.fromDate(new Date(newStartMs)),
-      deadlineAt: Timestamp.fromDate(new Date(newEndMs))
+      queueStartAt: nextQueueStartAt,
+      deadlineAt: nextDeadlineAt
     });
+    localQueueUpdates.push({ task, queueStartAt: nextQueueStartAt, deadlineAt: nextDeadlineAt });
     changedCount += 1;
   });
 
   if (!changedCount) return 0;
 
   await batch.commit();
+  localQueueUpdates.forEach(({ task, queueStartAt, deadlineAt }) => {
+    task.queueStartAt = queueStartAt;
+    task.deadlineAt = deadlineAt;
+  });
   return changedCount;
 }
 
@@ -7704,6 +7832,14 @@ async function persistWorkOrder(dispatch, button) {
     }
 
     const now = new Date();
+
+    if (dispatch) {
+      const employeesReceivingNewWork = rows
+        .filter((row) => row.assignedToUid && !row.isLunchBreak)
+        .map((row) => row.assignedToUid);
+      await completeActiveLunchBreaksBeforeNewAssignment(employeesReceivingNewWork, now);
+    }
+
     const batch = writeBatch(db);
 
     // Nếu đang sửa 1 phiếu nháp có sẵn: xoá phiếu + công việc cũ, sau đó tạo lại từ đầu.
@@ -7920,6 +8056,11 @@ async function dispatchWorkOrder(workOrderId, button) {
 
   try {
     const now = new Date();
+    const employeesReceivingNewWork = tasksInGroup
+      .filter((task) => task.assignedToUid && !isLunchBreakTask(task))
+      .map((task) => task.assignedToUid);
+    await completeActiveLunchBreaksBeforeNewAssignment(employeesReceivingNewWork, now);
+
     const batch = writeBatch(db);
     const notificationItems = [];
 
@@ -11063,12 +11204,23 @@ function employeeHasUnfinishedTask(employeeUid, ignoredTaskId = "") {
   ));
 }
 
+// Nhân viên chỉ đang Nghỉ trưa vẫn được phép nhận việc mới; Phiếu Nghỉ trưa sẽ
+// được tự động kết thúc ngay lúc giao. Các công việc chưa hoàn thành khác vẫn chặn.
+function employeeHasUnfinishedNonLunchTask(employeeUid, ignoredTaskId = "") {
+  return state.tasks.some((task) => (
+    task.id !== ignoredTaskId
+    && task.assignedToUid === employeeUid
+    && isUnfinishedAssignedTask(task)
+    && !(isLunchBreakTask(task) && task.status === "lunch_break")
+  ));
+}
+
 function getAvailableReplacementEmployees(task) {
   return state.employees.filter((employee) => (
     employee.uid
     && isEmployeeWorking(employee)
     && employee.uid !== task.assignedToUid
-    && !employeeHasUnfinishedTask(employee.uid, task.id)
+    && !employeeHasUnfinishedNonLunchTask(employee.uid, task.id)
   ));
 }
 
@@ -14352,7 +14504,7 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
         renderReassignEmployeeOptions(task.id);
         throw new Error("Nhân viên này đang ở trạng thái Đang Off và không thể nhận công việc. Vui lòng chọn nhân viên khác.");
       }
-      if (employeeHasUnfinishedTask(newEmployee.uid, task.id)) {
+      if (employeeHasUnfinishedNonLunchTask(newEmployee.uid, task.id)) {
         throw new Error("Nhân viên này đang có công việc chưa hoàn thành. Vui lòng chọn nhân viên chưa được giao việc.");
       }
 
@@ -14363,6 +14515,11 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
     setButtonLoading(els.confirmReassignEmployeeBtn, true, releaseToWaiting ? "Đang tạm dừng..." : "Đang đổi...");
 
     const now = new Date();
+
+    if (!releaseToWaiting && newEmployee?.uid && !isLunchBreakTask(task)) {
+      await completeActiveLunchBreaksBeforeNewAssignment([newEmployee.uid], now);
+    }
+
     const oldEmployeeUid = task.assignedToUid || "";
     const oldEmployeeName = getEmployeeDisplayNameByUid(oldEmployeeUid, task.assignedToName);
     const accumulatedWorkedMs = Number(task.accumulatedWorkedMs || 0);

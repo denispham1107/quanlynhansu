@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260725-hotel-result-rule-v32";
+const CACHE_NAME = "culao-task-shell-v20260725-auto-end-lunch-on-assignment-v33";
 const APP_SHELL = [
   "./",
   "./index.html",
