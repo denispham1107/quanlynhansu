@@ -6955,7 +6955,7 @@ function createTaskRowElement(prefill = null) {
       </div>
     </div>
     <p class="small-note task-type-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
-    <p class="small-note task-type-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>10 bé</strong> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <strong>30 phút</strong>. Cứ <strong>mỗi 1 bé vào</strong> ở thêm thì sẽ cộng thêm thời gian cho <strong>2 phút</strong>.</p>
+    <p class="small-note task-type-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>Thời gian quy định dọn dẹp chuồng, vệ sinh chung, rửa chén, nấu cơm cho mỗi bé là 4 phút 30 giây.</strong></p>
     <div class="two-col task-row-duration-grid">
       <label class="task-row-field">
         <span class="task-field-label">Số giờ</span>
@@ -11010,8 +11010,7 @@ function renderHotelInfoBox(task) {
   return `
     <div class="hotel-info-box">
       <strong>
-        <span class="hotel-highlight">10 bé</span> ở hotel thì tổng thời gian cho ăn và dọn dẹp của các bạn chăm sóc trong 1 ngày sẽ là <span class="hotel-highlight">30 phút</span>.
-        Cứ <span class="hotel-highlight">mỗi 1 bé vào</span> ở thêm thì sẽ cộng thêm thời gian cho <span class="hotel-highlight">2 phút</span>.
+        Thời gian quy định dọn dẹp chuồng, vệ sinh chung, rửa chén, nấu cơm cho mỗi bé là <span class="hotel-highlight">4 phút 30 giây</span>.
       </strong>
     </div>
   `;
