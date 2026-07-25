@@ -7486,24 +7486,63 @@
       line-height: 1;
     }
 
-    .work-order-settings-card {
+    #workOrderSettingsModal:not(.hidden) {
+      overflow: hidden !important;
+    }
+
+    #workOrderSettingsModal .work-order-settings-card {
       width: min(620px, calc(100vw - 32px));
       max-height: min(86dvh, 760px);
-      overflow: auto;
+      overflow: hidden !important;
+      box-sizing: border-box;
+      border: 1px solid #dbe7f7;
       border-radius: 24px !important;
       background: #ffffff;
+      background-clip: padding-box;
+      isolation: isolate;
+      contain: paint;
+      transform: translateZ(0);
       box-shadow: 0 28px 90px rgba(15, 23, 42, 0.30);
     }
 
+    #workOrderSettingsModal .work-order-settings-scroll {
+      width: 100%;
+      max-height: min(86dvh, 760px);
+      padding: 20px;
+      overflow-x: hidden;
+      overflow-y: auto;
+      box-sizing: border-box;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-gutter: stable;
+    }
+
+    #workOrderSettingsModal .work-order-settings-scroll::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    #workOrderSettingsModal .work-order-settings-scroll::-webkit-scrollbar-track {
+      margin: 18px 0;
+      background: transparent;
+    }
+
+    #workOrderSettingsModal .work-order-settings-scroll::-webkit-scrollbar-thumb {
+      border: 3px solid transparent;
+      border-radius: 999px;
+      background: rgba(100, 116, 139, 0.56);
+      background-clip: content-box;
+    }
+
     .work-order-settings-header {
-      position: sticky;
-      top: 0;
-      z-index: 4;
+      position: static;
+      top: auto;
+      z-index: auto;
       margin: 0;
       padding-bottom: 15px;
       border-bottom: 1px solid #e2e8f0;
-      background: rgba(255, 255, 255, 0.96);
-      backdrop-filter: blur(14px);
+      border-radius: 0 !important;
+      background: transparent;
+      backdrop-filter: none;
     }
 
     .work-order-settings-header h3 {
@@ -7754,15 +7793,15 @@
     }
 
     .work-order-settings-actions {
-      position: sticky;
-      bottom: 0;
-      z-index: 4;
+      position: static;
+      bottom: auto;
+      z-index: auto;
       margin-top: 2px;
       padding-top: 14px;
       padding-bottom: max(2px, env(safe-area-inset-bottom));
       border-top: 1px solid #e2e8f0;
-      background: rgba(255, 255, 255, 0.96);
-      backdrop-filter: blur(14px);
+      background: transparent;
+      backdrop-filter: none;
     }
 
     .settings-save-btn {
@@ -7825,14 +7864,20 @@
         padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
       }
 
-      .work-order-settings-card {
+      #workOrderSettingsModal .work-order-settings-card {
         width: min(calc(100% - 18px), 620px) !important;
         max-height: calc(100dvh - 24px) !important;
         margin: auto !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        border-radius: 22px !important;
+      }
+
+      #workOrderSettingsModal .work-order-settings-scroll {
+        max-height: calc(100dvh - 24px) !important;
         padding: 16px !important;
         overflow-x: hidden !important;
         overflow-y: auto !important;
-        border-radius: 22px !important;
       }
 
       .work-order-setting-section {
@@ -10273,6 +10318,7 @@
   <div id="workOrderSettingsModal" class="modal work-order-settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="workOrderSettingsModalTitle">
     <div class="modal-backdrop" data-close-work-order-settings></div>
     <div class="modal-card small-modal work-order-settings-card">
+      <div class="work-order-settings-scroll">
       <div class="modal-header work-order-settings-header">
         <div>
           <p class="eyebrow">Cài đặt</p>
@@ -10368,6 +10414,7 @@
           <button id="saveWorkOrderSettingsBtn" class="btn primary settings-save-btn" type="submit">Lưu Cài đặt</button>
         </div>
       </form>
+      </div>
     </div>
   </div>
 
