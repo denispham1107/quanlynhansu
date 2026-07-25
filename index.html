@@ -7493,26 +7493,31 @@
     #workOrderSettingsModal .work-order-settings-card {
       width: min(620px, calc(100vw - 32px));
       max-height: min(86dvh, 760px);
+      min-height: 0;
       overflow: hidden !important;
       box-sizing: border-box;
       border: 1px solid #dbe7f7;
       border-radius: 24px !important;
       background: #ffffff;
       background-clip: padding-box;
-      isolation: isolate;
-      contain: paint;
-      transform: translateZ(0);
+      /* Không dùng paint containment / GPU transform ở modal Cài đặt.
+         Một số Safari/Chrome mobile tạo vùng trắng và mất phần đầu khi nội dung checkbox đổi trạng thái. */
+      isolation: auto;
+      contain: none;
+      transform: none;
       box-shadow: 0 28px 90px rgba(15, 23, 42, 0.30);
     }
 
     #workOrderSettingsModal .work-order-settings-scroll {
       width: 100%;
       max-height: min(86dvh, 760px);
+      min-height: 0;
       padding: 20px;
       overflow-x: hidden;
       overflow-y: auto;
       box-sizing: border-box;
       overscroll-behavior: contain;
+      overflow-anchor: none;
       -webkit-overflow-scrolling: touch;
       scrollbar-gutter: stable;
     }
@@ -7640,9 +7645,12 @@
       display: grid;
       gap: 8px;
       max-height: 190px;
+      min-height: 0;
       padding: 9px;
+      overflow-x: hidden;
       overflow-y: auto;
       overscroll-behavior: contain;
+      overflow-anchor: none;
       border: 1px solid #fdba74;
       border-radius: 13px;
       background: #ffffff;
@@ -7656,6 +7664,7 @@
     }
 
     .work-supervision-excluded-option {
+      position: relative;
       display: grid;
       grid-template-columns: 24px minmax(0, 1fr);
       align-items: center;
@@ -7666,6 +7675,7 @@
       border-radius: 11px;
       background: #fffaf5;
       cursor: pointer;
+      overflow: hidden;
       transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
     }
 
@@ -7682,17 +7692,20 @@
 
     .work-supervision-excluded-option input {
       position: absolute;
-      width: 1px;
-      height: 1px;
-      margin: -1px;
+      inset: 0;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+      margin: 0;
       padding: 0;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
       border: 0;
+      border-radius: inherit;
+      opacity: 0;
+      cursor: pointer;
     }
 
     .work-supervision-excluded-check {
+      pointer-events: none;
       display: grid;
       place-items: center;
       width: 24px;
@@ -7718,6 +7731,7 @@
     }
 
     .work-supervision-excluded-name {
+      pointer-events: none;
       min-width: 0;
       color: #0f172a;
       font-size: 13px;
@@ -7987,9 +8001,11 @@
 
       #workOrderSettingsModal .work-order-settings-scroll {
         max-height: calc(100dvh - 24px) !important;
+        min-height: 0 !important;
         padding: 16px !important;
         overflow-x: hidden !important;
         overflow-y: auto !important;
+        overflow-anchor: none !important;
       }
 
       .work-order-setting-section {

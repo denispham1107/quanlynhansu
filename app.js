@@ -8802,7 +8802,21 @@ els.enableWorkSupervision?.addEventListener("change", syncWorkSupervisionSetting
 els.workSupervisionCountdownMinutes?.addEventListener("input", syncWorkSupervisionSettingControls);
 els.workSupervisionExcludedEmployeeList?.addEventListener("change", (event) => {
   if (!event.target?.matches('input[data-work-supervision-excluded-uid]')) return;
+
+  // Giữ nguyên vị trí cuộn khi nội dung trợ giúp thay đổi sau mỗi lần tích chọn.
+  // Tránh Safari/Chrome mobile tự neo vào checkbox rồi tạo vùng trắng hoặc làm mất phần đầu modal.
+  const settingsScroll = els.workOrderSettingsModal?.querySelector('.work-order-settings-scroll');
+  const settingsScrollTop = Number(settingsScroll?.scrollTop || 0);
+  const employeeListScrollTop = Number(els.workSupervisionExcludedEmployeeList?.scrollTop || 0);
+
   syncWorkSupervisionSettingControls();
+
+  window.requestAnimationFrame(() => {
+    if (settingsScroll) settingsScroll.scrollTop = settingsScrollTop;
+    if (els.workSupervisionExcludedEmployeeList) {
+      els.workSupervisionExcludedEmployeeList.scrollTop = employeeListScrollTop;
+    }
+  });
 });
 els.openWorkOrderSettingsBtn?.addEventListener("click", openWorkOrderSettingsPasswordModal);
 
