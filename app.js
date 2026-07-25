@@ -201,6 +201,9 @@ const state = {
     allowOverdueTimeExtension: false,
     workSupervisionEnabled: false,
     workSupervisionCountdownMinutes: 5,
+    workSupervisionExcludedEmployeeUids: [],
+    workSupervisionExcludedEmployeeNames: {},
+    // Giữ hai field cũ để đọc dữ liệu của các bản trước.
     workSupervisionExcludedEmployeeUid: "",
     workSupervisionExcludedEmployeeName: ""
   },
@@ -576,12 +579,45 @@ function normalizeWorkOrderControlSettings(value = {}) {
       && Number(input.workSupervisionCountdownMinutes) <= 30
         ? Number(input.workSupervisionCountdownMinutes)
         : 5,
-    workSupervisionExcludedEmployeeUid: typeof input.workSupervisionExcludedEmployeeUid === "string"
-      ? input.workSupervisionExcludedEmployeeUid.trim()
-      : "",
-    workSupervisionExcludedEmployeeName: typeof input.workSupervisionExcludedEmployeeName === "string"
-      ? input.workSupervisionExcludedEmployeeName.trim()
-      : ""
+    ...(() => {
+      const legacyUid = typeof input.workSupervisionExcludedEmployeeUid === "string"
+        ? input.workSupervisionExcludedEmployeeUid.trim()
+        : "";
+      const rawUids = Array.isArray(input.workSupervisionExcludedEmployeeUids)
+        ? input.workSupervisionExcludedEmployeeUids
+        : (legacyUid ? [legacyUid] : []);
+      const workSupervisionExcludedEmployeeUids = [...new Set(
+        rawUids.map((uid) => String(uid || "").trim()).filter(Boolean)
+      )];
+
+      const names = {};
+      if (input.workSupervisionExcludedEmployeeNames && typeof input.workSupervisionExcludedEmployeeNames === "object" && !Array.isArray(input.workSupervisionExcludedEmployeeNames)) {
+        Object.entries(input.workSupervisionExcludedEmployeeNames).forEach(([uid, name]) => {
+          const safeUid = String(uid || "").trim();
+          const safeName = String(name || "").trim();
+          if (safeUid && safeName) names[safeUid] = safeName;
+        });
+      }
+      if (Array.isArray(input.workSupervisionExcludedEmployees)) {
+        input.workSupervisionExcludedEmployees.forEach((employee) => {
+          const safeUid = String(employee?.uid || "").trim();
+          const safeName = String(employee?.name || "").trim();
+          if (safeUid && safeName) names[safeUid] = safeName;
+        });
+      }
+      const legacyName = typeof input.workSupervisionExcludedEmployeeName === "string"
+        ? input.workSupervisionExcludedEmployeeName.trim()
+        : "";
+      if (legacyUid && legacyName && !names[legacyUid]) names[legacyUid] = legacyName;
+
+      return {
+        workSupervisionExcludedEmployeeUids,
+        workSupervisionExcludedEmployeeNames: names,
+        // Duy trì tương thích với các đoạn code hoặc dữ liệu cũ.
+        workSupervisionExcludedEmployeeUid: workSupervisionExcludedEmployeeUids[0] || "",
+        workSupervisionExcludedEmployeeName: names[workSupervisionExcludedEmployeeUids[0]] || legacyName || ""
+      };
+    })()
   };
 }
 
@@ -724,7 +760,7 @@ const els = {
   enableWorkSupervision: $("#enableWorkSupervision"),
   workSupervisionSettingControls: $("#workSupervisionSettingControls"),
   workSupervisionCountdownMinutes: $("#workSupervisionCountdownMinutes"),
-  workSupervisionExcludedEmployeeUid: $("#workSupervisionExcludedEmployeeUid"),
+  workSupervisionExcludedEmployeeList: $("#workSupervisionExcludedEmployeeList"),
   workSupervisionSettingHelp: $("#workSupervisionSettingHelp"),
   saveWorkOrderSettingsBtn: $("#saveWorkOrderSettingsBtn"),
   adminWorkSupervisionBanner: $("#adminWorkSupervisionBanner"),
@@ -8573,48 +8609,85 @@ function getCurrentFreeEmployeesForWorkSupervisionSettings() {
   return workingEmployees.filter((employee) => !busyUids.has(employee.uid));
 }
 
-function populateWorkSupervisionExcludedEmployeeOptions(settings = getWorkOrderControlSettings()) {
-  const select = els.workSupervisionExcludedEmployeeUid;
-  if (!select) return;
+function getSelectedWorkSupervisionExcludedEmployeeUids() {
+  if (!els.workSupervisionExcludedEmployeeList) return [];
+  return [...els.workSupervisionExcludedEmployeeList.querySelectorAll('input[data-work-supervision-excluded-uid]:checked')]
+    .map((input) => String(input.value || "").trim())
+    .filter(Boolean);
+}
 
-  const selectedUid = String(select.value || settings.workSupervisionExcludedEmployeeUid || "").trim();
+function populateWorkSupervisionExcludedEmployeeOptions(settings = getWorkOrderControlSettings()) {
+  const list = els.workSupervisionExcludedEmployeeList;
+  if (!list) return;
+
+  const checkedBeforeRender = getSelectedWorkSupervisionExcludedEmployeeUids();
+  const hasRenderedBefore = list.dataset.initialized === "true";
+  const selectedUids = hasRenderedBefore
+    ? checkedBeforeRender
+    : [...(settings.workSupervisionExcludedEmployeeUids || [])];
+  const selectedSet = new Set(selectedUids);
   const freeEmployees = getCurrentFreeEmployeesForWorkSupervisionSettings()
     .slice()
     .sort((a, b) => getEmployeeSummaryName(a).localeCompare(getEmployeeSummaryName(b), "vi"));
   const optionEmployees = [...freeEmployees];
 
-  if (selectedUid && !optionEmployees.some((employee) => employee.uid === selectedUid)) {
-    const storedEmployee = state.employees.find((employee) => employee.uid === selectedUid);
-    optionEmployees.unshift(storedEmployee || {
-      uid: selectedUid,
-      name: settings.workSupervisionExcludedEmployeeName || "Nhân viên đã chọn"
+  selectedUids.forEach((uid) => {
+    if (optionEmployees.some((employee) => employee.uid === uid)) return;
+    const storedEmployee = state.employees.find((employee) => employee.uid === uid);
+    optionEmployees.push(storedEmployee || {
+      uid,
+      name: settings.workSupervisionExcludedEmployeeNames?.[uid] || "Nhân viên đã chọn"
     });
+  });
+
+  optionEmployees.sort((a, b) => getEmployeeSummaryName(a).localeCompare(getEmployeeSummaryName(b), "vi"));
+
+  if (!optionEmployees.length) {
+    list.innerHTML = '<p class="work-supervision-excluded-empty">Hiện chưa có nhân viên nào thuộc nhóm chưa được giao việc.</p>';
+    list.dataset.initialized = "true";
+    return;
   }
 
-  select.innerHTML = [
-    '<option value="">Không miễn trừ nhân viên nào</option>',
-    ...optionEmployees.map((employee) => {
-      const suffix = freeEmployees.some((item) => item.uid === employee.uid)
-        ? ""
-        : " (hiện không thuộc nhóm chưa có việc)";
-      return `<option value="${escapeHtml(employee.uid)}">${escapeHtml(getEmployeeSummaryName(employee))}${escapeHtml(suffix)}</option>`;
-    })
-  ].join("");
-  select.value = selectedUid;
+  const freeUidSet = new Set(freeEmployees.map((employee) => employee.uid));
+  list.innerHTML = optionEmployees.map((employee) => {
+    const uid = String(employee.uid || "").trim();
+    const isChecked = selectedSet.has(uid);
+    const unavailableSuffix = freeUidSet.has(uid) ? "" : " · hiện không thuộc nhóm chưa có việc";
+    return `
+      <label class="work-supervision-excluded-option${isChecked ? " is-selected" : ""}">
+        <input
+          type="checkbox"
+          value="${escapeHtml(uid)}"
+          data-work-supervision-excluded-uid
+          ${isChecked ? "checked" : ""}
+        />
+        <span class="work-supervision-excluded-check" aria-hidden="true">✓</span>
+        <span class="work-supervision-excluded-name">${escapeHtml(getEmployeeSummaryName(employee))}</span>
+        ${unavailableSuffix ? `<small>${escapeHtml(unavailableSuffix.replace(/^ · /, ""))}</small>` : ""}
+      </label>
+    `;
+  }).join("");
+  list.dataset.initialized = "true";
 }
 
 function syncWorkSupervisionSettingControls() {
   const enabled = els.enableWorkSupervision?.checked === true;
   els.workSupervisionSettingControls?.classList.toggle("is-disabled", !enabled);
   if (els.workSupervisionCountdownMinutes) els.workSupervisionCountdownMinutes.disabled = !enabled;
-  if (els.workSupervisionExcludedEmployeeUid) els.workSupervisionExcludedEmployeeUid.disabled = !enabled;
+  els.workSupervisionExcludedEmployeeList?.querySelectorAll('input[data-work-supervision-excluded-uid]').forEach((input) => {
+    input.disabled = !enabled;
+    input.closest('.work-supervision-excluded-option')?.classList.toggle('is-selected', input.checked);
+  });
 
   const minutes = Math.min(30, Math.max(1, Math.trunc(Number(els.workSupervisionCountdownMinutes?.value || 5))));
   if (els.workSupervisionSettingHelp) {
-    const excludedName = els.workSupervisionExcludedEmployeeUid?.selectedOptions?.[0]?.textContent || "";
-    const hasExcludedEmployee = Boolean(els.workSupervisionExcludedEmployeeUid?.value);
-    els.workSupervisionSettingHelp.textContent = hasExcludedEmployee
-      ? `Bộ đếm màu đỏ kéo dài ${minutes} phút. ${excludedName} không bị giám sát và không được tạo Phiếu nghỉ trưa tự động.`
+    const selectedUids = getSelectedWorkSupervisionExcludedEmployeeUids();
+    const selectedNames = selectedUids.map((uid) => {
+      const input = els.workSupervisionExcludedEmployeeList?.querySelector(`input[data-work-supervision-excluded-uid][value="${CSS.escape(uid)}"]`);
+      return input?.closest('.work-supervision-excluded-option')?.querySelector('.work-supervision-excluded-name')?.textContent?.trim() || uid;
+    });
+    els.workSupervisionSettingHelp.textContent = selectedNames.length
+      ? `Bộ đếm màu đỏ kéo dài ${minutes} phút. Đã miễn giám sát ${selectedNames.length} nhân viên: ${selectedNames.join(", ")}. Những người này không bị tạo Phiếu nghỉ trưa tự động.`
       : `Bộ đếm màu đỏ kéo dài ${minutes} phút và hiển thị trên trang Admin cùng đúng các nhân viên thuộc nhóm giám sát.`;
   }
 }
@@ -8644,6 +8717,9 @@ function openWorkOrderSettingsModal() {
   }
   if (els.workSupervisionCountdownMinutes) {
     els.workSupervisionCountdownMinutes.value = String(settings.workSupervisionCountdownMinutes || 5);
+  }
+  if (els.workSupervisionExcludedEmployeeList) {
+    delete els.workSupervisionExcludedEmployeeList.dataset.initialized;
   }
   populateWorkSupervisionExcludedEmployeeOptions(settings);
 
@@ -8724,7 +8800,10 @@ els.workOrderSettingsPasswordForm?.addEventListener("submit", async (event) => {
 els.enableMaxExtendMinutes?.addEventListener("change", syncWorkOrderSettingsLimitControls);
 els.enableWorkSupervision?.addEventListener("change", syncWorkSupervisionSettingControls);
 els.workSupervisionCountdownMinutes?.addEventListener("input", syncWorkSupervisionSettingControls);
-els.workSupervisionExcludedEmployeeUid?.addEventListener("change", syncWorkSupervisionSettingControls);
+els.workSupervisionExcludedEmployeeList?.addEventListener("change", (event) => {
+  if (!event.target?.matches('input[data-work-supervision-excluded-uid]')) return;
+  syncWorkSupervisionSettingControls();
+});
 els.openWorkOrderSettingsBtn?.addEventListener("click", openWorkOrderSettingsPasswordModal);
 
 document.querySelectorAll("[data-close-work-order-settings-password]").forEach((button) => {
@@ -8798,7 +8877,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true,
       workSupervisionEnabled: supervisionEnabled,
       workSupervisionCountdownMinutes: supervisionCountdownMinutes,
-      workSupervisionExcludedEmployeeUid: String(els.workSupervisionExcludedEmployeeUid?.value || "").trim()
+      workSupervisionExcludedEmployeeUids: getSelectedWorkSupervisionExcludedEmployeeUids()
     });
 
     const savedSettings = normalizeWorkOrderControlSettings(result?.data?.settings || {});
