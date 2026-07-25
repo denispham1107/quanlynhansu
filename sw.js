@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260726-per-employee-supervision-v34";
+const CACHE_NAME = "culao-task-shell-v20260726-fix-supervision-mobile-layout-v35";
 const APP_SHELL = [
   "./",
   "./index.html",
