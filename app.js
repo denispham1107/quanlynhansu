@@ -246,7 +246,10 @@ const state = {
   taskReviewAlertEnableInFlight: false,
   taskReviewAlertNeedsGestureToastShown: false,
   taskReviewAlertAutoEnablePending: false,
-  taskReviewAlertAutoEnableAttempted: false
+  taskReviewAlertAutoEnableAttempted: false,
+  adminTaskSnapshotReady: false,
+  adminAutoScrollSubmittedTaskId: "",
+  adminAutoScrollSubmittedTaskTimer: null
 };
 
 
@@ -2214,6 +2217,72 @@ async function showSystemNotification(notification) {
 els.enableNotificationsBtn?.addEventListener("click", requestNotificationPermission);
 els.taskReviewAlertEnableBtn?.addEventListener("click", enableTaskReviewAlertFromUserGesture);
 els.mobileTaskReviewAlertEnableBtn?.addEventListener("click", enableTaskReviewAlertFromUserGesture);
+
+function getTaskSubmittedAtMs(task) {
+  return timestampToDate(task?.submittedAt)?.getTime()
+    || timestampToDate(task?.updatedAt)?.getTime()
+    || timestampToDate(task?.createdAt)?.getTime()
+    || 0;
+}
+
+function scrollToSubmittedTaskWithRetry(taskId, attempt = 0) {
+  if (!taskId || state.adminAutoScrollSubmittedTaskId !== taskId) return;
+
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task || task.status !== "submitted" || !state.user || !isAdminProfile()) {
+    state.adminAutoScrollSubmittedTaskId = "";
+    return;
+  }
+
+  if (scrollToTaskCard(taskId)) {
+    state.adminAutoScrollSubmittedTaskId = "";
+    return;
+  }
+
+  if (attempt >= 10) {
+    state.adminAutoScrollSubmittedTaskId = "";
+    return;
+  }
+
+  window.setTimeout(() => scrollToSubmittedTaskWithRetry(taskId, attempt + 1), 120);
+}
+
+function scheduleAdminAutoScrollToSubmittedTask(tasks = []) {
+  if (!state.user || !isAdminProfile()) return;
+
+  const target = tasks
+    .filter((task) => task?.id && task.status === "submitted")
+    .sort((a, b) => getTaskSubmittedAtMs(b) - getTaskSubmittedAtMs(a))[0];
+
+  if (!target) return;
+
+  state.adminAutoScrollSubmittedTaskId = target.id;
+  if (state.adminAutoScrollSubmittedTaskTimer) {
+    window.clearTimeout(state.adminAutoScrollSubmittedTaskTimer);
+  }
+
+  state.adminAutoScrollSubmittedTaskTimer = window.setTimeout(() => {
+    state.adminAutoScrollSubmittedTaskTimer = null;
+
+    const freshTask = state.tasks.find((item) => item.id === target.id);
+    if (!freshTask || freshTask.status !== "submitted" || !state.user || !isAdminProfile()) {
+      state.adminAutoScrollSubmittedTaskId = "";
+      return;
+    }
+
+    // Đưa Admin về đúng danh sách, tự bỏ các bộ lọc có thể đang che công việc
+    // rồi cuộn tới chính xác thẻ vừa được nhân viên báo hoàn thành.
+    closeChatDirectory();
+    els.notificationPanel?.classList.add("hidden");
+    setMobileTopbarMenuOpen(false);
+    setMobileDataMenuOpen(false);
+    showTaskInCurrentDashboard(freshTask);
+
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => scrollToSubmittedTaskWithRetry(target.id), 90);
+    });
+  }, 80);
+}
 
 function queuePushTaskOpen(taskId) {
   const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
@@ -5130,12 +5199,41 @@ function setupAdminDashboard() {
 
   const tasksQuery = query(collection(db, "tasks"), orderBy("createdAt", "desc"));
 
+  state.adminTaskSnapshotReady = false;
+  state.adminAutoScrollSubmittedTaskId = "";
+  if (state.adminAutoScrollSubmittedTaskTimer) {
+    window.clearTimeout(state.adminAutoScrollSubmittedTaskTimer);
+    state.adminAutoScrollSubmittedTaskTimer = null;
+  }
+
   const unsubTasks = onSnapshot(
     tasksQuery,
     async (snapshot) => {
-      state.tasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      const previousStatusById = new Map(
+        state.tasks.map((task) => [task.id, task.status])
+      );
+      const nextTasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      const newlySubmittedTasks = state.adminTaskSnapshotReady && isAdminProfile()
+        ? snapshot.docChanges()
+          .filter((change) => ["added", "modified"].includes(change.type))
+          .map((change) => ({ id: change.doc.id, ...change.doc.data() }))
+          .filter((task) => (
+            task.status === "submitted"
+            && previousStatusById.get(task.id) !== "submitted"
+          ))
+        : [];
+
+      state.tasks = nextTasks;
       renderAdminTasks();
       syncTaskReviewAlertSound();
+
+      if (!state.adminTaskSnapshotReady) {
+        // Không tự cuộn khi Admin vừa đăng nhập và snapshot đầu tiên chứa các
+        // công việc đã chờ duyệt từ trước. Chỉ phản ứng với lần chuyển trạng thái mới.
+        state.adminTaskSnapshotReady = true;
+      } else if (newlySubmittedTasks.length) {
+        scheduleAdminAutoScrollToSubmittedTask(newlySubmittedTasks);
+      }
 
       // Chỉ tài khoản Admin tự đồng bộ trạng thái quá hạn vào database.
       // Giám sát vẫn nhìn thấy trạng thái tính toán realtime nhưng không tự ghi dữ liệu nếu không phải Admin.
