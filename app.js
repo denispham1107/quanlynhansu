@@ -201,6 +201,7 @@ const state = {
     allowOverdueTimeExtension: false,
     workSupervisionEnabled: false,
     workSupervisionCountdownMinutes: 5,
+    workSupervisionLunchCreditMinutes: 5,
     workSupervisionExcludedEmployeeUids: [],
     workSupervisionExcludedEmployeeNames: {},
     // Giữ hai field cũ để đọc dữ liệu của các bản trước.
@@ -583,6 +584,17 @@ function normalizeWorkOrderControlSettings(value = {}) {
       && Number(input.workSupervisionCountdownMinutes) <= 30
         ? Number(input.workSupervisionCountdownMinutes)
         : 5,
+    workSupervisionLunchCreditMinutes: Number.isInteger(Number(input.workSupervisionLunchCreditMinutes))
+      && Number(input.workSupervisionLunchCreditMinutes) >= 0
+      && Number(input.workSupervisionLunchCreditMinutes) <= 30
+        ? Number(input.workSupervisionLunchCreditMinutes)
+        : (
+          Number.isInteger(Number(input.workSupervisionCountdownMinutes))
+          && Number(input.workSupervisionCountdownMinutes) >= 1
+          && Number(input.workSupervisionCountdownMinutes) <= 30
+            ? Number(input.workSupervisionCountdownMinutes)
+            : 5
+        ),
     ...(() => {
       const legacyUid = typeof input.workSupervisionExcludedEmployeeUid === "string"
         ? input.workSupervisionExcludedEmployeeUid.trim()
@@ -764,6 +776,7 @@ const els = {
   enableWorkSupervision: $("#enableWorkSupervision"),
   workSupervisionSettingControls: $("#workSupervisionSettingControls"),
   workSupervisionCountdownMinutes: $("#workSupervisionCountdownMinutes"),
+  workSupervisionLunchCreditMinutes: $("#workSupervisionLunchCreditMinutes"),
   workSupervisionExcludedEmployeeList: $("#workSupervisionExcludedEmployeeList"),
   workSupervisionSettingHelp: $("#workSupervisionSettingHelp"),
   saveWorkOrderSettingsBtn: $("#saveWorkOrderSettingsBtn"),
@@ -8936,12 +8949,14 @@ function syncWorkSupervisionSettingControls() {
   const enabled = els.enableWorkSupervision?.checked === true;
   els.workSupervisionSettingControls?.classList.toggle("is-disabled", !enabled);
   if (els.workSupervisionCountdownMinutes) els.workSupervisionCountdownMinutes.disabled = !enabled;
+  if (els.workSupervisionLunchCreditMinutes) els.workSupervisionLunchCreditMinutes.disabled = !enabled;
   els.workSupervisionExcludedEmployeeList?.querySelectorAll('input[data-work-supervision-excluded-uid]').forEach((input) => {
     input.disabled = !enabled;
     input.closest('.work-supervision-excluded-option')?.classList.toggle('is-selected', input.checked);
   });
 
   const minutes = Math.min(30, Math.max(1, Math.trunc(Number(els.workSupervisionCountdownMinutes?.value || 5))));
+  const lunchCreditMinutes = Math.min(30, Math.max(0, Math.trunc(Number(els.workSupervisionLunchCreditMinutes?.value || 0))));
   if (els.workSupervisionSettingHelp) {
     const selectedUids = getSelectedWorkSupervisionExcludedEmployeeUids();
     const selectedNames = selectedUids.map((uid) => {
@@ -8949,8 +8964,8 @@ function syncWorkSupervisionSettingControls() {
       return input?.closest('.work-supervision-excluded-option')?.querySelector('.work-supervision-excluded-name')?.textContent?.trim() || uid;
     });
     els.workSupervisionSettingHelp.textContent = selectedNames.length
-      ? `Mỗi nhân viên có một bộ đếm riêng kéo dài ${minutes} phút. Đã miễn giám sát ${selectedNames.length} nhân viên: ${selectedNames.join(", ")}. Những người này không bị tạo Phiếu nghỉ trưa tự động.`
-      : `Mỗi nhân viên thuộc diện giám sát có một bộ đếm riêng kéo dài ${minutes} phút. Trang Admin thấy toàn bộ bộ đếm; mỗi nhân viên chỉ thấy bộ đếm của chính mình.`;
+      ? `Mỗi nhân viên có một bộ đếm riêng kéo dài ${minutes} phút. Khi hết giờ, Phiếu nghỉ trưa được cộng sẵn ${lunchCreditMinutes} phút. Đã miễn giám sát ${selectedNames.length} nhân viên: ${selectedNames.join(", ")}.`
+      : `Mỗi nhân viên thuộc diện giám sát có một bộ đếm riêng kéo dài ${minutes} phút. Khi hết giờ, Phiếu nghỉ trưa được cộng sẵn ${lunchCreditMinutes} phút. Trang Admin thấy toàn bộ bộ đếm; mỗi nhân viên chỉ thấy bộ đếm của chính mình.`;
   }
 }
 
@@ -8979,6 +8994,13 @@ function openWorkOrderSettingsModal() {
   }
   if (els.workSupervisionCountdownMinutes) {
     els.workSupervisionCountdownMinutes.value = String(settings.workSupervisionCountdownMinutes || 5);
+  }
+  if (els.workSupervisionLunchCreditMinutes) {
+    els.workSupervisionLunchCreditMinutes.value = String(
+      Number.isInteger(Number(settings.workSupervisionLunchCreditMinutes))
+        ? Number(settings.workSupervisionLunchCreditMinutes)
+        : Number(settings.workSupervisionCountdownMinutes || 5)
+    );
   }
   if (els.workSupervisionExcludedEmployeeList) {
     delete els.workSupervisionExcludedEmployeeList.dataset.initialized;
@@ -9062,6 +9084,7 @@ els.workOrderSettingsPasswordForm?.addEventListener("submit", async (event) => {
 els.enableMaxExtendMinutes?.addEventListener("change", syncWorkOrderSettingsLimitControls);
 els.enableWorkSupervision?.addEventListener("change", syncWorkSupervisionSettingControls);
 els.workSupervisionCountdownMinutes?.addEventListener("input", syncWorkSupervisionSettingControls);
+els.workSupervisionLunchCreditMinutes?.addEventListener("input", syncWorkSupervisionSettingControls);
 els.workSupervisionExcludedEmployeeList?.addEventListener("change", (event) => {
   if (!event.target?.matches('input[data-work-supervision-excluded-uid]')) return;
 
@@ -9132,6 +9155,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
 
   const supervisionEnabled = els.enableWorkSupervision?.checked === true;
   const supervisionCountdownMinutes = Number(els.workSupervisionCountdownMinutes?.value || 5);
+  const supervisionLunchCreditMinutes = Number(els.workSupervisionLunchCreditMinutes?.value || 0);
   if (
     supervisionEnabled
     && (!Number.isInteger(supervisionCountdownMinutes)
@@ -9140,6 +9164,16 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
   ) {
     toast("Thời gian Giám sát công việc phải là số nguyên từ 1 đến 30 phút.", "error");
     els.workSupervisionCountdownMinutes?.focus({ preventScroll: true });
+    return;
+  }
+  if (
+    supervisionEnabled
+    && (!Number.isInteger(supervisionLunchCreditMinutes)
+      || supervisionLunchCreditMinutes < 0
+      || supervisionLunchCreditMinutes > 30)
+  ) {
+    toast("Số phút cộng sẵn vào Phiếu nghỉ trưa phải là số nguyên từ 0 đến 30 phút.", "error");
+    els.workSupervisionLunchCreditMinutes?.focus({ preventScroll: true });
     return;
   }
 
@@ -9153,6 +9187,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true,
       workSupervisionEnabled: supervisionEnabled,
       workSupervisionCountdownMinutes: supervisionCountdownMinutes,
+      workSupervisionLunchCreditMinutes: supervisionLunchCreditMinutes,
       workSupervisionExcludedEmployeeUids: getSelectedWorkSupervisionExcludedEmployeeUids()
     });
 
@@ -9822,11 +9857,16 @@ function getWorkSupervisionEmployeeReminderContext() {
 
   if (remainingMs <= 0) return null;
 
+  const lunchCreditMinutes = Math.min(30, Math.max(0, Math.trunc(Number(
+    data.lunchCreditMinutes ?? getWorkOrderControlSettings().workSupervisionLunchCreditMinutes ?? countdownMinutes
+  ))));
+
   return {
     data,
     cycleId,
     employeeUid,
     countdownMinutes,
+    lunchCreditMinutes,
     startedAtMs,
     remainingMs
   };
@@ -9836,7 +9876,7 @@ function showWorkSupervisionEmployeeReminder(context) {
   if (!context || context.remainingMs <= 0) return;
   const remainingText = formatWorkSupervisionCountdown(context.remainingMs);
   toast(
-    `Bạn đang được Giám sát công việc. Bộ đếm riêng của bạn còn ${remainingText}. Nếu hết thời gian mà vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa tự động và tính sẵn ${context.countdownMinutes} phút.`,
+    `Bạn đang được Giám sát công việc. Bộ đếm riêng của bạn còn ${remainingText}. Nếu hết thời gian mà vẫn chưa nhận việc mới, hệ thống sẽ tạo Phiếu nghỉ trưa tự động và cộng sẵn ${context.lunchCreditMinutes} phút theo Cài đặt.`,
     "warning"
   );
 }
@@ -9978,6 +10018,9 @@ function renderWorkSupervisionCountdown() {
     const countdownMinutes = Math.min(30, Math.max(1, Math.trunc(Number(
       data.countdownMinutes || getWorkOrderControlSettings().workSupervisionCountdownMinutes || 5
     ))));
+    const lunchCreditMinutes = Math.min(30, Math.max(0, Math.trunc(Number(
+      data.lunchCreditMinutes ?? getWorkOrderControlSettings().workSupervisionLunchCreditMinutes ?? countdownMinutes
+    ))));
     if (els.employeeWorkSupervisionCountdown) {
       els.employeeWorkSupervisionCountdown.textContent = waitingForServer
         ? "00:00"
@@ -9985,8 +10028,8 @@ function renderWorkSupervisionCountdown() {
     }
     if (els.employeeWorkSupervisionMessage) {
       els.employeeWorkSupervisionMessage.textContent = waitingForServer
-        ? `Bộ đếm riêng ${countdownMinutes} phút của bạn đã hết. Hệ thống đang kiểm tra và tạo Phiếu nghỉ trưa tự động.`
-        : `Đây là bộ đếm riêng của bạn. Nếu hết ${countdownMinutes} phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn ${countdownMinutes} phút đã chờ.`;
+        ? `Bộ đếm riêng ${countdownMinutes} phút của bạn đã hết. Hệ thống đang kiểm tra và tạo Phiếu nghỉ trưa tự động, cộng sẵn ${lunchCreditMinutes} phút theo Cài đặt.`
+        : `Đây là bộ đếm riêng của bạn. Nếu hết ${countdownMinutes} phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn ${lunchCreditMinutes} phút theo Cài đặt.`;
     }
 
     if (waitingForServer) {
@@ -11830,10 +11873,10 @@ function renderWorkSupervisionLunchCreditBox(task) {
 
   return `
     <div class="work-supervision-lunch-credit-box">
-      <strong>⏱ Đã tính sẵn ${initialMinutes} phút nghỉ</strong>
+      <strong>⏱ Đã cộng sẵn ${initialMinutes} phút nghỉ</strong>
       <span>${task.status === "completed"
-        ? `Tổng thời gian nghỉ thực tế đã bao gồm ${initialMinutes} phút đếm ngược trước khi Phiếu được tạo.`
-        : `Khi bấm “Hoàn thành” hoặc khi Admin kết thúc Phiếu, hệ thống sẽ cộng thêm ${initialMinutes} phút đã đếm ngược vào tổng thời gian nghỉ.`}</span>
+        ? `Tổng thời gian nghỉ thực tế đã bao gồm ${initialMinutes} phút do Admin cài đặt cộng thêm.`
+        : `Khi bấm “Hoàn thành” hoặc khi Admin kết thúc Phiếu, hệ thống sẽ cộng thêm ${initialMinutes} phút do Admin cài đặt vào tổng thời gian nghỉ.`}</span>
     </div>
   `;
 }
@@ -15292,8 +15335,9 @@ async function approveTask(taskId, button) {
     const approvedDate = new Date();
     // Riêng Phiếu nghỉ trưa tự động của “Giám sát công việc”, thời gian thực tế
     // phải chốt tại lúc nhân viên bấm “Hoàn thành”, đồng thời cộng thêm số phút
-    // đếm ngược đã được ghi trong accumulatedWorkedMs. Không cộng thêm thời gian chờ Admin duyệt.
-    const resultCalculatedAt = isLunchBreakTask(task) && Number(task.workSupervisionInitialMinutes || 0) > 0
+    // do Admin cài đặt đã được ghi trong accumulatedWorkedMs. Kể cả cài đặt là 0 phút,
+    // không cộng thêm thời gian chờ Admin duyệt.
+    const resultCalculatedAt = isLunchBreakTask(task) && task.autoCreatedByWorkSupervision === true
       ? (timestampToDate(task.submittedAt) || approvedDate)
       : approvedDate;
     const result = calculateResultAt(task, resultCalculatedAt);

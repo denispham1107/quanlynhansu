@@ -7599,6 +7599,13 @@
       opacity: 0.56;
     }
 
+    .work-supervision-time-fields {
+      display: grid;
+      align-content: start;
+      gap: 14px;
+      min-width: 0;
+    }
+
     .work-supervision-setting-field {
       display: grid;
       gap: 7px;
@@ -10125,7 +10132,7 @@
       <section id="employeeWorkSupervisionBanner" class="work-supervision-countdown-banner hidden" role="status" aria-live="polite">
         <div class="work-supervision-countdown-copy">
           <strong>⏱ Bạn đang được giám sát thời gian chờ việc</strong>
-          <span id="employeeWorkSupervisionMessage">Nếu hết thời gian đã cài đặt mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và tính sẵn thời gian đã chờ.</span>
+          <span id="employeeWorkSupervisionMessage">Nếu hết thời gian đã cài đặt mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn số phút do Admin cài đặt.</span>
         </div>
         <strong id="employeeWorkSupervisionCountdown" class="work-supervision-countdown-value">00:00</strong>
       </section>
@@ -10583,14 +10590,25 @@
           </label>
 
           <div id="workSupervisionSettingControls" class="work-supervision-setting-controls">
-            <label class="work-supervision-setting-field" for="workSupervisionCountdownMinutes">
-              <span>Thời gian đếm ngược</span>
-              <div class="work-supervision-minute-input-wrap">
-                <input id="workSupervisionCountdownMinutes" type="number" min="1" max="30" step="1" inputmode="numeric" value="5" />
-                <strong>phút</strong>
-              </div>
-              <small>Nhập từ 1 đến 30 phút. Số phút này cũng được tính sẵn vào Phiếu nghỉ trưa tự động.</small>
-            </label>
+            <div class="work-supervision-time-fields">
+              <label class="work-supervision-setting-field" for="workSupervisionCountdownMinutes">
+                <span>Thời gian đếm ngược</span>
+                <div class="work-supervision-minute-input-wrap">
+                  <input id="workSupervisionCountdownMinutes" type="number" min="1" max="30" step="1" inputmode="numeric" value="5" />
+                  <strong>phút</strong>
+                </div>
+                <small>Nhập từ 1 đến 30 phút. Đây chỉ là thời gian đếm ngược trước khi tạo Phiếu nghỉ trưa.</small>
+              </label>
+
+              <label class="work-supervision-setting-field" for="workSupervisionLunchCreditMinutes">
+                <span>Số phút cộng thêm vào Phiếu nghỉ trưa</span>
+                <div class="work-supervision-minute-input-wrap">
+                  <input id="workSupervisionLunchCreditMinutes" type="number" min="0" max="30" step="1" inputmode="numeric" value="5" />
+                  <strong>phút</strong>
+                </div>
+                <small>Nhập từ 0 đến 30 phút. Khi bộ đếm kết thúc, số phút này được cộng sẵn vào Phiếu nghỉ trưa; không còn tự lấy bằng thời gian đếm ngược.</small>
+              </label>
+            </div>
 
             <div class="work-supervision-setting-field">
               <span>Nhân viên không bị giám sát</span>
