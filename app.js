@@ -7067,7 +7067,7 @@ function createTaskRowElement(prefill = null) {
         </label>
         <label class="checkbox-line ship-line">
           <input type="checkbox" class="row-ship" />
-          <span>Ship</span>
+          <span>Ship (CV khác)</span>
         </label>
         <label class="checkbox-line cleaning-line">
           <input type="checkbox" class="row-cleaning" />
@@ -10123,7 +10123,7 @@ function getCompletedTypeFilterLabel(value) {
     normal: "Công việc bình thường",
     lunch_break: "Đã nghỉ trưa",
     hotel: "Hotel đã làm",
-    ship: "Đã ship"
+    ship: "Đã Ship - CV khác"
   };
 
   return labels[value] || "";
@@ -10777,7 +10777,7 @@ function getAdminWorkOrderSearchStatusScopeLabel() {
     waiting_assignee: "Chờ chọn người",
     lunch_break: "Nghỉ trưa",
     hotel: "Hotel",
-    ship: "Đang ship",
+    ship: "Đang Ship - CV khác",
     doing: "Đang làm",
     near_due: "Gần hết giờ",
     overdue: "Quá hạn",
