@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260726-auto-scroll-submitted-task-v36";
+const CACHE_NAME = "culao-task-shell-v20260726-work-order-created-time-v37";
 const APP_SHELL = [
   "./",
   "./index.html",

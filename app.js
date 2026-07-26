@@ -1113,6 +1113,17 @@ function formatFullDateTime(value) {
   return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
+function formatTimeWithSeconds(value) {
+  const date = timestampToDate(value);
+  if (!date) return "";
+
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+
+  return `${hours}:${minutes}:${seconds}`;
+}
+
 function formatFileSize(bytes = 0) {
   const size = Number(bytes) || 0;
   if (size < 1024) return `${size} B`;
@@ -11042,7 +11053,8 @@ function renderTicketGroup(group, mode = "admin") {
   // Admin có thể thấy toàn bộ task trong phiếu, nhưng Nhân viên chỉ đọc được task của chính mình.
   // Vì vậy tiêu đề phiếu phải dùng tổng số công việc lưu ở workOrders.taskCount, không dùng số task đang hiển thị.
   const taskCount = Number(group.totalTaskCount || group.tasks.length || 0);
-  const ticketTitle = `${group.name} - ${taskCount} công việc`;
+  const createdTimeText = formatTimeWithSeconds(group.createdAtMs);
+  const ticketTitle = `${group.name}${createdTimeText ? ` • ${createdTimeText}` : ""} - ${taskCount} công việc`;
   const actionButtons = [];
 
   if (mode === "admin" && isDraft) {
