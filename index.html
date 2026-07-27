@@ -9623,6 +9623,58 @@
     font-weight: 800;
   }
 
+  .work-assignment-history-title-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .work-assignment-history-delete-all-btn,
+  .work-assignment-history-delete-btn {
+    appearance: none;
+    border: 1px solid rgba(185, 28, 28, .35);
+    font-family: inherit;
+    font-weight: 900;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: transform .16s ease, filter .16s ease, opacity .16s ease;
+  }
+
+  .work-assignment-history-delete-all-btn {
+    padding: 7px 10px;
+    border-radius: 11px;
+    background: #b91c1c;
+    color: #fff;
+    font-size: 11px;
+    white-space: nowrap;
+    box-shadow: 0 6px 14px rgba(185, 28, 28, .18);
+  }
+
+  .work-assignment-history-delete-btn {
+    flex: 0 0 auto;
+    padding: 7px 9px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .9);
+    color: #b91c1c;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  .work-assignment-history-delete-all-btn:hover,
+  .work-assignment-history-delete-btn:hover {
+    filter: brightness(.96);
+    transform: translateY(-1px);
+  }
+
+  .work-assignment-history-delete-all-btn:disabled,
+  .work-assignment-history-delete-btn:disabled {
+    cursor: wait;
+    opacity: .65;
+    transform: none;
+  }
+
   .work-assignment-history-list {
     display: grid;
     gap: 8px;
@@ -9641,6 +9693,14 @@
     color: #7c2d12;
     box-shadow: 0 8px 20px rgba(194, 65, 12, .10);
     box-sizing: border-box;
+  }
+
+  .work-assignment-history-row-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .work-assignment-history-row strong {
@@ -9669,6 +9729,7 @@
     }
 
     .work-assignment-history-title {
+      align-items: flex-start;
       padding: 0 2px;
     }
 
@@ -9680,17 +9741,41 @@
       font-size: 10.5px;
     }
 
+    .work-assignment-history-title-actions {
+      align-items: flex-end;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .work-assignment-history-delete-all-btn {
+      padding: 6px 8px;
+      border-radius: 9px;
+      font-size: 9.5px;
+    }
+
     .work-assignment-history-row {
-      align-items: flex-start;
+      align-items: stretch;
+      flex-direction: column;
       gap: 8px;
       padding: 9px 10px;
       border-left-width: 5px;
       border-radius: 12px;
     }
 
+    .work-assignment-history-row-content {
+      align-items: flex-start;
+      gap: 8px;
+    }
+
     .work-assignment-history-row strong {
       font-size: 11.5px;
       line-height: 1.45;
+    }
+
+    .work-assignment-history-delete-btn {
+      align-self: flex-end;
+      padding: 6px 8px;
+      font-size: 9.5px;
     }
 
     .work-assignment-history-badge {

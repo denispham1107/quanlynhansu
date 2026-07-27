@@ -11095,9 +11095,78 @@ function getFilteredWorkAssignmentHistory(searchQuery = state.adminWorkOrderSear
     ));
 }
 
+async function deleteWorkAssignmentHistoryItem(historyId, button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin mới có thể xóa Lịch sử giao việc.", "error");
+    return;
+  }
+
+  const safeHistoryId = String(historyId || "").trim();
+  if (!safeHistoryId) return;
+
+  const history = (state.workAssignmentHistory || []).find((item) => item.id === safeHistoryId);
+  const historyLabel = String(history?.workOrderName || "dòng Lịch sử giao việc này").trim();
+  const confirmed = await requestDestructiveConfirmation({
+    title: "Xóa Lịch sử giao việc?",
+    message: `Bạn có thực sự muốn xóa lịch sử giao việc của Phiếu “${historyLabel}” không?`,
+    details: "Chỉ dòng lịch sử này bị xóa. Phiếu công việc và công việc liên quan vẫn được giữ nguyên.",
+    confirmLabel: "Xóa lịch sử"
+  });
+
+  if (!confirmed) return;
+
+  setButtonLoading(button, true, "Đang xóa...");
+
+  try {
+    await deleteDoc(doc(db, "workAssignmentHistory", safeHistoryId));
+    toast("Đã xóa một dòng Lịch sử giao việc.", "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không xóa được Lịch sử giao việc.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function deleteAllWorkAssignmentHistory(button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin mới có thể xóa toàn bộ Lịch sử giao việc.", "error");
+    return;
+  }
+
+  const historyCount = Number((state.workAssignmentHistory || []).length || 0);
+  if (!historyCount) {
+    toast("Không có Lịch sử giao việc nào để xóa.", "info");
+    return;
+  }
+
+  const confirmed = await requestDestructiveConfirmation({
+    title: "Xóa hết Lịch sử giao việc?",
+    message: `Bạn có thực sự muốn xóa toàn bộ ${historyCount} dòng Lịch sử giao việc không?`,
+    details: "Các Phiếu công việc và công việc liên quan vẫn được giữ nguyên. Hành động này không thể hoàn tác.",
+    confirmLabel: "Xóa hết lịch sử"
+  });
+
+  if (!confirmed) return;
+
+  setButtonLoading(button, true, "Đang xóa hết...");
+
+  try {
+    const operations = await getCollectionDeleteOperations("workAssignmentHistory");
+    await commitInChunks(operations);
+    toast(`Đã xóa toàn bộ ${historyCount} dòng Lịch sử giao việc.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không xóa được toàn bộ Lịch sử giao việc.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 function renderWorkAssignmentHistory(historyItems = []) {
   if (!historyItems.length) return "";
 
+  const canDeleteHistory = isAdminProfile();
   const rows = historyItems.map((history) => {
     const workOrderCreatedDate = getAssignmentHistoryWorkOrderCreatedDate(history);
     const assignedDate = getAssignmentHistoryAssignedDate(history);
@@ -11113,20 +11182,33 @@ function renderWorkAssignmentHistory(historyItems = []) {
       ? `cho các nhân viên: ${employeeNames.join(", ")}`
       : `cho nhân viên: ${employeeNames[0] || "--"}`;
     const lineText = `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc lúc: ${assignedTimeText} ${employeeText}`;
+    const deleteButton = canDeleteHistory
+      ? `<button class="work-assignment-history-delete-btn" data-action="delete-assignment-history" data-assignment-history-id="${escapeHtml(history.id || "")}" type="button" aria-label="Xóa dòng Lịch sử giao việc này" title="Xóa dòng Lịch sử giao việc này">🗑 Xóa</button>`
+      : "";
 
     return `
       <article class="work-assignment-history-row" data-assignment-history-id="${escapeHtml(history.id || "")}">
-        <span class="work-assignment-history-badge">Lịch sử giao việc</span>
-        <strong>${escapeHtml(lineText)}</strong>
+        <div class="work-assignment-history-row-content">
+          <span class="work-assignment-history-badge">Lịch sử giao việc</span>
+          <strong>${escapeHtml(lineText)}</strong>
+        </div>
+        ${deleteButton}
       </article>
     `;
   }).join("");
+
+  const deleteAllButton = canDeleteHistory
+    ? `<button class="work-assignment-history-delete-all-btn" data-action="delete-all-assignment-history" type="button">🗑 Xóa hết lịch sử</button>`
+    : "";
 
   return `
     <section class="work-assignment-history-section" aria-label="Lịch sử giao việc">
       <div class="work-assignment-history-title">
         <strong>Lịch sử giao việc</strong>
-        <span>${historyItems.length} lần giao việc</span>
+        <div class="work-assignment-history-title-actions">
+          <span>${historyItems.length} lần giao việc</span>
+          ${deleteAllButton}
+        </div>
       </div>
       <div class="work-assignment-history-list">${rows}</div>
     </section>
@@ -12701,6 +12783,14 @@ document.addEventListener("click", async (event) => {
 
   if (action === "delete-work-order") {
     await deleteWorkOrder(button.dataset.workOrderId, button);
+  }
+
+  if (action === "delete-assignment-history") {
+    await deleteWorkAssignmentHistoryItem(button.dataset.assignmentHistoryId, button);
+  }
+
+  if (action === "delete-all-assignment-history") {
+    await deleteAllWorkAssignmentHistory(button);
   }
 });
 
