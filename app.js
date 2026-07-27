@@ -132,6 +132,7 @@ const state = {
   staffAccounts: [],
   tasks: [],
   workOrders: [],
+  workAssignmentHistory: [],
   timeExtensionReasons: [],
   workTemplates: [],
   hotelDailyReports: [],
@@ -4837,6 +4838,7 @@ onAuthStateChanged(auth, async (user) => {
   state.staffAccounts = [];
   state.tasks = [];
   state.workOrders = [];
+  state.workAssignmentHistory = [];
   state.employeeUnassignedTaskCountCache = new Map();
   state.employeeUnassignedTaskCountPendingKey = "";
   state.employeeUnassignedTaskCountRequestSerial += 1;
@@ -5279,6 +5281,25 @@ function setupAdminDashboard() {
     handleSnapshotError
   );
 
+  // Lịch sử mỗi lần Phiếu Chưa giao việc được giao thành công.
+  // Dùng collection riêng để lịch sử vẫn còn ngay cả khi Phiếu gốc thay đổi trạng thái.
+  const assignmentHistoryQuery = query(
+    collection(db, "workAssignmentHistory"),
+    orderBy("assignedAt", "desc")
+  );
+
+  const unsubWorkAssignmentHistory = onSnapshot(
+    assignmentHistoryQuery,
+    (snapshot) => {
+      state.workAssignmentHistory = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderAdminTasks();
+    },
+    (error) => {
+      console.error(error);
+      toast("Không đọc được Lịch sử giao việc. Hãy deploy Firestore Rules mới nhất.", "error");
+    }
+  );
+
   const templatesQuery = query(collection(db, "workTemplates"), orderBy("createdAt", "desc"));
 
   const unsubWorkTemplates = onSnapshot(
@@ -5347,6 +5368,7 @@ function setupAdminDashboard() {
     unsubUsers,
     unsubTasks,
     unsubWorkOrders,
+    unsubWorkAssignmentHistory,
     unsubWorkTemplates,
     unsubTimeExtensionReasons,
     unsubHotelDailyReports,
@@ -6509,6 +6531,7 @@ els.workTemplateSearch?.addEventListener("input", renderWorkTemplateList);
 const BACKUP_COLLECTIONS = [
   "users",
   "workOrders",
+  "workAssignmentHistory",
   "tasks",
   "workTemplates",
   "timeExtensionReasons",
@@ -7920,6 +7943,66 @@ function reserveQueueSlot(employeeQueueEnd, uid, deadlineMinutes, now) {
   };
 }
 
+function getUniqueAssignmentRecipients(items = []) {
+  const recipientsByUid = new Map();
+
+  items.forEach((item) => {
+    const uid = String(item?.uid || item?.assignedToUid || "").trim();
+    if (!uid || recipientsByUid.has(uid)) return;
+
+    const name = String(
+      item?.name
+      || item?.assignedToName
+      || item?.assignedEmployee?.name
+      || item?.assignedEmployee?.email
+      || getEmployeeDisplayNameByUid(uid, "")
+      || "Nhân viên"
+    ).trim();
+
+    recipientsByUid.set(uid, name || "Nhân viên");
+  });
+
+  return Array.from(recipientsByUid, ([uid, name]) => ({ uid, name }));
+}
+
+function addWorkAssignmentHistoryToBatch(batch, {
+  workOrderId,
+  workOrderName,
+  workOrderCreatedAt,
+  recipients = [],
+  taskIds = [],
+  taskCount = 0,
+  source = "draft_dispatched"
+} = {}) {
+  if (!batch || !workOrderId || !workOrderName) return null;
+
+  const uniqueRecipients = getUniqueAssignmentRecipients(recipients);
+  if (!uniqueRecipients.length) return null;
+
+  const historyRef = doc(collection(db, "workAssignmentHistory"));
+  const safeTaskIds = Array.from(new Set(taskIds.map((id) => String(id || "").trim()).filter(Boolean)));
+  const createdAtValue = timestampToDate(workOrderCreatedAt)
+    ? workOrderCreatedAt
+    : serverTimestamp();
+
+  batch.set(historyRef, {
+    id: historyRef.id,
+    workOrderId: String(workOrderId),
+    workOrderName: String(workOrderName),
+    workOrderCreatedAt: createdAtValue,
+    assignedAt: serverTimestamp(),
+    assignedByUid: state.user?.uid || "",
+    assignedByName: state.profile?.name || state.user?.email || "Admin",
+    assignedEmployeeUids: uniqueRecipients.map((item) => item.uid),
+    assignedEmployeeNames: uniqueRecipients.map((item) => item.name),
+    taskIds: safeTaskIds,
+    taskCount: Math.max(1, Number(taskCount || safeTaskIds.length || 1)),
+    source
+  });
+
+  return historyRef;
+}
+
 // Dùng chung cho cả 3 luồng: Lưu nháp mới, Sửa & lưu lại nháp, Sửa & giao việc luôn,
 // và Tạo phiếu & giao việc ngay (trường hợp không sửa phiếu có sẵn).
 async function persistWorkOrder(dispatch, button) {
@@ -8083,6 +8166,25 @@ async function persistWorkOrder(dispatch, button) {
       batch.set(taskRef, taskData);
     });
 
+    if (dispatch) {
+      addWorkAssignmentHistoryToBatch(batch, {
+        workOrderId: workOrderRef.id,
+        workOrderName,
+        // Phiếu được tạo và giao trong cùng một batch nên dùng serverTimestamp
+        // để giờ tạo/lưu và giờ giao đều lấy theo máy chủ.
+        workOrderCreatedAt: null,
+        recipients: rows
+          .filter((row) => row.assignedToUid)
+          .map((row) => ({
+            uid: row.assignedToUid,
+            name: row.assignedEmployee?.name || row.assignedEmployee?.email || row.assignedToName || ""
+          })),
+        taskIds: createdTaskRefs.map((item) => item.id),
+        taskCount: rows.length,
+        source: previousWorkOrderId ? "draft_edited_and_dispatched" : "created_and_dispatched"
+      });
+    }
+
     await batch.commit();
 
     const adminWorkOrderNotification = {
@@ -8242,6 +8344,19 @@ async function dispatchWorkOrder(workOrderId, button) {
       batch.update(doc(db, "workOrders", workOrderId), { status: "dispatched" });
     }
 
+    const workOrderMeta = getWorkOrderMeta(workOrderId);
+    addWorkAssignmentHistoryToBatch(batch, {
+      workOrderId,
+      workOrderName: workOrderMeta?.name || tasksInGroup[0]?.workOrderName || "Phiếu công việc",
+      workOrderCreatedAt: workOrderMeta?.createdAt || tasksInGroup[0]?.createdAt || Timestamp.fromDate(now),
+      recipients: tasksInGroup
+        .filter((task) => task.assignedToUid)
+        .map((task) => ({ uid: task.assignedToUid, name: task.assignedToName })),
+      taskIds: tasksInGroup.map((task) => task.id),
+      taskCount: tasksInGroup.length,
+      source: "draft_dispatched"
+    });
+
     await batch.commit();
 
     notificationItems.push({
@@ -8397,6 +8512,7 @@ async function deleteAllWorkOrders(button) {
   const hasAnyWorkData = Boolean(
     state.tasks.length
     || state.workOrders.length
+    || state.workAssignmentHistory.length
     || state.hotelDailyReports.length
     || state.notifications.length
   );
@@ -8415,7 +8531,7 @@ async function deleteAllWorkOrders(button) {
   const confirmed = await requestDestructiveConfirmation({
     title: "Xóa toàn bộ Phiếu công việc?",
     message: `Bạn có thực sự muốn xóa TOÀN BỘ ${ticketCount} Phiếu công việc cùng ${state.tasks.length} công việc bên trong không?`,
-    details: `Hệ thống cũng sẽ xóa toàn bộ báo cáo Hotel, thống kê liên quan, thông báo cũ và ${photoCount} ảnh báo cáo trên Firebase Storage. Hành động này không thể hoàn tác.`,
+    details: `Hệ thống cũng sẽ xóa toàn bộ Lịch sử giao việc, báo cáo Hotel, thống kê liên quan, thông báo cũ và ${photoCount} ảnh báo cáo trên Firebase Storage. Hành động này không thể hoàn tác.`,
     confirmLabel: "Xóa toàn bộ"
   });
 
@@ -8438,6 +8554,7 @@ async function deleteAllWorkOrders(button) {
       operations.push((batch) => batch.delete(doc(db, "workOrders", workOrder.id)));
     });
 
+    operations.push(...await getCollectionDeleteOperations("workAssignmentHistory"));
     operations.push(...await getCollectionDeleteOperations("hotelDailyReports"));
     operations.push(...await getCollectionDeleteOperations("notifications"));
 
@@ -8447,7 +8564,7 @@ async function deleteAllWorkOrders(button) {
     state.adminHotelReportHygiene = "pending";
     state.adminHotelEndPetCount = "";
 
-    toast("Đã xoá toàn bộ phiếu, báo cáo, thống kê, thông báo và hình ảnh liên quan.", "success");
+    toast("Đã xoá toàn bộ phiếu, Lịch sử giao việc, báo cáo, thống kê, thông báo và hình ảnh liên quan.", "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không xoá được toàn bộ phiếu.", "error");
@@ -8668,8 +8785,12 @@ function getAdminMobileResultScopeLabel() {
 function updateAdminMobileResultSummary(groupCount = 0) {
   if (!els.adminMobileResultSummary) return;
   const count = Math.max(0, Number(groupCount || 0));
-  const ticketLabel = count === 1 ? "Phiếu công việc" : "Phiếu công việc";
-  els.adminMobileResultSummary.textContent = `▣ ${getAdminMobileResultScopeLabel()} • ${count} ${ticketLabel}`;
+  const itemLabel = state.adminStatusFilter === "assignment_history"
+    ? "lịch sử giao việc"
+    : state.adminStatusFilter === "all" && (state.workAssignmentHistory || []).length
+      ? "mục"
+      : "Phiếu công việc";
+  els.adminMobileResultSummary.textContent = `▣ ${getAdminMobileResultScopeLabel()} • ${count} ${itemLabel}`;
 }
 
 function resetAdminMobileFilters() {
@@ -10816,6 +10937,7 @@ function getAdminWorkOrderSearchDateScopeLabel() {
 function getAdminWorkOrderSearchStatusScopeLabel() {
   const statusLabels = {
     all: "tất cả trạng thái",
+    assignment_history: "Lịch sử giao việc",
     draft: "Chưa giao việc",
     waiting_assignee: "Chờ chọn người",
     lunch_break: "Nghỉ trưa",
@@ -10859,7 +10981,7 @@ function renderAdminWorkOrderSearchSummary(resultCount = 0) {
   }
 
   summaryEl.classList.remove("hidden");
-  summaryEl.textContent = `Đang tìm Phiếu công việc theo ${getAdminWorkOrderSearchScopeLabel()}: ${resultCount} kết quả gần giống “${queryText}”.`;
+  summaryEl.textContent = `Đang tìm Phiếu công việc và Lịch sử giao việc theo ${getAdminWorkOrderSearchScopeLabel()}: ${resultCount} kết quả gần giống “${queryText}”.`;
 }
 
 function getAdminSearchedTicketGroups(computedTasks) {
@@ -10892,6 +11014,81 @@ function getAdminSearchedTicketGroups(computedTasks) {
       || b.createdAtMs - a.createdAtMs
       || a.name.localeCompare(b.name, "vi")
     ));
+}
+
+function getAssignmentHistoryAssignedDate(history) {
+  return timestampToDate(history?.assignedAt);
+}
+
+function isAssignmentHistoryInDateFilter(history, filter = state.adminDateFilter) {
+  const assignedDate = getAssignmentHistoryAssignedDate(history);
+  if (!assignedDate) return filter?.mode === "all";
+
+  return isTaskInDateFilter(
+    { taskDate: toLocalDateInputValue(assignedDate) },
+    filter
+  );
+}
+
+function getFilteredWorkAssignmentHistory(searchQuery = state.adminWorkOrderSearch) {
+  if (!["all", "assignment_history"].includes(state.adminStatusFilter)) return [];
+
+  const normalizedQuery = String(searchQuery || "").trim();
+
+  return (state.workAssignmentHistory || [])
+    .filter((history) => isAssignmentHistoryInDateFilter(history, state.adminDateFilter))
+    .filter((history) => (
+      state.adminEmployeeFilter === "all"
+      || (Array.isArray(history.assignedEmployeeUids)
+        && history.assignedEmployeeUids.includes(state.adminEmployeeFilter))
+    ))
+    .filter((history) => (
+      !normalizedQuery
+      || Number.isFinite(getWorkOrderSearchScore(history.workOrderName || "", normalizedQuery))
+    ))
+    .sort((a, b) => (
+      (getAssignmentHistoryAssignedDate(b)?.getTime() || 0)
+      - (getAssignmentHistoryAssignedDate(a)?.getTime() || 0)
+    ));
+}
+
+function renderWorkAssignmentHistory(historyItems = []) {
+  if (!historyItems.length) return "";
+
+  const rows = historyItems.map((history) => {
+    const workOrderCreatedDate = timestampToDate(history.workOrderCreatedAt)
+      || getAssignmentHistoryAssignedDate(history);
+    const assignedDate = getAssignmentHistoryAssignedDate(history);
+    const createdDateText = workOrderCreatedDate
+      ? formatDateOnly(toLocalDateInputValue(workOrderCreatedDate))
+      : "--/--/----";
+    const createdTimeText = formatTimeWithSeconds(workOrderCreatedDate) || "--:--:--";
+    const assignedTimeText = formatTimeWithSeconds(assignedDate) || "--:--:--";
+    const employeeNames = Array.isArray(history.assignedEmployeeNames)
+      ? history.assignedEmployeeNames.filter(Boolean)
+      : [];
+    const employeeText = employeeNames.length > 1
+      ? `cho các nhân viên: ${employeeNames.join(", ")}`
+      : `cho nhân viên: ${employeeNames[0] || "--"}`;
+    const lineText = `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc lúc: ${assignedTimeText} ${employeeText}`;
+
+    return `
+      <article class="work-assignment-history-row" data-assignment-history-id="${escapeHtml(history.id || "")}">
+        <span class="work-assignment-history-badge">Lịch sử giao việc</span>
+        <strong>${escapeHtml(lineText)}</strong>
+      </article>
+    `;
+  }).join("");
+
+  return `
+    <section class="work-assignment-history-section" aria-label="Lịch sử giao việc">
+      <div class="work-assignment-history-title">
+        <strong>Lịch sử giao việc</strong>
+        <span>${historyItems.length} lần giao việc</span>
+      </div>
+      <div class="work-assignment-history-list">${rows}</div>
+    </section>
+  `;
 }
 
 function renderAdminTasks() {
@@ -10943,21 +11140,24 @@ function renderAdminTasks() {
     // Tìm kiếm tên Phiếu công việc bắt buộc theo bộ lọc thời gian,
     // trạng thái và nhóm công việc đã hoàn thành hiện tại.
     const searchedGroups = getAdminSearchedTicketGroups(computed);
-    renderAdminWorkOrderSearchSummary(searchedGroups.length);
+    const searchedHistory = getFilteredWorkAssignmentHistory(searchQuery);
+    const resultCount = searchedGroups.length + searchedHistory.length;
+    renderAdminWorkOrderSearchSummary(resultCount);
     els.adminCompletedTypeReport?.classList.add("hidden");
 
-    if (!searchedGroups.length) {
+    if (!resultCount) {
       updateAdminMobileResultSummary(0);
-      els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc có tên gần giống “${escapeHtml(searchQuery)}” theo ${escapeHtml(getAdminWorkOrderSearchScopeLabel())}.`;
+      els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc hoặc Lịch sử giao việc có tên gần giống “${escapeHtml(searchQuery)}” theo ${escapeHtml(getAdminWorkOrderSearchScopeLabel())}.`;
       els.adminTaskList.classList.add("empty");
       return;
     }
 
-    updateAdminMobileResultSummary(searchedGroups.length);
+    updateAdminMobileResultSummary(resultCount);
     els.adminTaskList.classList.remove("empty");
-    els.adminTaskList.innerHTML = searchedGroups
-      .map((group) => renderTicketGroup(group))
-      .join("");
+    els.adminTaskList.innerHTML = [
+      renderWorkAssignmentHistory(searchedHistory),
+      searchedGroups.map((group) => renderTicketGroup(group)).join("")
+    ].join("");
 
     updateCountdowns();
     refreshPhotoReportPageIfOpen();
@@ -10974,20 +11174,25 @@ function renderAdminTasks() {
     state.adminDateFilter.mode === "all";
 
   const groups = withEmptyDraftGroups(groupTasksByWorkOrder(filtered), showEmptyDrafts);
+  const assignmentHistory = getFilteredWorkAssignmentHistory();
+  const totalVisibleItems = groups.length + assignmentHistory.length;
 
-  if (!groups.length) {
+  if (!totalVisibleItems) {
     updateAdminMobileResultSummary(0);
-    els.adminTaskList.innerHTML = "Không có công việc phù hợp bộ lọc.";
+    els.adminTaskList.innerHTML = state.adminStatusFilter === "assignment_history"
+      ? "Không có Lịch sử giao việc phù hợp bộ lọc."
+      : "Không có công việc phù hợp bộ lọc.";
     els.adminTaskList.classList.add("empty");
     return;
   }
 
-  updateAdminMobileResultSummary(groups.length);
+  updateAdminMobileResultSummary(totalVisibleItems);
   els.adminTaskList.classList.remove("empty");
 
-  els.adminTaskList.innerHTML = groups
-    .map((group) => renderTicketGroup(group))
-    .join("");
+  els.adminTaskList.innerHTML = [
+    renderWorkAssignmentHistory(assignmentHistory),
+    groups.map((group) => renderTicketGroup(group)).join("")
+  ].join("");
 
   updateCountdowns();
   refreshPhotoReportPageIfOpen();
@@ -14826,7 +15031,25 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
       updateData.accumulatedWorkedMs = accumulatedWorkedMs;
     }
 
-    await updateDoc(doc(db, "tasks", task.id), updateData);
+    if (isWaitingAssignee) {
+      const assignmentBatch = writeBatch(db);
+      assignmentBatch.update(doc(db, "tasks", task.id), updateData);
+
+      const workOrderMeta = getWorkOrderMeta(task.workOrderId);
+      addWorkAssignmentHistoryToBatch(assignmentBatch, {
+        workOrderId: task.workOrderId || "legacy",
+        workOrderName: workOrderMeta?.name || task.workOrderName || "Phiếu công việc",
+        workOrderCreatedAt: workOrderMeta?.createdAt || task.createdAt || Timestamp.fromDate(now),
+        recipients: [{ uid: newEmployee.uid, name: newEmployeeName }],
+        taskIds: [task.id],
+        taskCount: Number(workOrderMeta?.taskCount || task.workOrderTaskCount || 1),
+        source: "assigned_from_waiting"
+      });
+
+      await assignmentBatch.commit();
+    } else {
+      await updateDoc(doc(db, "tasks", task.id), updateData);
+    }
 
     const startMessage = isWaitingAssignee
       ? `Công việc bắt đầu tính giờ từ bây giờ với thời gian còn lại ${formatMinutes(Math.ceil(resumeMs / 60000))}.`

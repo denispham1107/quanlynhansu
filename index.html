@@ -9593,6 +9593,112 @@
     }
 
   </style>
+<!-- Lịch sử giao việc: luôn nằm trên cùng danh sách Phiếu -->
+<style>
+  .work-assignment-history-section {
+    display: grid;
+    gap: 9px;
+    width: 100%;
+    margin: 0 0 12px;
+    box-sizing: border-box;
+  }
+
+  .work-assignment-history-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 4px;
+    color: #9a3412;
+  }
+
+  .work-assignment-history-title strong {
+    font-size: 15px;
+    font-weight: 950;
+  }
+
+  .work-assignment-history-title span {
+    color: #b45309;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .work-assignment-history-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .work-assignment-history-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 11px 14px;
+    border: 1px solid rgba(234, 88, 12, .5);
+    border-left: 7px solid #dc2626;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 48%, #fee2e2 100%);
+    color: #7c2d12;
+    box-shadow: 0 8px 20px rgba(194, 65, 12, .10);
+    box-sizing: border-box;
+  }
+
+  .work-assignment-history-row strong {
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .work-assignment-history-badge {
+    flex: 0 0 auto;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #ea580c, #dc2626);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 768px) {
+    .work-assignment-history-section {
+      gap: 7px;
+      margin-bottom: 9px;
+    }
+
+    .work-assignment-history-title {
+      padding: 0 2px;
+    }
+
+    .work-assignment-history-title strong {
+      font-size: 13px;
+    }
+
+    .work-assignment-history-title span {
+      font-size: 10.5px;
+    }
+
+    .work-assignment-history-row {
+      align-items: flex-start;
+      gap: 8px;
+      padding: 9px 10px;
+      border-left-width: 5px;
+      border-radius: 12px;
+    }
+
+    .work-assignment-history-row strong {
+      font-size: 11.5px;
+      line-height: 1.45;
+    }
+
+    .work-assignment-history-badge {
+      padding: 4px 7px;
+      font-size: 9px;
+    }
+  }
+</style>
 </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
@@ -9885,6 +9991,7 @@
             <span class="mobile-filter-field-label">Trạng thái</span>
             <select id="adminStatusFilter" aria-label="Lọc trạng thái">
               <option value="all">Tất cả trạng thái</option>
+              <option value="assignment_history">Lịch sử giao việc</option>
               <option value="draft">Chưa giao việc</option>
               <option value="waiting_assignee">Chờ chọn người</option>
               <option value="lunch_break">Nghỉ trưa</option>
