@@ -8050,10 +8050,26 @@ async function persistWorkOrder(dispatch, button) {
     const batch = writeBatch(db);
 
     // Nếu đang sửa 1 phiếu nháp có sẵn: xoá phiếu + công việc cũ, sau đó tạo lại từ đầu.
+    // Luôn giữ nguyên mốc tạo/lưu đầu tiên của Phiếu để Lịch sử giao việc hiển thị
+    // đúng giờ tạo Phiếu, không bị đổi thành giờ giao việc sau khi sửa rồi giao.
     const previousWorkOrderId = state.editingWorkOrderId;
+    const previousWorkOrder = previousWorkOrderId
+      ? state.workOrders.find((item) => item.id === previousWorkOrderId)
+      : null;
+    const oldTasks = previousWorkOrderId
+      ? state.tasks.filter((task) => (task.workOrderId || "legacy") === previousWorkOrderId)
+      : [];
+    const previousCreatedAtCandidates = [
+      previousWorkOrder?.createdAt,
+      ...oldTasks.map((task) => task.createdAt)
+    ]
+      .map((value) => timestampToDate(value))
+      .filter(Boolean)
+      .sort((a, b) => a.getTime() - b.getTime());
+    const workOrderCreatedDate = previousCreatedAtCandidates[0] || now;
+    const workOrderCreatedAtValue = Timestamp.fromDate(workOrderCreatedDate);
 
     if (previousWorkOrderId) {
-      const oldTasks = state.tasks.filter((task) => (task.workOrderId || "legacy") === previousWorkOrderId);
       oldTasks.forEach((task) => batch.delete(doc(db, "tasks", task.id)));
 
       if (previousWorkOrderId !== "legacy") {
@@ -8067,7 +8083,8 @@ async function persistWorkOrder(dispatch, button) {
       name: workOrderName,
       createdByUid: state.user.uid,
       createdByName: state.profile.name,
-      createdAt: serverTimestamp(),
+      createdAt: workOrderCreatedAtValue,
+      updatedAt: serverTimestamp(),
       taskCount: rows.length,
       status: dispatch ? "dispatched" : "draft"
     });
@@ -8170,9 +8187,9 @@ async function persistWorkOrder(dispatch, button) {
       addWorkAssignmentHistoryToBatch(batch, {
         workOrderId: workOrderRef.id,
         workOrderName,
-        // Phiếu được tạo và giao trong cùng một batch nên dùng serverTimestamp
-        // để giờ tạo/lưu và giờ giao đều lấy theo máy chủ.
-        workOrderCreatedAt: null,
+        // Đây là thời điểm Phiếu được tạo/lưu. assignedAt bên dưới là một mốc
+        // riêng do máy chủ ghi khi giao việc thành công.
+        workOrderCreatedAt: workOrderCreatedAtValue,
         recipients: rows
           .filter((row) => row.assignedToUid)
           .map((row) => ({
@@ -11020,6 +11037,32 @@ function getAssignmentHistoryAssignedDate(history) {
   return timestampToDate(history?.assignedAt);
 }
 
+function getAssignmentHistoryWorkOrderCreatedDate(history) {
+  const workOrderId = String(history?.workOrderId || "").trim();
+  const currentWorkOrderCreatedDate = timestampToDate(getWorkOrderMeta(workOrderId)?.createdAt);
+
+  if (currentWorkOrderCreatedDate) return currentWorkOrderCreatedDate;
+
+  const historyTaskIds = new Set(
+    Array.isArray(history?.taskIds)
+      ? history.taskIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : []
+  );
+  const taskCreatedDates = (state.tasks || [])
+    .filter((task) => (
+      (workOrderId && String(task?.workOrderId || "") === workOrderId)
+      || historyTaskIds.has(String(task?.id || ""))
+    ))
+    .map((task) => timestampToDate(task?.createdAt))
+    .filter(Boolean)
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  if (taskCreatedDates.length) return taskCreatedDates[0];
+
+  return timestampToDate(history?.workOrderCreatedAt)
+    || getAssignmentHistoryAssignedDate(history);
+}
+
 function isAssignmentHistoryInDateFilter(history, filter = state.adminDateFilter) {
   const assignedDate = getAssignmentHistoryAssignedDate(history);
   if (!assignedDate) return filter?.mode === "all";
@@ -11056,8 +11099,7 @@ function renderWorkAssignmentHistory(historyItems = []) {
   if (!historyItems.length) return "";
 
   const rows = historyItems.map((history) => {
-    const workOrderCreatedDate = timestampToDate(history.workOrderCreatedAt)
-      || getAssignmentHistoryAssignedDate(history);
+    const workOrderCreatedDate = getAssignmentHistoryWorkOrderCreatedDate(history);
     const assignedDate = getAssignmentHistoryAssignedDate(history);
     const createdDateText = workOrderCreatedDate
       ? formatDateOnly(toLocalDateInputValue(workOrderCreatedDate))
