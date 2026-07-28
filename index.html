@@ -9695,6 +9695,18 @@
     box-sizing: border-box;
   }
 
+  /* Ở chế độ Thu gọn chỉ hiện hai dòng Lịch sử giao việc mới nhất.
+     Nút “Chi tiết” trên desktop mở lại toàn bộ danh sách. */
+  .work-assignment-history-row.is-compact-hidden {
+    display: none;
+  }
+
+  @media (min-width: 769px) {
+    html.desktop-task-detail-mode .work-assignment-history-row.is-compact-hidden {
+      display: flex;
+    }
+  }
+
   .work-assignment-history-row-content {
     display: flex;
     align-items: center;

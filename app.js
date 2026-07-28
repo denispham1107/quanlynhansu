@@ -11287,7 +11287,10 @@ function renderWorkAssignmentHistory(historyItems = []) {
   if (!historyItems.length) return "";
 
   const canDeleteHistory = isAdminProfile() && !isWorkOrderDeletionLocked();
-  const rows = historyItems.map((history) => {
+  // Danh sách Lịch sử giao việc luôn khởi tạo ở chế độ Thu gọn:
+  // chỉ hai lần giao việc mới nhất được hiển thị. Khi Admin chuyển
+  // giao diện desktop sang “Chi tiết”, CSS sẽ mở toàn bộ các dòng còn lại.
+  const rows = historyItems.map((history, historyIndex) => {
     const workOrderCreatedDate = getAssignmentHistoryWorkOrderCreatedDate(history);
     const assignedDate = getAssignmentHistoryAssignedDate(history);
     const createdDateText = workOrderCreatedDate
@@ -11308,7 +11311,7 @@ function renderWorkAssignmentHistory(historyItems = []) {
       : "";
 
     return `
-      <article class="work-assignment-history-row" data-assignment-history-id="${escapeHtml(history.id || "")}">
+      <article class="work-assignment-history-row${historyIndex >= 2 ? " is-compact-hidden" : ""}" data-assignment-history-id="${escapeHtml(history.id || "")}">
         <div class="work-assignment-history-row-content">
           <span class="work-assignment-history-badge">Lịch sử giao việc</span>
           <strong>${escapeHtml(lineText)}</strong>
