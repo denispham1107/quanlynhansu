@@ -9332,6 +9332,8 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
     const savedSettings = normalizeWorkOrderControlSettings(result?.data?.settings || {});
     state.workOrderControlSettings = savedSettings;
     state.workOrderControlSettingsReady = true;
+    applyManagementPermissionUI();
+    renderAdminTasks();
 
     closeWorkOrderSettingsModal();
     toast("Đã lưu Cài đặt Phiếu công việc.", "success");
@@ -11101,6 +11103,11 @@ async function deleteWorkAssignmentHistoryItem(historyId, button) {
     return;
   }
 
+  if (isWorkOrderDeletionLocked()) {
+    toast("Chức năng xóa Phiếu công việc và Lịch sử giao việc đang bị khóa trong Cài đặt.", "error");
+    return;
+  }
+
   const safeHistoryId = String(historyId || "").trim();
   if (!safeHistoryId) return;
 
@@ -11131,6 +11138,11 @@ async function deleteWorkAssignmentHistoryItem(historyId, button) {
 async function deleteAllWorkAssignmentHistory(button) {
   if (!isAdminProfile()) {
     toast("Chỉ Admin mới có thể xóa toàn bộ Lịch sử giao việc.", "error");
+    return;
+  }
+
+  if (isWorkOrderDeletionLocked()) {
+    toast("Chức năng xóa Phiếu công việc và Lịch sử giao việc đang bị khóa trong Cài đặt.", "error");
     return;
   }
 
@@ -11166,7 +11178,7 @@ async function deleteAllWorkAssignmentHistory(button) {
 function renderWorkAssignmentHistory(historyItems = []) {
   if (!historyItems.length) return "";
 
-  const canDeleteHistory = isAdminProfile();
+  const canDeleteHistory = isAdminProfile() && !isWorkOrderDeletionLocked();
   const rows = historyItems.map((history) => {
     const workOrderCreatedDate = getAssignmentHistoryWorkOrderCreatedDate(history);
     const assignedDate = getAssignmentHistoryAssignedDate(history);
