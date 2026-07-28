@@ -141,6 +141,7 @@ const state = {
   tasks: [],
   workOrders: [],
   workAssignmentHistory: [],
+  workAssignmentHistoryExpanded: false,
   timeExtensionReasons: [],
   workTemplates: [],
   hotelDailyReports: [],
@@ -4847,6 +4848,7 @@ onAuthStateChanged(auth, async (user) => {
   state.tasks = [];
   state.workOrders = [];
   state.workAssignmentHistory = [];
+  state.workAssignmentHistoryExpanded = false;
   state.employeeUnassignedTaskCountCache = new Map();
   state.employeeUnassignedTaskCountPendingKey = "";
   state.employeeUnassignedTaskCountRequestSerial += 1;
@@ -11287,9 +11289,9 @@ function renderWorkAssignmentHistory(historyItems = []) {
   if (!historyItems.length) return "";
 
   const canDeleteHistory = isAdminProfile() && !isWorkOrderDeletionLocked();
-  // Danh sách Lịch sử giao việc luôn khởi tạo ở chế độ Thu gọn:
-  // chỉ hai lần giao việc mới nhất được hiển thị. Khi Admin chuyển
-  // giao diện desktop sang “Chi tiết”, CSS sẽ mở toàn bộ các dòng còn lại.
+  const isHistoryExpanded = Boolean(state.workAssignmentHistoryExpanded);
+  // Ở mọi chế độ xem, Lịch sử giao việc mặc định chỉ hiện hai dòng mới nhất.
+  // Admin dùng nút riêng ngay dưới danh sách để mở toàn bộ hoặc thu gọn lại.
   const rows = historyItems.map((history, historyIndex) => {
     const workOrderCreatedDate = getAssignmentHistoryWorkOrderCreatedDate(history);
     const assignedDate = getAssignmentHistoryAssignedDate(history);
@@ -11311,7 +11313,7 @@ function renderWorkAssignmentHistory(historyItems = []) {
       : "";
 
     return `
-      <article class="work-assignment-history-row${historyIndex >= 2 ? " is-compact-hidden" : ""}" data-assignment-history-id="${escapeHtml(history.id || "")}">
+      <article class="work-assignment-history-row${historyIndex >= 2 && !isHistoryExpanded ? " is-compact-hidden" : ""}" data-assignment-history-id="${escapeHtml(history.id || "")}">
         <div class="work-assignment-history-row-content">
           <span class="work-assignment-history-badge">Lịch sử giao việc</span>
           <strong>${escapeHtml(lineText)}</strong>
@@ -11324,6 +11326,9 @@ function renderWorkAssignmentHistory(historyItems = []) {
   const deleteAllButton = canDeleteHistory
     ? `<button class="work-assignment-history-delete-all-btn" data-action="delete-all-assignment-history" type="button">🗑 Xóa hết lịch sử</button>`
     : "";
+  const expandButton = historyItems.length > 2
+    ? `<button class="work-assignment-history-expand-btn" data-action="toggle-assignment-history-expanded" type="button" aria-expanded="${isHistoryExpanded ? "true" : "false"}">${isHistoryExpanded ? "Thu gọn còn 2 dòng mới nhất" : `Xem toàn bộ ${historyItems.length} dòng lịch sử giao việc`}</button>`
+    : "";
 
   return `
     <section class="work-assignment-history-section" aria-label="Lịch sử giao việc">
@@ -11335,6 +11340,7 @@ function renderWorkAssignmentHistory(historyItems = []) {
         </div>
       </div>
       <div class="work-assignment-history-list">${rows}</div>
+      ${expandButton ? `<div class="work-assignment-history-expand-wrap">${expandButton}</div>` : ""}
     </section>
   `;
 }
@@ -12915,6 +12921,11 @@ document.addEventListener("click", async (event) => {
 
   if (action === "delete-all-assignment-history") {
     await deleteAllWorkAssignmentHistory(button);
+  }
+
+  if (action === "toggle-assignment-history-expanded") {
+    state.workAssignmentHistoryExpanded = !state.workAssignmentHistoryExpanded;
+    renderAdminTasks();
   }
 });
 

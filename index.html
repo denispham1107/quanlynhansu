@@ -9695,16 +9695,38 @@
     box-sizing: border-box;
   }
 
-  /* Ở chế độ Thu gọn chỉ hiện hai dòng Lịch sử giao việc mới nhất.
-     Nút “Chi tiết” trên desktop mở lại toàn bộ danh sách. */
+  /* Ở mọi chế độ xem chỉ hiện hai dòng mới nhất cho đến khi Admin
+     bấm nút riêng “Xem toàn bộ” ngay dưới danh sách. */
   .work-assignment-history-row.is-compact-hidden {
     display: none;
   }
 
-  @media (min-width: 769px) {
-    html.desktop-task-detail-mode .work-assignment-history-row.is-compact-hidden {
-      display: flex;
-    }
+  .work-assignment-history-expand-wrap {
+    display: flex;
+    justify-content: center;
+    padding-top: 2px;
+  }
+
+  .work-assignment-history-expand-btn {
+    appearance: none;
+    min-height: 42px;
+    padding: 10px 18px;
+    border: 1px solid rgba(234, 88, 12, .45);
+    border-radius: 999px;
+    background: linear-gradient(135deg, #fff7ed, #ffedd5);
+    color: #9a3412;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 950;
+    cursor: pointer;
+    touch-action: manipulation;
+    box-shadow: 0 6px 16px rgba(194, 65, 12, .10);
+    transition: transform .16s ease, filter .16s ease;
+  }
+
+  .work-assignment-history-expand-btn:hover {
+    filter: brightness(.97);
+    transform: translateY(-1px);
   }
 
   .work-assignment-history-row-content {
@@ -9788,6 +9810,10 @@
       align-self: flex-end;
       padding: 6px 8px;
       font-size: 9.5px;
+    }
+
+    .work-assignment-history-expand-btn {
+      width: 100%;
     }
 
     .work-assignment-history-badge {
