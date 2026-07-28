@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260728-lock-work-orders-and-assignment-history-v43";
+const CACHE_NAME = "culao-task-shell-v20260728-persist-assignment-history-v44";
 const APP_SHELL = [
   "./",
   "./index.html",

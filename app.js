@@ -103,6 +103,14 @@ const processWorkSupervisionNowCallable = httpsCallable(
   functions,
   "processWorkSupervisionNow"
 );
+const deleteWorkAssignmentHistoryItemCallable = httpsCallable(
+  functions,
+  "deleteWorkAssignmentHistoryItem"
+);
+const deleteAllWorkAssignmentHistoryCallable = httpsCallable(
+  functions,
+  "deleteAllWorkAssignmentHistory"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -8529,7 +8537,6 @@ async function deleteAllWorkOrders(button) {
   const hasAnyWorkData = Boolean(
     state.tasks.length
     || state.workOrders.length
-    || state.workAssignmentHistory.length
     || state.hotelDailyReports.length
     || state.notifications.length
   );
@@ -8548,7 +8555,7 @@ async function deleteAllWorkOrders(button) {
   const confirmed = await requestDestructiveConfirmation({
     title: "Xóa toàn bộ Phiếu công việc?",
     message: `Bạn có thực sự muốn xóa TOÀN BỘ ${ticketCount} Phiếu công việc cùng ${state.tasks.length} công việc bên trong không?`,
-    details: `Hệ thống cũng sẽ xóa toàn bộ Lịch sử giao việc, báo cáo Hotel, thống kê liên quan, thông báo cũ và ${photoCount} ảnh báo cáo trên Firebase Storage. Hành động này không thể hoàn tác.`,
+    details: `Hệ thống sẽ giữ nguyên toàn bộ Lịch sử giao việc. Báo cáo Hotel, thống kê liên quan, thông báo cũ và ${photoCount} ảnh báo cáo trên Firebase Storage sẽ bị xóa. Hành động này không thể hoàn tác.`,
     confirmLabel: "Xóa toàn bộ"
   });
 
@@ -8571,7 +8578,8 @@ async function deleteAllWorkOrders(button) {
       operations.push((batch) => batch.delete(doc(db, "workOrders", workOrder.id)));
     });
 
-    operations.push(...await getCollectionDeleteOperations("workAssignmentHistory"));
+    // Lịch sử giao việc là dữ liệu lưu trữ độc lập và chỉ được xóa bằng
+    // hai nút chuyên dụng: Xóa từng dòng hoặc Xóa hết lịch sử.
     operations.push(...await getCollectionDeleteOperations("hotelDailyReports"));
     operations.push(...await getCollectionDeleteOperations("notifications"));
 
@@ -8581,7 +8589,7 @@ async function deleteAllWorkOrders(button) {
     state.adminHotelReportHygiene = "pending";
     state.adminHotelEndPetCount = "";
 
-    toast("Đã xoá toàn bộ phiếu, Lịch sử giao việc, báo cáo, thống kê, thông báo và hình ảnh liên quan.", "success");
+    toast("Đã xoá toàn bộ phiếu, báo cáo, thống kê, thông báo và hình ảnh liên quan. Lịch sử giao việc được giữ nguyên.", "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không xoá được toàn bộ phiếu.", "error");
@@ -11125,7 +11133,7 @@ async function deleteWorkAssignmentHistoryItem(historyId, button) {
   setButtonLoading(button, true, "Đang xóa...");
 
   try {
-    await deleteDoc(doc(db, "workAssignmentHistory", safeHistoryId));
+    await deleteWorkAssignmentHistoryItemCallable({ historyId: safeHistoryId });
     toast("Đã xóa một dòng Lịch sử giao việc.", "success");
   } catch (error) {
     console.error(error);
@@ -11164,9 +11172,9 @@ async function deleteAllWorkAssignmentHistory(button) {
   setButtonLoading(button, true, "Đang xóa hết...");
 
   try {
-    const operations = await getCollectionDeleteOperations("workAssignmentHistory");
-    await commitInChunks(operations);
-    toast(`Đã xóa toàn bộ ${historyCount} dòng Lịch sử giao việc.`, "success");
+    const response = await deleteAllWorkAssignmentHistoryCallable({});
+    const deletedCount = Number(response?.data?.deletedCount || historyCount);
+    toast(`Đã xóa toàn bộ ${deletedCount} dòng Lịch sử giao việc.`, "success");
   } catch (error) {
     console.error(error);
     toast(error.message || "Không xóa được toàn bộ Lịch sử giao việc.", "error");
