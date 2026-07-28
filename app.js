@@ -7979,6 +7979,7 @@ function addWorkAssignmentHistoryToBatch(batch, {
   workOrderCreatedAt,
   recipients = [],
   taskIds = [],
+  taskAssignments = [],
   taskCount = 0,
   source = "draft_dispatched"
 } = {}) {
@@ -7989,6 +7990,20 @@ function addWorkAssignmentHistoryToBatch(batch, {
 
   const historyRef = doc(collection(db, "workAssignmentHistory"));
   const safeTaskIds = Array.from(new Set(taskIds.map((id) => String(id || "").trim()).filter(Boolean)));
+  const safeTaskAssignments = taskAssignments
+    .map((item) => ({
+      taskId: String(item?.taskId || item?.id || "").trim(),
+      taskName: String(item?.taskName || item?.title || "").trim(),
+      employeeUid: String(item?.employeeUid || item?.assignedToUid || item?.uid || "").trim(),
+      employeeName: String(item?.employeeName || item?.assignedToName || item?.name || "").trim()
+    }))
+    .filter((item) => item.taskName && item.employeeUid)
+    .filter((item, index, items) => items.findIndex((candidate) => (
+      candidate.taskId === item.taskId
+      && candidate.taskName === item.taskName
+      && candidate.employeeUid === item.employeeUid
+    )) === index);
+  const safeTaskNames = Array.from(new Set(safeTaskAssignments.map((item) => item.taskName)));
   const createdAtValue = timestampToDate(workOrderCreatedAt)
     ? workOrderCreatedAt
     : serverTimestamp();
@@ -8004,6 +8019,8 @@ function addWorkAssignmentHistoryToBatch(batch, {
     assignedEmployeeUids: uniqueRecipients.map((item) => item.uid),
     assignedEmployeeNames: uniqueRecipients.map((item) => item.name),
     taskIds: safeTaskIds,
+    taskNames: safeTaskNames,
+    taskAssignments: safeTaskAssignments,
     taskCount: Math.max(1, Number(taskCount || safeTaskIds.length || 1)),
     source
   });
@@ -8205,6 +8222,14 @@ async function persistWorkOrder(dispatch, button) {
             name: row.assignedEmployee?.name || row.assignedEmployee?.email || row.assignedToName || ""
           })),
         taskIds: createdTaskRefs.map((item) => item.id),
+        taskAssignments: rows
+          .map((row, index) => ({
+            taskId: createdTaskRefs[index]?.id || "",
+            taskName: row.title || "",
+            employeeUid: row.assignedToUid || "",
+            employeeName: row.assignedEmployee?.name || row.assignedEmployee?.email || row.assignedToName || ""
+          }))
+          .filter((item) => item.employeeUid),
         taskCount: rows.length,
         source: previousWorkOrderId ? "draft_edited_and_dispatched" : "created_and_dispatched"
       });
@@ -8378,6 +8403,14 @@ async function dispatchWorkOrder(workOrderId, button) {
         .filter((task) => task.assignedToUid)
         .map((task) => ({ uid: task.assignedToUid, name: task.assignedToName })),
       taskIds: tasksInGroup.map((task) => task.id),
+      taskAssignments: tasksInGroup
+        .filter((task) => task.assignedToUid)
+        .map((task) => ({
+          taskId: task.id,
+          taskName: task.title || "",
+          employeeUid: task.assignedToUid,
+          employeeName: task.assignedToName || ""
+        })),
       taskCount: tasksInGroup.length,
       source: "draft_dispatched"
     });
@@ -11183,6 +11216,73 @@ async function deleteAllWorkAssignmentHistory(button) {
   }
 }
 
+function getAssignmentHistoryTaskAssignments(history) {
+  const storedAssignments = Array.isArray(history?.taskAssignments)
+    ? history.taskAssignments
+      .map((item) => ({
+        taskId: String(item?.taskId || "").trim(),
+        taskName: String(item?.taskName || item?.title || "").trim(),
+        employeeUid: String(item?.employeeUid || item?.assignedToUid || "").trim(),
+        employeeName: String(item?.employeeName || item?.assignedToName || "").trim()
+      }))
+      .filter((item) => item.taskName)
+    : [];
+
+  if (storedAssignments.length) return storedAssignments;
+
+  const workOrderId = String(history?.workOrderId || "").trim();
+  const historyTaskIds = new Set(
+    Array.isArray(history?.taskIds)
+      ? history.taskIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : []
+  );
+
+  return (state.tasks || [])
+    .filter((task) => (
+      (workOrderId && String(task?.workOrderId || "") === workOrderId)
+      || historyTaskIds.has(String(task?.id || ""))
+    ))
+    .map((task) => ({
+      taskId: String(task?.id || "").trim(),
+      taskName: String(task?.title || "").trim(),
+      employeeUid: String(task?.assignedToUid || "").trim(),
+      employeeName: String(task?.assignedToName || "").trim()
+    }))
+    .filter((item) => item.taskName);
+}
+
+function getAssignmentHistoryTaskText(history) {
+  const assignments = getAssignmentHistoryTaskAssignments(history);
+
+  if (assignments.length) {
+    const groupsByEmployee = new Map();
+
+    assignments.forEach((item) => {
+      const employeeKey = item.employeeUid || item.employeeName || "__unknown__";
+      const current = groupsByEmployee.get(employeeKey) || {
+        employeeName: item.employeeName || "Nhân viên",
+        taskNames: []
+      };
+
+      if (!current.taskNames.includes(item.taskName)) current.taskNames.push(item.taskName);
+      groupsByEmployee.set(employeeKey, current);
+    });
+
+    const groups = Array.from(groupsByEmployee.values());
+    if (groups.length === 1) return groups[0].taskNames.join(", ");
+
+    return groups
+      .map((group) => `${group.taskNames.join(", ")} (${group.employeeName})`)
+      .join("; ");
+  }
+
+  const storedTaskNames = Array.isArray(history?.taskNames)
+    ? Array.from(new Set(history.taskNames.map((name) => String(name || "").trim()).filter(Boolean)))
+    : [];
+
+  return storedTaskNames.length ? storedTaskNames.join(", ") : "--";
+}
+
 function renderWorkAssignmentHistory(historyItems = []) {
   if (!historyItems.length) return "";
 
@@ -11201,7 +11301,8 @@ function renderWorkAssignmentHistory(historyItems = []) {
     const employeeText = employeeNames.length > 1
       ? `cho các nhân viên: ${employeeNames.join(", ")}`
       : `cho nhân viên: ${employeeNames[0] || "--"}`;
-    const lineText = `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc lúc: ${assignedTimeText} ${employeeText}`;
+    const taskText = getAssignmentHistoryTaskText(history);
+    const lineText = `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc: ${taskText} lúc: ${assignedTimeText} ${employeeText}`;
     const deleteButton = canDeleteHistory
       ? `<button class="work-assignment-history-delete-btn" data-action="delete-assignment-history" data-assignment-history-id="${escapeHtml(history.id || "")}" type="button" aria-label="Xóa dòng Lịch sử giao việc này" title="Xóa dòng Lịch sử giao việc này">🗑 Xóa</button>`
       : "";
@@ -15194,6 +15295,12 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
         workOrderCreatedAt: workOrderMeta?.createdAt || task.createdAt || Timestamp.fromDate(now),
         recipients: [{ uid: newEmployee.uid, name: newEmployeeName }],
         taskIds: [task.id],
+        taskAssignments: [{
+          taskId: task.id,
+          taskName: task.title || "",
+          employeeUid: newEmployee.uid,
+          employeeName: newEmployeeName
+        }],
         taskCount: Number(workOrderMeta?.taskCount || task.workOrderTaskCount || 1),
         source: "assigned_from_waiting"
       });
