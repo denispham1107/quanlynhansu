@@ -693,6 +693,8 @@ const els = {
   employeeView: $("#employeeView"),
   currentUserText: $("#currentUserText"),
   loginForm: $("#loginForm"),
+  installPwaBtn: $("#installPwaBtn"),
+  installPwaHelp: $("#installPwaHelp"),
   logoutBtn: $("#logoutBtn"),
   mobileTopbarMenuBtn: $("#mobileTopbarMenuBtn"),
   mobileTopbarMenu: $("#mobileTopbarMenu"),
@@ -2027,6 +2029,94 @@ function isStandaloneWebApp() {
   return window.matchMedia?.("(display-mode: standalone)")?.matches
     || window.navigator.standalone === true;
 }
+
+
+let deferredPwaInstallPrompt = null;
+
+function setPwaInstallHelp(message = "") {
+  if (!els.installPwaHelp) return;
+  els.installPwaHelp.innerHTML = message;
+  els.installPwaHelp.hidden = !message;
+}
+
+function refreshPwaInstallButton() {
+  const button = els.installPwaBtn;
+  if (!button) return;
+
+  if (isStandaloneWebApp()) {
+    button.textContent = "Ứng dụng đã được cài đặt";
+    button.disabled = true;
+    setPwaInstallHelp("<strong>Culao Task đang chạy dưới dạng ứng dụng web độc lập.</strong>");
+    return;
+  }
+
+  button.textContent = "Cài đặt";
+  button.disabled = false;
+}
+
+function showManualPwaInstallGuide() {
+  if (isIosDevice()) {
+    setPwaInstallHelp(
+      "<strong>iPhone/iPad:</strong> Safari không cho website tự bấm cài đặt. Hãy mở trang bằng Safari, bấm nút Chia sẻ, chọn “Thêm vào Màn hình chính”, rồi xác nhận “Thêm”. Culao Task sẽ mở dưới dạng ứng dụng độc lập, không phải một tab trình duyệt."
+    );
+    return;
+  }
+
+  setPwaInstallHelp(
+    "<strong>Trình duyệt chưa mở hộp cài đặt.</strong> Hãy dùng Chrome hoặc Edge, chờ trang tải xong rồi bấm lại. Bạn cũng có thể mở menu trình duyệt và chọn “Cài đặt ứng dụng” hoặc “Thêm vào Màn hình chính”."
+  );
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredPwaInstallPrompt = event;
+  setPwaInstallHelp("");
+  refreshPwaInstallButton();
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredPwaInstallPrompt = null;
+  refreshPwaInstallButton();
+  toast("Đã cài đặt Culao Task dưới dạng ứng dụng web.", "success");
+});
+
+window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change", refreshPwaInstallButton);
+
+els.installPwaBtn?.addEventListener("click", async () => {
+  if (isStandaloneWebApp()) {
+    refreshPwaInstallButton();
+    toast("Culao Task đã được cài đặt trên thiết bị này.", "success");
+    return;
+  }
+
+  if (!deferredPwaInstallPrompt) {
+    showManualPwaInstallGuide();
+    return;
+  }
+
+  const promptEvent = deferredPwaInstallPrompt;
+  deferredPwaInstallPrompt = null;
+  setButtonLoading(els.installPwaBtn, true, "Đang mở cài đặt...");
+
+  try {
+    await promptEvent.prompt();
+    const choice = await promptEvent.userChoice;
+    if (choice?.outcome === "accepted") {
+      toast("Đã xác nhận cài đặt Culao Task.", "success");
+    } else {
+      toast("Bạn đã hủy cài đặt ứng dụng.", "info");
+      showManualPwaInstallGuide();
+    }
+  } catch (error) {
+    console.warn("Không mở được hộp cài đặt PWA:", error);
+    showManualPwaInstallGuide();
+  } finally {
+    setButtonLoading(els.installPwaBtn, false);
+    refreshPwaInstallButton();
+  }
+});
+
+refreshPwaInstallButton();
 
 function getConfiguredVapidKey() {
   const value = firebaseConfig?.messagingVapidKey

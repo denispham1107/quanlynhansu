@@ -9822,6 +9822,50 @@
     }
   }
 </style>
+
+  <style>
+    /* Nút cài Culao Task dưới dạng PWA ngay tại màn hình đăng nhập. */
+    .pwa-install-btn {
+      width: 100%;
+      min-height: 48px;
+      margin-top: 10px;
+      border: 1px solid #93c5fd !important;
+      background: linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%) !important;
+      color: #1d4ed8 !important;
+      font-weight: 900 !important;
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.10);
+    }
+
+    .pwa-install-btn:hover,
+    .pwa-install-btn:focus-visible {
+      border-color: #2563eb !important;
+      background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%) !important;
+      color: #1e40af !important;
+    }
+
+    .pwa-install-btn:disabled {
+      cursor: default;
+      opacity: 0.72;
+      box-shadow: none;
+    }
+
+    .pwa-install-help {
+      margin: 10px 0 0;
+      padding: 11px 12px;
+      border: 1px solid #bfdbfe;
+      border-radius: 14px;
+      background: #f8fbff;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+
+    .pwa-install-help strong {
+      color: #1d4ed8;
+    }
+  </style>
+
 </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
@@ -9884,6 +9928,8 @@
           <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" required />
         </label>
         <button id="loginBtn" class="btn primary" type="submit">Đăng nhập</button>
+        <button id="installPwaBtn" class="btn pwa-install-btn" type="button">Cài đặt</button>
+        <p id="installPwaHelp" class="pwa-install-help" hidden></p>
       </form>
 
       <p class="small-note">
@@ -10977,7 +11023,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260725-hotel-result-rule-v32"></script>
+  <script type="module" src="app.js?v=20260729-pwa-install-button-v48"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
