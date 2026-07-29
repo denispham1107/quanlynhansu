@@ -6,10 +6,6 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "display_override": [
-    "window-controls-overlay",
-    "standalone"
-  ],
   "background_color": "#eaf3ff",
   "theme_color": "#2563eb",
   "orientation": "any",
@@ -27,5 +23,7 @@
       "purpose": "any maskable"
     }
   ],
-  "prefer_related_applications": false
+  "prefer_related_applications": false,
+  "lang": "vi-VN",
+  "dir": "ltr"
 }

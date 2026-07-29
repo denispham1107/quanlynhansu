@@ -14,6 +14,42 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
+
+  <!--
+    Khởi tạo PWA thật sớm, trước khi app.js và Firebase tải xong.
+    Điều này tránh bỏ lỡ sự kiện beforeinstallprompt trên Android Chrome.
+  -->
+  <script>
+    (() => {
+      const pwaState = window.__CULAO_PWA_INSTALL__ = window.__CULAO_PWA_INSTALL__ || {
+        promptEvent: null,
+        installed: false,
+        serviceWorkerPromise: null
+      };
+
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        pwaState.promptEvent = event;
+        window.dispatchEvent(new CustomEvent("culao:pwa-install-ready"));
+      });
+
+      window.addEventListener("appinstalled", () => {
+        pwaState.promptEvent = null;
+        pwaState.installed = true;
+        window.dispatchEvent(new CustomEvent("culao:pwa-installed"));
+      });
+
+      if ("serviceWorker" in navigator) {
+        pwaState.serviceWorkerPromise = navigator.serviceWorker
+          .register("./sw.js", { scope: "./" })
+          .catch((error) => {
+            console.warn("Không đăng ký sớm được service worker:", error);
+            return null;
+          });
+      }
+    })();
+  </script>
+
   <link rel="stylesheet" href="styles.css" />
 
   <style>
@@ -11023,7 +11059,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260729-pwa-install-button-v48"></script>
+  <script type="module" src="app.js?v=20260729-pwa-install-fix-v49"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

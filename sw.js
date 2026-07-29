@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260729-pwa-install-button-v48";
+const CACHE_NAME = "culao-task-shell-v20260729-pwa-install-fix-v49";
 const APP_SHELL = [
   "./",
   "./index.html",
