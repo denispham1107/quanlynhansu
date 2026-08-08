@@ -274,7 +274,7 @@ const SUPERVISOR_PERMISSION_DEFINITIONS = [
   { key: "accessWorkTemplates", label: "Quyền truy cập trang Danh sách công việc", description: "Mở và xem danh sách công việc mẫu đã tạo.", primary: true },
   { key: "dispatchWorkOrder", label: "Giao Phiếu công việc", description: "Giao một Phiếu đang nháp hoặc tạo và giao ngay cho nhân viên." },
   { key: "editWorkOrder", label: "Sửa Phiếu chưa giao", description: "Sửa tên Phiếu, các dòng công việc, nhân viên, thời gian và yêu cầu ảnh trước khi giao." },
-  { key: "reviewTasks", label: "Duyệt kết quả công việc", description: "Xác nhận hoàn thành, yêu cầu làm lại và kết thúc Phiếu nghỉ trưa." },
+  { key: "reviewTasks", label: "Duyệt kết quả công việc", description: "Xác nhận hoàn thành, yêu cầu làm lại và chủ động kết thúc công việc đã giao." },
   { key: "reassignTasks", label: "Đổi nhân viên phụ trách", description: "Chuyển công việc sang nhân viên khác hoặc đưa về trạng thái Chờ chọn người." },
   { key: "extendTaskTime", label: "Thêm giờ công việc", description: "Cộng thêm thời gian và quản lý danh sách mục đích thêm giờ." },
   { key: "managePhotoRequirements", label: "Chỉnh số ảnh bắt buộc", description: "Thay đổi số lượng ảnh báo cáo bắt buộc của công việc chưa hoàn thành." },
@@ -12445,7 +12445,7 @@ function renderTaskCard(task, mode) {
     canEmployeeSubmit,
     canAdminReview,
     canAdminDeleteTask: mode === "admin" && isAdminProfile() && !isWorkOrderDeletionLocked(),
-    canAdminEndLunchBreak: canAdminEndLunchBreak(task, mode),
+    canAdminEndTask: canAdminEndAssignedTask(task, mode),
     canAdminExtendTime: canAdminExtendTaskTime(task, mode),
     canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
     submitPhotoReady: photoCompletionState.ready,
@@ -13004,11 +13004,14 @@ function normalizeTaskResultForDisplay(task) {
   };
 }
 
-function canAdminEndLunchBreak(task, mode) {
-  return mode === "admin"
-    && hasPermission("reviewTasks")
-    && isLunchBreakTask(task)
-    && task.status === "lunch_break";
+function canAdminEndAssignedTask(task, mode) {
+  if (mode !== "admin" || !hasPermission("reviewTasks") || !task?.assignedToUid) return false;
+
+  // Admin được chủ động kết thúc mọi công việc đã giao đang còn chạy.
+  // Không hiện nút cho Phiếu nháp, Chờ chọn người, Chờ xác nhận hoặc Đã hoàn thành.
+  // Công việc đang "Chờ đến lượt" vẫn có raw status là doing nên cũng có thể được
+  // Admin kết thúc; khi đó thời gian thực tế chưa chạy sẽ được tính là 0 phút.
+  return ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status);
 }
 
 function isTaskOverdueForTimeExtension(task, nowMs = Date.now()) {
@@ -13108,9 +13111,9 @@ function renderTaskActions(task, permissions) {
     `);
   }
 
-  if (permissions.canAdminEndLunchBreak) {
+  if (permissions.canAdminEndTask) {
     buttons.push(`
-      <button class="btn primary" data-action="end-lunch-break" data-task-id="${escapeHtml(task.id)}">
+      <button class="btn primary" data-action="end-assigned-task" data-task-id="${escapeHtml(task.id)}">
         Kết thúc
       </button>
     `);
@@ -13213,8 +13216,8 @@ document.addEventListener("click", async (event) => {
     await approveTask(taskId, button);
   }
 
-  if (action === "end-lunch-break") {
-    await endLunchBreakTask(taskId, button);
+  if (action === "end-assigned-task") {
+    await endAssignedTask(taskId, button);
   }
 
   if (action === "redo-task") {
@@ -16213,15 +16216,15 @@ async function approveTask(taskId, button) {
   }
 }
 
-async function endLunchBreakTask(taskId, button) {
-  if (!requirePermission("reviewTasks", "Tài khoản của bạn chưa được cấp quyền kết thúc Phiếu nghỉ trưa.")) return;
+async function endAssignedTask(taskId, button) {
+  if (!requirePermission("reviewTasks", "Tài khoản của bạn chưa được cấp quyền chủ động kết thúc công việc.")) return;
   setButtonLoading(button, true, "Đang kết thúc...");
 
   try {
     const taskSnap = await getDoc(doc(db, "tasks", taskId));
 
     if (!taskSnap.exists()) {
-      throw new Error("Không tìm thấy phiếu Nghỉ trưa.");
+      throw new Error("Không tìm thấy công việc.");
     }
 
     const task = {
@@ -16229,30 +16232,52 @@ async function endLunchBreakTask(taskId, button) {
       ...taskSnap.data()
     };
 
-    if (!isLunchBreakTask(task) || task.status !== "lunch_break") {
-      throw new Error("Chỉ có thể kết thúc trực tiếp task đang ở trạng thái Nghỉ trưa.");
+    if (!task.assignedToUid) {
+      throw new Error("Công việc này chưa được giao cho nhân viên.");
     }
 
-    const result = calculateResultAt(task, new Date());
+    if (!["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status)) {
+      throw new Error("Chỉ có thể kết thúc trực tiếp công việc đã giao đang còn thực hiện.");
+    }
+
+    const endedAt = new Date();
+    const endedTimestamp = Timestamp.fromDate(endedAt);
+    const result = calculateResultAt(task, endedAt);
+    const endedByUid = state.user?.uid || "";
+    const endedByName = state.profile?.name || state.profile?.email || "Admin";
 
     await updateDoc(doc(db, "tasks", taskId), {
       status: "completed",
-      submittedAt: serverTimestamp(),
-      approvedAt: serverTimestamp(),
+      submittedAt: endedTimestamp,
+      approvedAt: endedTimestamp,
       actualMinutes: result.actualMinutes,
       resultType: result.resultType,
       differenceMinutes: result.differenceMinutes,
-      differencePercent: result.differencePercent
+      differencePercent: result.differencePercent,
+      adminEndedAt: endedTimestamp,
+      adminEndedByUid: endedByUid,
+      adminEndedByName: endedByName
     });
 
-    await reflowQueuedTasksForEmployee(task.assignedToUid, taskId);
+    // Bảo đảm task không còn nằm trong danh sách phát âm báo chờ Admin duyệt.
+    markTaskReviewDecisionLocally(taskId, "completed");
+
+    // Nếu nhân viên có các công việc đang chờ đến lượt phía sau, kéo lại mốc bắt đầu
+    // ngay sau thời điểm Admin chủ động kết thúc công việc hiện tại.
+    await reflowQueuedTasksForEmployee(task.assignedToUid, taskId, endedAt);
+
+    const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+    const isLunchBreak = isLunchBreakTask(task);
+    const resultText = taskResultShortText(result);
 
     const notifications = [
       {
         recipientUid: state.user.uid,
-        type: "task_approved_admin",
-        title: "Đã kết thúc nghỉ trưa",
-        message: `Bạn đã kết thúc phiếu Nghỉ trưa “${task.title}” của ${task.assignedToName || "nhân viên"}.`,
+        type: isLunchBreak ? "task_approved_admin" : "task_admin_ended_admin",
+        title: isLunchBreak ? "Đã kết thúc nghỉ trưa" : "Đã chủ động kết thúc công việc",
+        message: isLunchBreak
+          ? `Bạn đã kết thúc phiếu Nghỉ trưa “${task.title}” của ${employeeName}. Thời gian nghỉ: ${result.actualMinutes} phút.`
+          : `Bạn đã kết thúc “${task.title}” của ${employeeName}. Kết quả: ${resultText}.`,
         taskId,
         taskTitle: task.title
       }
@@ -16261,19 +16286,27 @@ async function endLunchBreakTask(taskId, button) {
     if (task.assignedToUid) {
       notifications.unshift({
         recipientUid: task.assignedToUid,
-        type: "task_approved",
-        title: "Phiếu Nghỉ trưa đã kết thúc",
-        message: `Admin đã kết thúc phiếu Nghỉ trưa “${task.title}”.`,
+        type: isLunchBreak ? "task_approved" : "task_admin_ended",
+        title: isLunchBreak ? "Phiếu Nghỉ trưa đã kết thúc" : "Công việc đã được Admin kết thúc",
+        message: isLunchBreak
+          ? `Admin đã kết thúc phiếu Nghỉ trưa “${task.title}”. Bạn đã nghỉ trưa được ${result.actualMinutes} phút.`
+          : `Admin đã chủ động kết thúc công việc “${task.title}”. Kết quả: ${resultText}.`,
         taskId,
         taskTitle: task.title
       });
     }
 
     await createNotifications(notifications);
-    toast("Đã kết thúc phiếu Nghỉ trưa và chuyển sang trạng thái Đã hoàn thành.", "success");
+
+    toast(
+      isLunchBreak
+        ? "Đã kết thúc phiếu Nghỉ trưa và chuyển sang trạng thái Đã hoàn thành."
+        : "Đã chủ động kết thúc công việc, tính kết quả và chuyển sang Đã hoàn thành.",
+      "success"
+    );
   } catch (error) {
     console.error(error);
-    toast(error.message || "Không kết thúc được phiếu Nghỉ trưa.", "error");
+    toast(error.message || "Không kết thúc được công việc.", "error");
   } finally {
     setButtonLoading(button, false);
   }
