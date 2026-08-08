@@ -8759,11 +8759,16 @@ async function deleteSingleTask(taskId, button) {
   const workOrderName = String(workOrder?.name || task.workOrderName || "Phiếu công việc").trim();
   const taskName = String(task.title || "(Chưa đặt tên công việc)").trim();
 
+  const deletingLastTask = remainingTasks.length === 0;
   const confirmed = await requestDestructiveConfirmation({
-    title: "Xóa công việc khỏi Phiếu?",
-    message: `Bạn có thực sự muốn xóa công việc “${taskName}” khỏi Phiếu “${workOrderName}” không?`,
-    details: `Chỉ công việc này và ảnh thuộc công việc này bị xóa. Phiếu “${workOrderName}” và các công việc còn lại vẫn được giữ nguyên. Lịch sử giao việc cũng không bị xóa.`,
-    confirmLabel: "Xóa công việc"
+    title: deletingLastTask ? "Xóa công việc cuối cùng và Phiếu?" : "Xóa công việc khỏi Phiếu?",
+    message: deletingLastTask
+      ? `Đây là công việc cuối cùng trong Phiếu “${workOrderName}”. Nếu xóa công việc “${taskName}”, toàn bộ Phiếu này cũng sẽ được xóa. Bạn có muốn tiếp tục không?`
+      : `Bạn có thực sự muốn xóa công việc “${taskName}” khỏi Phiếu “${workOrderName}” không?`,
+    details: deletingLastTask
+      ? `Công việc, ảnh thuộc công việc và Phiếu “${workOrderName}” sẽ bị xóa. Lịch sử giao việc vẫn được giữ nguyên.`
+      : `Chỉ công việc này và ảnh thuộc công việc này bị xóa. Phiếu “${workOrderName}” và các công việc còn lại vẫn được giữ nguyên. Lịch sử giao việc cũng không bị xóa.`,
+    confirmLabel: deletingLastTask ? "Xóa công việc và Phiếu" : "Xóa công việc"
   });
 
   if (!confirmed) return;
@@ -8785,18 +8790,15 @@ async function deleteSingleTask(taskId, button) {
     });
 
     if (workOrderId !== "legacy" && workOrder) {
-      const workOrderUpdate = {
-        taskCount: remainingTasks.length
-      };
-
-      // Nếu xóa công việc cuối cùng, vẫn giữ Phiếu để Admin có thể sửa/thêm lại
-      // công việc hoặc dùng nút “Xóa phiếu” như trước. Chuyển Phiếu về nháp để
-      // Phiếu 0 công việc vẫn hiển thị trong danh sách.
       if (!remainingTasks.length) {
-        workOrderUpdate.status = "draft";
+        // Khi đây là công việc cuối cùng trong Phiếu, xóa luôn Phiếu công việc.
+        // Lịch sử giao việc nằm ở collection riêng nên vẫn được giữ nguyên.
+        batch.delete(doc(db, "workOrders", workOrderId));
+      } else {
+        batch.update(doc(db, "workOrders", workOrderId), {
+          taskCount: remainingTasks.length
+        });
       }
-
-      batch.update(doc(db, "workOrders", workOrderId), workOrderUpdate);
     }
 
     await batch.commit();
@@ -8814,7 +8816,7 @@ async function deleteSingleTask(taskId, button) {
     toast(
       remainingTasks.length
         ? `Đã xóa công việc “${taskName}”. Phiếu còn ${remainingTasks.length} công việc.`
-        : `Đã xóa công việc cuối cùng. Phiếu “${workOrderName}” vẫn được giữ lại với 0 công việc.`,
+        : `Đã xóa công việc cuối cùng và xóa luôn Phiếu “${workOrderName}”.`,
       "success"
     );
   } catch (error) {
@@ -12444,8 +12446,10 @@ function renderTaskCard(task, mode) {
   const taskActions = renderTaskActions(task, {
     canEmployeeSubmit,
     canAdminReview,
-    canAdminDeleteTask: mode === "admin" && isAdminProfile() && !isWorkOrderDeletionLocked(),
-    canAdminEndTask: canAdminEndAssignedTask(task, mode),
+    // Hai thao tác phá hủy/chốt công việc chỉ hiển thị khi chính thẻ công việc
+    // đang được mở Chi tiết. Ở chế độ Thu gọn, giữ giao diện gọn và tránh bấm nhầm.
+    canAdminDeleteTask: mode === "admin" && activeExpanded && isAdminProfile() && !isWorkOrderDeletionLocked(),
+    canAdminEndTask: activeExpanded && canAdminEndAssignedTask(task, mode),
     canAdminExtendTime: canAdminExtendTaskTime(task, mode),
     canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
     submitPhotoReady: photoCompletionState.ready,

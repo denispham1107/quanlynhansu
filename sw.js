@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260809-admin-end-assigned-task-v51";
+const CACHE_NAME = "culao-task-shell-v20260809-delete-last-task-and-hide-compact-v52";
 const APP_SHELL = [
   "./",
   "./index.html",
