@@ -11094,13 +11094,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260729-pwa-install-fix-v49"></script>
+  <script type="module" src="app.js?v=20260809-ios-calendar-close-v54"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
     <div class="google-calendar-import-backdrop" data-close-google-calendar-import></div>
     <section class="google-calendar-import-card">
-      <button class="google-calendar-import-close" type="button" data-close-google-calendar-import aria-label="Đóng">×</button>
+      <button id="googleCalendarImportCloseBtn" class="google-calendar-import-close" type="button" data-close-google-calendar-import aria-label="Đóng">×</button>
       <div class="google-calendar-import-scroll">
       <span class="google-calendar-import-eyebrow">GOOGLE CALENDAR</span>
       <h2 id="googleCalendarImportTitle">Nạp lịch thành Phiếu công việc</h2>
@@ -11210,7 +11210,7 @@
     .google-calendar-import-scroll::-webkit-scrollbar-track { margin:18px 4px; background:transparent; }
     .google-calendar-import-scroll::-webkit-scrollbar-thumb { border:3px solid transparent; border-radius:999px; background:#94a3b8; background-clip:padding-box; }
     .google-calendar-import-scroll { scrollbar-width:thin; scrollbar-color:#94a3b8 transparent; }
-    .google-calendar-import-close { position:absolute; top:16px; right:16px; width:48px; height:48px; border:0; border-radius:16px; background:#eef2f7; font-size:30px; cursor:pointer; }
+    .google-calendar-import-close { position:absolute; top:16px; right:16px; z-index:20; width:48px; height:48px; border:0; border-radius:16px; background:#eef2f7; font-size:30px; cursor:pointer; pointer-events:auto; touch-action:manipulation; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
     .google-calendar-import-eyebrow { display:inline-flex; padding:7px 12px; border:1px solid #86efac; border-radius:999px; background:#ecfdf5; color:#047857; font-size:12px; font-weight:900; letter-spacing:.06em; }
     .google-calendar-import-card h2 { margin:15px 58px 8px 0; font-size:clamp(25px,4vw,34px); line-height:1.12; color:#0f172a; }
     .google-calendar-import-note { margin:0 0 20px; color:#64748b; line-height:1.5; }

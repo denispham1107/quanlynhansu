@@ -727,6 +727,7 @@ const els = {
   openGoogleCalendarImportBtn: $("#openGoogleCalendarImportBtn"),
   openGoogleCalendarImportMobileBtn: $("#openGoogleCalendarImportMobileBtn"),
   googleCalendarImportModal: $("#googleCalendarImportModal"),
+  googleCalendarImportCloseBtn: $("#googleCalendarImportCloseBtn"),
   googleCalendarImportForm: $("#googleCalendarImportForm"),
   googleCalendarIdInput: $("#googleCalendarIdInput"),
   googleCalendarApiKeyInput: $("#googleCalendarApiKeyInput"),
@@ -16863,9 +16864,22 @@ els.googleCalendarPreviewList?.addEventListener("click", (event) => {
   checkbox.checked = !checkbox.checked;
   checkbox.dispatchEvent(new Event("change", { bubbles: true }));
 });
+function handleGoogleCalendarImportClose(event) {
+  // iOS Chrome/Safari đôi lúc đặt lớp cuộn của modal lên một compositing layer riêng.
+  // Bắt trực tiếp cả touchend lẫn click trên nút X để thao tác đóng không phụ thuộc
+  // vào event delegation/bubbling của lớp scroll. preventDefault ở touchend cũng
+  // ngăn iOS phát thêm click "xuyên" xuống giao diện sau khi modal đã đóng.
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  closeGoogleCalendarImportModal();
+}
+
+els.googleCalendarImportCloseBtn?.addEventListener("touchend", handleGoogleCalendarImportClose, { passive: false });
+els.googleCalendarImportCloseBtn?.addEventListener("click", handleGoogleCalendarImportClose);
+
 els.googleCalendarImportModal?.addEventListener("click", (event) => {
   if (event.target.matches("[data-close-google-calendar-import], .google-calendar-import-backdrop")) {
-    closeGoogleCalendarImportModal();
+    handleGoogleCalendarImportClose(event);
   }
 });
 
