@@ -4248,6 +4248,19 @@
         margin: 0 !important;
       }
 
+      /* Hai nút quản trị “Xóa CV” và “Kết thúc” luôn có sẵn trong DOM nhưng
+         chỉ hiện khi chính thẻ công việc đang mở Chi tiết. Điều này tránh lỗi
+         bấm Chi tiết nhưng nút không xuất hiện do thẻ không được render lại. */
+      .task-card .task-detail-only-action {
+        display: none !important;
+      }
+
+      .task-card.is-desktop-expanded .task-detail-only-action,
+      html.desktop-task-detail-mode .task-card .task-detail-only-action,
+      .task-card.is-mobile-expanded .task-detail-only-action {
+        display: inline-flex !important;
+      }
+
       .task-actions .btn,
       .task-desktop-quick-actions .btn {
         min-height: 34px !important;
@@ -9902,7 +9915,29 @@
     }
   </style>
 
-</head>
+
+    <style id="task-detail-admin-actions-fix">
+      /* Fix: các nút quản trị đã được render sẵn, nhưng chỉ hiển thị khi thẻ
+         công việc thực sự mở Chi tiết trên desktop hoặc mobile. */
+      .task-card .task-detail-only-action {
+        display: none !important;
+      }
+
+      @media (min-width: 769px) {
+        .task-card.is-desktop-expanded .task-detail-only-action,
+        html.desktop-task-detail-mode .task-card .task-detail-only-action {
+          display: inline-flex !important;
+        }
+      }
+
+      @media (max-width: 768px) {
+        .task-card.is-mobile-expanded .task-detail-only-action {
+          display: inline-flex !important;
+        }
+      }
+    </style>
+
+  </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
 

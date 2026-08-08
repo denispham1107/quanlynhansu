@@ -12446,10 +12446,11 @@ function renderTaskCard(task, mode) {
   const taskActions = renderTaskActions(task, {
     canEmployeeSubmit,
     canAdminReview,
-    // Hai thao tác phá hủy/chốt công việc chỉ hiển thị khi chính thẻ công việc
-    // đang được mở Chi tiết. Ở chế độ Thu gọn, giữ giao diện gọn và tránh bấm nhầm.
-    canAdminDeleteTask: mode === "admin" && activeExpanded && isAdminProfile() && !isWorkOrderDeletionLocked(),
-    canAdminEndTask: activeExpanded && canAdminEndAssignedTask(task, mode),
+    // Luôn render hai nút quản trị vào DOM khi đủ quyền; CSS sẽ chỉ hiện chúng
+    // lúc thẻ công việc đang mở Chi tiết. Cách này giúp nút xuất hiện ngay khi
+    // người dùng bấm “Chi tiết” mà không cần render lại toàn bộ danh sách.
+    canAdminDeleteTask: mode === "admin" && isAdminProfile() && !isWorkOrderDeletionLocked(),
+    canAdminEndTask: canAdminEndAssignedTask(task, mode),
     canAdminExtendTime: canAdminExtendTaskTime(task, mode),
     canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
     submitPhotoReady: photoCompletionState.ready,
@@ -13078,7 +13079,7 @@ function renderTaskActions(task, permissions) {
 
   if (permissions.canAdminDeleteTask) {
     buttons.push(`
-      <button class="btn danger small" data-action="delete-single-task" data-task-id="${escapeHtml(task.id)}" type="button" title="Xóa riêng công việc này, vẫn giữ Phiếu công việc">
+      <button class="btn danger small task-detail-only-action" data-action="delete-single-task" data-task-id="${escapeHtml(task.id)}" type="button" title="Xóa riêng công việc này, vẫn giữ Phiếu công việc">
         🗑 Xóa CV
       </button>
     `);
@@ -13117,7 +13118,7 @@ function renderTaskActions(task, permissions) {
 
   if (permissions.canAdminEndTask) {
     buttons.push(`
-      <button class="btn primary" data-action="end-assigned-task" data-task-id="${escapeHtml(task.id)}">
+      <button class="btn primary task-detail-only-action" data-action="end-assigned-task" data-task-id="${escapeHtml(task.id)}">
         Kết thúc
       </button>
     `);
