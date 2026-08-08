@@ -8728,6 +8728,103 @@ async function getCollectionDeleteOperations(collectionName) {
   return snapshot.docs.map((item) => (batch) => batch.delete(doc(db, collectionName, item.id)));
 }
 
+// Xóa riêng một công việc nhưng giữ nguyên Phiếu công việc.
+// Quyền này dùng chung với quyền Xóa Phiếu để không phát sinh thêm một quyền quản trị mới.
+// Sau khi xóa, hệ thống cập nhật lại số công việc/rowIndex của Phiếu và kéo lại hàng đợi
+// thời gian của nhân viên nếu công việc bị xóa đang chiếm chỗ trong hàng đợi.
+async function deleteSingleTask(taskId, button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ tài khoản Admin mới được xóa riêng từng công việc trong Phiếu.", "error");
+    return;
+  }
+
+  if (isWorkOrderDeletionLocked()) {
+    toast("Chức năng Xóa công việc trong Phiếu đang bị khóa trong Cài đặt.", "error");
+    return;
+  }
+
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) {
+    toast("Không tìm thấy công việc cần xóa.", "error");
+    return;
+  }
+
+  const workOrderId = task.workOrderId || "legacy";
+  const tasksInGroup = state.tasks
+    .filter((item) => (item.workOrderId || "legacy") === workOrderId)
+    .slice()
+    .sort((a, b) => Number(a.rowIndex ?? 0) - Number(b.rowIndex ?? 0));
+  const remainingTasks = tasksInGroup.filter((item) => item.id !== task.id);
+  const workOrder = workOrderId === "legacy" ? null : getWorkOrderMeta(workOrderId);
+  const workOrderName = String(workOrder?.name || task.workOrderName || "Phiếu công việc").trim();
+  const taskName = String(task.title || "(Chưa đặt tên công việc)").trim();
+
+  const confirmed = await requestDestructiveConfirmation({
+    title: "Xóa công việc khỏi Phiếu?",
+    message: `Bạn có thực sự muốn xóa công việc “${taskName}” khỏi Phiếu “${workOrderName}” không?`,
+    details: `Chỉ công việc này và ảnh thuộc công việc này bị xóa. Phiếu “${workOrderName}” và các công việc còn lại vẫn được giữ nguyên. Lịch sử giao việc cũng không bị xóa.`,
+    confirmLabel: "Xóa công việc"
+  });
+
+  if (!confirmed) return;
+
+  setButtonLoading(button, true, "Đang xoá...");
+
+  try {
+    await deleteTaskPhotosFromStorage([task]);
+
+    const batch = writeBatch(db);
+    batch.delete(doc(db, "tasks", task.id));
+
+    // Chuẩn hóa lại thứ tự và tổng số công việc còn lại trong cùng Phiếu.
+    remainingTasks.forEach((remainingTask, index) => {
+      batch.update(doc(db, "tasks", remainingTask.id), {
+        rowIndex: index,
+        workOrderTaskCount: remainingTasks.length
+      });
+    });
+
+    if (workOrderId !== "legacy" && workOrder) {
+      const workOrderUpdate = {
+        taskCount: remainingTasks.length
+      };
+
+      // Nếu xóa công việc cuối cùng, vẫn giữ Phiếu để Admin có thể sửa/thêm lại
+      // công việc hoặc dùng nút “Xóa phiếu” như trước. Chuyển Phiếu về nháp để
+      // Phiếu 0 công việc vẫn hiển thị trong danh sách.
+      if (!remainingTasks.length) {
+        workOrderUpdate.status = "draft";
+      }
+
+      batch.update(doc(db, "workOrders", workOrderId), workOrderUpdate);
+    }
+
+    await batch.commit();
+
+    // Nếu công việc bị xóa đang chạy/đang giữ chỗ thời gian, kéo các công việc
+    // chờ phía sau của cùng nhân viên lên ngay để không còn khoảng trống sai.
+    if (task.assignedToUid && isTaskBlockingQueue(task)) {
+      try {
+        await reflowQueuedTasksForEmployee(task.assignedToUid, task.id, new Date());
+      } catch (queueError) {
+        console.warn("Không cập nhật được hàng đợi sau khi xóa công việc", queueError);
+      }
+    }
+
+    toast(
+      remainingTasks.length
+        ? `Đã xóa công việc “${taskName}”. Phiếu còn ${remainingTasks.length} công việc.`
+        : `Đã xóa công việc cuối cùng. Phiếu “${workOrderName}” vẫn được giữ lại với 0 công việc.`,
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không xóa được công việc.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 async function deleteWorkOrder(workOrderId, button) {
   if (!requirePermission("deleteWorkOrder", "Tài khoản của bạn chưa được cấp quyền xóa Phiếu công việc.")) return;
 
@@ -12347,6 +12444,7 @@ function renderTaskCard(task, mode) {
   const taskActions = renderTaskActions(task, {
     canEmployeeSubmit,
     canAdminReview,
+    canAdminDeleteTask: mode === "admin" && isAdminProfile() && !isWorkOrderDeletionLocked(),
     canAdminEndLunchBreak: canAdminEndLunchBreak(task, mode),
     canAdminExtendTime: canAdminExtendTaskTime(task, mode),
     canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
@@ -12971,6 +13069,14 @@ function renderTimeExtensionBox(task) {
 function renderTaskActions(task, permissions) {
   const buttons = [];
 
+  if (permissions.canAdminDeleteTask) {
+    buttons.push(`
+      <button class="btn danger small" data-action="delete-single-task" data-task-id="${escapeHtml(task.id)}" type="button" title="Xóa riêng công việc này, vẫn giữ Phiếu công việc">
+        🗑 Xóa CV
+      </button>
+    `);
+  }
+
   if (permissions.canAdminExtendTime) {
     buttons.push(`
       <button class="btn ghost" data-action="open-extend-time" data-task-id="${escapeHtml(task.id)}">
@@ -13133,6 +13239,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "delete-work-order") {
     await deleteWorkOrder(button.dataset.workOrderId, button);
+  }
+
+  if (action === "delete-single-task") {
+    await deleteSingleTask(taskId, button);
   }
 
   if (action === "delete-assignment-history") {
