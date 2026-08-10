@@ -115,6 +115,10 @@ const backfillInvalidTaskHistoryCallable = httpsCallable(
   functions,
   "backfillInvalidTaskHistory"
 );
+const convertInvalidTaskHistoryToLunchBreakCallable = httpsCallable(
+  functions,
+  "convertInvalidTaskHistoryToLunchBreak"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -11514,6 +11518,7 @@ function getFilteredInvalidTaskHistory(searchQuery = state.adminWorkOrderSearch)
   const normalizedQuery = String(searchQuery || "").trim();
 
   return (state.invalidTaskHistory || [])
+    .filter((history) => !history?.convertedAt)
     .filter((history) => isInvalidTaskHistoryInDateFilter(history, state.adminDateFilter))
     .filter((history) => (
       state.adminEmployeeFilter === "all"
@@ -11565,12 +11570,25 @@ function renderInvalidTaskHistory(historyItems = []) {
       : "--/--/---- --:--:--";
     const lineText = `${taskName} • Phiếu: ${workOrderName} • Nhân viên: ${employeeName} • Thời gian thực tế: ${formatMinutes(actualMinutes)} / Quy định: ${formatMinutes(deadlineMinutes)} • Nhanh hơn ${formatMinutes(differenceMinutes)} (${formatPercent(differencePercent)}%) • Hoàn thành: ${completedText}`;
 
+    const convertDisabled = !isAdminProfile() || isWorkOrderDeletionLocked() || !history.id || !history.taskId;
+    const convertTitle = isWorkOrderDeletionLocked()
+      ? "Chức năng xóa Phiếu/công việc đang bị khóa trong Cài đặt."
+      : "Xóa công việc gốc và chuyển thời gian thực tế thành một Phiếu nghỉ trưa đã hoàn thành.";
+
     return `
       <article class="invalid-task-history-row${historyIndex >= 2 && !isExpanded ? " is-compact-hidden" : ""}" data-invalid-task-history-id="${escapeHtml(history.id || "")}">
         <div class="invalid-task-history-row-content">
           <span class="invalid-task-history-badge">Không hợp lệ</span>
           <strong>${escapeHtml(lineText)}</strong>
         </div>
+        <button
+          class="invalid-task-history-convert-btn"
+          data-action="convert-invalid-task-history"
+          data-invalid-task-history-id="${escapeHtml(history.id || "")}"
+          type="button"
+          title="${escapeHtml(convertTitle)}"
+          ${convertDisabled ? "disabled" : ""}
+        >Chuyển</button>
       </article>
     `;
   }).join("");
@@ -11589,6 +11607,57 @@ function renderInvalidTaskHistory(historyItems = []) {
       ${expandButton ? `<div class="invalid-task-history-expand-wrap">${expandButton}</div>` : ""}
     </section>
   `;
+}
+
+async function convertInvalidTaskHistoryToLunchBreak(historyId, button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin mới có thể chuyển công việc không hợp lệ thành Phiếu nghỉ trưa.", "error");
+    return;
+  }
+
+  if (isWorkOrderDeletionLocked()) {
+    toast("Chức năng xóa Phiếu/công việc đang bị khóa trong Cài đặt.", "error");
+    return;
+  }
+
+  const safeHistoryId = String(historyId || "").trim();
+  if (!safeHistoryId) return;
+
+  const history = (state.invalidTaskHistory || []).find((item) => item.id === safeHistoryId);
+  if (!history) {
+    toast("Không tìm thấy dòng Lịch sử công việc không hợp lệ này.", "error");
+    return;
+  }
+
+  const taskName = String(history.taskName || "Công việc").trim() || "Công việc";
+  const workOrderName = String(history.workOrderName || "Phiếu công việc").trim() || "Phiếu công việc";
+  const employeeName = String(history.employeeName || "Nhân viên").trim() || "Nhân viên";
+  const actualMinutes = Math.max(0, Number(history.actualMinutes || 0));
+
+  const confirmed = await requestDestructiveConfirmation({
+    title: "Chuyển thành Phiếu nghỉ trưa?",
+    message: `Công việc “${taskName}” trong Phiếu “${workOrderName}” của ${employeeName} sẽ bị xóa và được chuyển thành một Phiếu nghỉ trưa đã hoàn thành.`,
+    details: `Thời gian nghỉ trưa đã hoàn thành sẽ được ghi đúng bằng thời gian thực tế ${formatMinutes(actualMinutes)} trên dòng lịch sử này. Nếu đây là công việc cuối cùng trong Phiếu gốc thì Phiếu gốc cũng sẽ bị xóa.`,
+    confirmLabel: "Chuyển"
+  });
+
+  if (!confirmed) return;
+
+  setButtonLoading(button, true, "Đang chuyển...");
+  try {
+    const response = await convertInvalidTaskHistoryToLunchBreakCallable({ historyId: safeHistoryId });
+    const result = response?.data || {};
+    const convertedMinutes = Math.max(0, Number(result.actualMinutes ?? actualMinutes));
+    toast(
+      `Đã chuyển “${taskName}” thành Phiếu nghỉ trưa của ${employeeName}, thời gian hoàn thành ${formatMinutes(convertedMinutes)}.`,
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    toast(error?.message || "Không chuyển được công việc thành Phiếu nghỉ trưa.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 async function deleteWorkAssignmentHistoryItem(historyId, button) {
@@ -13405,6 +13474,10 @@ document.addEventListener("click", async (event) => {
   if (action === "toggle-invalid-task-history-expanded") {
     state.invalidTaskHistoryExpanded = !state.invalidTaskHistoryExpanded;
     renderAdminTasks();
+  }
+
+  if (action === "convert-invalid-task-history") {
+    await convertInvalidTaskHistoryToLunchBreak(button.dataset.invalidTaskHistoryId, button);
   }
 });
 
