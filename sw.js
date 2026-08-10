@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260809-fix-ios-calendar-close-v54";
+const CACHE_NAME = "culao-task-shell-v20260811-invalid-task-history-v55";
 const APP_SHELL = [
   "./",
   "./index.html",

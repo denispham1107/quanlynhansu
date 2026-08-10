@@ -111,6 +111,10 @@ const deleteAllWorkAssignmentHistoryCallable = httpsCallable(
   functions,
   "deleteAllWorkAssignmentHistory"
 );
+const backfillInvalidTaskHistoryCallable = httpsCallable(
+  functions,
+  "backfillInvalidTaskHistory"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -142,6 +146,9 @@ const state = {
   workOrders: [],
   workAssignmentHistory: [],
   workAssignmentHistoryExpanded: false,
+  invalidTaskHistory: [],
+  invalidTaskHistoryExpanded: false,
+  invalidTaskHistoryBackfillRequested: false,
   timeExtensionReasons: [],
   workTemplates: [],
   hotelDailyReports: [],
@@ -5070,6 +5077,9 @@ onAuthStateChanged(auth, async (user) => {
   state.workOrders = [];
   state.workAssignmentHistory = [];
   state.workAssignmentHistoryExpanded = false;
+  state.invalidTaskHistory = [];
+  state.invalidTaskHistoryExpanded = false;
+  state.invalidTaskHistoryBackfillRequested = false;
   state.employeeUnassignedTaskCountCache = new Map();
   state.employeeUnassignedTaskCountPendingKey = "";
   state.employeeUnassignedTaskCountRequestSerial += 1;
@@ -5483,6 +5493,7 @@ function setupAdminDashboard() {
       state.tasks = nextTasks;
       renderAdminTasks();
       syncTaskReviewAlertSound();
+      requestInvalidTaskHistoryBackfillOnce();
 
       if (!state.adminTaskSnapshotReady) {
         // Không tự cuộn khi Admin vừa đăng nhập và snapshot đầu tiên chứa các
@@ -5528,6 +5539,25 @@ function setupAdminDashboard() {
     (error) => {
       console.error(error);
       toast("Không đọc được Lịch sử giao việc. Hãy deploy Firestore Rules mới nhất.", "error");
+    }
+  );
+
+  // Lịch sử công việc không hợp lệ: các công việc hoàn thành nhanh hơn từ 15% trở lên.
+  // Collection riêng giúp lịch sử vẫn còn ngay cả khi Phiếu/công việc gốc bị xóa sau này.
+  const invalidTaskHistoryQuery = query(
+    collection(db, "invalidTaskHistory"),
+    orderBy("completedAt", "desc")
+  );
+
+  const unsubInvalidTaskHistory = onSnapshot(
+    invalidTaskHistoryQuery,
+    (snapshot) => {
+      state.invalidTaskHistory = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderAdminTasks();
+    },
+    (error) => {
+      console.error(error);
+      toast("Không đọc được Lịch sử công việc không hợp lệ. Hãy deploy Firestore Rules mới nhất.", "error");
     }
   );
 
@@ -5600,6 +5630,7 @@ function setupAdminDashboard() {
     unsubTasks,
     unsubWorkOrders,
     unsubWorkAssignmentHistory,
+    unsubInvalidTaskHistory,
     unsubWorkTemplates,
     unsubTimeExtensionReasons,
     unsubHotelDailyReports,
@@ -6763,6 +6794,7 @@ const BACKUP_COLLECTIONS = [
   "users",
   "workOrders",
   "workAssignmentHistory",
+  "invalidTaskHistory",
   "tasks",
   "workTemplates",
   "timeExtensionReasons",
@@ -11460,6 +11492,105 @@ function getFilteredWorkAssignmentHistory(searchQuery = state.adminWorkOrderSear
     ));
 }
 
+
+function getInvalidTaskHistoryCompletedDate(history) {
+  return timestampToDate(history?.completedAt);
+}
+
+function isInvalidTaskHistoryInDateFilter(history, filter = state.adminDateFilter) {
+  const completedDate = getInvalidTaskHistoryCompletedDate(history);
+  if (!completedDate) return filter?.mode === "all";
+
+  return isTaskInDateFilter(
+    { taskDate: toLocalDateInputValue(completedDate) },
+    filter
+  );
+}
+
+function getFilteredInvalidTaskHistory(searchQuery = state.adminWorkOrderSearch) {
+  // Công việc không hợp lệ là một nhánh của các công việc đã hoàn thành.
+  if (!["all", "completed"].includes(state.adminStatusFilter)) return [];
+
+  const normalizedQuery = String(searchQuery || "").trim();
+
+  return (state.invalidTaskHistory || [])
+    .filter((history) => isInvalidTaskHistoryInDateFilter(history, state.adminDateFilter))
+    .filter((history) => (
+      state.adminEmployeeFilter === "all"
+      || String(history.employeeUid || "") === state.adminEmployeeFilter
+    ))
+    .filter((history) => (
+      state.adminStatusFilter !== "completed"
+      || state.adminCompletedTypeFilter === "all"
+      || String(history.completedType || "normal") === state.adminCompletedTypeFilter
+    ))
+    .filter((history) => {
+      if (!normalizedQuery) return true;
+      return Number.isFinite(getWorkOrderSearchScore(history.workOrderName || "", normalizedQuery))
+        || Number.isFinite(getWorkOrderSearchScore(history.taskName || "", normalizedQuery));
+    })
+    .sort((a, b) => (
+      (getInvalidTaskHistoryCompletedDate(b)?.getTime() || 0)
+      - (getInvalidTaskHistoryCompletedDate(a)?.getTime() || 0)
+    ));
+}
+
+async function requestInvalidTaskHistoryBackfillOnce() {
+  if (!isAdminProfile() || state.invalidTaskHistoryBackfillRequested) return;
+  state.invalidTaskHistoryBackfillRequested = true;
+
+  try {
+    await backfillInvalidTaskHistoryCallable();
+  } catch (error) {
+    // Không chặn giao diện nếu Function mới chưa được deploy; listener realtime vẫn hoạt động.
+    console.warn("Không backfill được Lịch sử công việc không hợp lệ:", error);
+  }
+}
+
+function renderInvalidTaskHistory(historyItems = []) {
+  if (!historyItems.length) return "";
+
+  const isExpanded = Boolean(state.invalidTaskHistoryExpanded);
+  const rows = historyItems.map((history, historyIndex) => {
+    const taskName = String(history.taskName || "Công việc").trim() || "Công việc";
+    const workOrderName = String(history.workOrderName || "Phiếu công việc").trim() || "Phiếu công việc";
+    const employeeName = String(history.employeeName || "Nhân viên").trim() || "Nhân viên";
+    const actualMinutes = Math.max(0, Number(history.actualMinutes || 0));
+    const deadlineMinutes = Math.max(0, Number(history.deadlineMinutes || 0));
+    const differenceMinutes = Math.max(0, Number(history.differenceMinutes || 0));
+    const differencePercent = Math.max(0, Number(history.differencePercent || 0));
+    const completedDate = getInvalidTaskHistoryCompletedDate(history);
+    const completedText = completedDate
+      ? `${formatDateOnly(toLocalDateInputValue(completedDate))} ${formatTimeWithSeconds(completedDate)}`
+      : "--/--/---- --:--:--";
+    const lineText = `${taskName} • Phiếu: ${workOrderName} • Nhân viên: ${employeeName} • Thời gian thực tế: ${formatMinutes(actualMinutes)} / Quy định: ${formatMinutes(deadlineMinutes)} • Nhanh hơn ${formatMinutes(differenceMinutes)} (${formatPercent(differencePercent)}%) • Hoàn thành: ${completedText}`;
+
+    return `
+      <article class="invalid-task-history-row${historyIndex >= 2 && !isExpanded ? " is-compact-hidden" : ""}" data-invalid-task-history-id="${escapeHtml(history.id || "")}">
+        <div class="invalid-task-history-row-content">
+          <span class="invalid-task-history-badge">Không hợp lệ</span>
+          <strong>${escapeHtml(lineText)}</strong>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  const expandButton = historyItems.length > 2
+    ? `<button class="invalid-task-history-expand-btn" data-action="toggle-invalid-task-history-expanded" type="button" aria-expanded="${isExpanded ? "true" : "false"}">${isExpanded ? "Thu gọn còn 2 dòng mới nhất" : `Xem toàn bộ ${historyItems.length} dòng công việc không hợp lệ`}</button>`
+    : "";
+
+  return `
+    <section class="invalid-task-history-section" aria-label="Lịch sử công việc không hợp lệ">
+      <div class="invalid-task-history-title">
+        <strong>Lịch sử công việc không hợp lệ</strong>
+        <span>${historyItems.length} công việc</span>
+      </div>
+      <div class="invalid-task-history-list">${rows}</div>
+      ${expandButton ? `<div class="invalid-task-history-expand-wrap">${expandButton}</div>` : ""}
+    </section>
+  `;
+}
+
 async function deleteWorkAssignmentHistoryItem(historyId, button) {
   if (!isAdminProfile()) {
     toast("Chỉ Admin mới có thể xóa Lịch sử giao việc.", "error");
@@ -11715,7 +11846,8 @@ function renderAdminTasks() {
     // trạng thái và nhóm công việc đã hoàn thành hiện tại.
     const searchedGroups = getAdminSearchedTicketGroups(computed);
     const searchedHistory = getFilteredWorkAssignmentHistory(searchQuery);
-    const resultCount = searchedGroups.length + searchedHistory.length;
+    const searchedInvalidHistory = getFilteredInvalidTaskHistory(searchQuery);
+    const resultCount = searchedGroups.length + searchedHistory.length + searchedInvalidHistory.length;
     renderAdminWorkOrderSearchSummary(resultCount);
     els.adminCompletedTypeReport?.classList.add("hidden");
 
@@ -11730,6 +11862,7 @@ function renderAdminTasks() {
     els.adminTaskList.classList.remove("empty");
     els.adminTaskList.innerHTML = [
       renderWorkAssignmentHistory(searchedHistory),
+      renderInvalidTaskHistory(searchedInvalidHistory),
       searchedGroups.map((group) => renderTicketGroup(group)).join("")
     ].join("");
 
@@ -11749,7 +11882,8 @@ function renderAdminTasks() {
 
   const groups = withEmptyDraftGroups(groupTasksByWorkOrder(filtered), showEmptyDrafts);
   const assignmentHistory = getFilteredWorkAssignmentHistory();
-  const totalVisibleItems = groups.length + assignmentHistory.length;
+  const invalidTaskHistory = getFilteredInvalidTaskHistory();
+  const totalVisibleItems = groups.length + assignmentHistory.length + invalidTaskHistory.length;
 
   if (!totalVisibleItems) {
     updateAdminMobileResultSummary(0);
@@ -11765,6 +11899,7 @@ function renderAdminTasks() {
 
   els.adminTaskList.innerHTML = [
     renderWorkAssignmentHistory(assignmentHistory),
+    renderInvalidTaskHistory(invalidTaskHistory),
     groups.map((group) => renderTicketGroup(group)).join("")
   ].join("");
 
@@ -13264,6 +13399,11 @@ document.addEventListener("click", async (event) => {
 
   if (action === "toggle-assignment-history-expanded") {
     state.workAssignmentHistoryExpanded = !state.workAssignmentHistoryExpanded;
+    renderAdminTasks();
+  }
+
+  if (action === "toggle-invalid-task-history-expanded") {
+    state.invalidTaskHistoryExpanded = !state.invalidTaskHistoryExpanded;
     renderAdminTasks();
   }
 });

@@ -9872,6 +9872,135 @@
   }
 </style>
 
+<!-- Lịch sử công việc không hợp lệ: cảnh báo xanh dương, nằm ngay dưới Lịch sử giao việc -->
+<style>
+  .invalid-task-history-section {
+    display: grid;
+    gap: 9px;
+    width: 100%;
+    margin: 0 0 16px;
+    box-sizing: border-box;
+  }
+
+  .invalid-task-history-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 4px;
+    color: #1d4ed8;
+  }
+
+  .invalid-task-history-title strong {
+    font-size: 15px;
+    font-weight: 950;
+  }
+
+  .invalid-task-history-title span {
+    color: #2563eb;
+    font-size: 12px;
+    font-weight: 850;
+  }
+
+  .invalid-task-history-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .invalid-task-history-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 11px 14px;
+    border: 1px solid rgba(59, 130, 246, .48);
+    border-left: 7px solid #2563eb;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 52%, #e0e7ff 100%);
+    color: #1e3a8a;
+    box-shadow: 0 8px 20px rgba(37, 99, 235, .10);
+    box-sizing: border-box;
+  }
+
+  .invalid-task-history-row.is-compact-hidden {
+    display: none;
+  }
+
+  .invalid-task-history-row-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .invalid-task-history-row strong {
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .invalid-task-history-badge {
+    flex: 0 0 auto;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
+  .invalid-task-history-expand-wrap {
+    display: flex;
+    justify-content: center;
+    padding-top: 2px;
+  }
+
+  .invalid-task-history-expand-btn {
+    appearance: none;
+    min-height: 42px;
+    padding: 10px 18px;
+    border: 1px solid rgba(59, 130, 246, .45);
+    border-radius: 999px;
+    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    color: #1d4ed8;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 950;
+    cursor: pointer;
+    touch-action: manipulation;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, .10);
+    transition: transform .16s ease, filter .16s ease;
+  }
+
+  .invalid-task-history-expand-btn:hover {
+    filter: brightness(.97);
+    transform: translateY(-1px);
+  }
+
+  @media (max-width: 768px) {
+    .invalid-task-history-section { gap: 7px; margin-bottom: 12px; }
+    .invalid-task-history-title { align-items: flex-start; padding: 0 2px; }
+    .invalid-task-history-title strong { font-size: 13px; }
+    .invalid-task-history-title span { font-size: 10.5px; }
+    .invalid-task-history-row {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 8px;
+      padding: 9px 10px;
+      border-left-width: 5px;
+      border-radius: 12px;
+    }
+    .invalid-task-history-row-content { align-items: flex-start; gap: 8px; }
+    .invalid-task-history-row strong { font-size: 11.5px; line-height: 1.45; }
+    .invalid-task-history-expand-btn { width: 100%; }
+    .invalid-task-history-badge { padding: 4px 7px; font-size: 9px; }
+  }
+</style>
+
   <style>
     /* Nút cài Culao Task dưới dạng PWA ngay tại màn hình đăng nhập. */
     .pwa-install-btn {
