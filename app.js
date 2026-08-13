@@ -220,6 +220,7 @@ const state = {
     maxExtendMinutes: null,
     preventWorkOrderDeletion: false,
     allowOverdueTimeExtension: false,
+    allowEditCompletedTaskActualTime: false,
     workSupervisionEnabled: false,
     workSupervisionCountdownMinutes: 5,
     workSupervisionLunchCreditMinutes: 5,
@@ -238,6 +239,7 @@ const state = {
   workSupervisionEmployeeNotificationTimer: null,
   workOrderSettingsAuthorizationToken: "",
   workOrderSettingsAuthorizationExpiresAt: 0,
+  editingCompletedTaskActualTimeId: null,
   pushServiceWorkerRegistration: null,
   pushMessaging: null,
   pushToken: "",
@@ -599,6 +601,7 @@ function normalizeWorkOrderControlSettings(value = {}) {
     maxExtendMinutes: WORK_ORDER_EXTENSION_LIMIT_OPTIONS.includes(parsedMax) ? parsedMax : null,
     preventWorkOrderDeletion: input.preventWorkOrderDeletion === true,
     allowOverdueTimeExtension: input.allowOverdueTimeExtension === true,
+    allowEditCompletedTaskActualTime: input.allowEditCompletedTaskActualTime === true,
     workSupervisionEnabled: input.workSupervisionEnabled === true,
     workSupervisionCountdownMinutes: Number.isInteger(Number(input.workSupervisionCountdownMinutes))
       && Number(input.workSupervisionCountdownMinutes) >= 1
@@ -672,6 +675,10 @@ function isWorkOrderDeletionLocked() {
 
 function isOverdueTimeExtensionAllowed() {
   return getWorkOrderControlSettings().allowOverdueTimeExtension === true;
+}
+
+function isCompletedTaskActualTimeEditAllowed() {
+  return getWorkOrderControlSettings().allowEditCompletedTaskActualTime === true;
 }
 
 function getTaskExtensionTotalMinutes(task = {}) {
@@ -797,6 +804,7 @@ const els = {
   maxExtendMinutesOptions: $("#maxExtendMinutesOptions"),
   preventWorkOrderDeletion: $("#preventWorkOrderDeletion"),
   allowOverdueTimeExtension: $("#allowOverdueTimeExtension"),
+  allowEditCompletedTaskActualTime: $("#allowEditCompletedTaskActualTime"),
   enableWorkSupervision: $("#enableWorkSupervision"),
   workSupervisionSettingControls: $("#workSupervisionSettingControls"),
   workSupervisionCountdownMinutes: $("#workSupervisionCountdownMinutes"),
@@ -804,6 +812,16 @@ const els = {
   workSupervisionExcludedEmployeeList: $("#workSupervisionExcludedEmployeeList"),
   workSupervisionSettingHelp: $("#workSupervisionSettingHelp"),
   saveWorkOrderSettingsBtn: $("#saveWorkOrderSettingsBtn"),
+  actualTimeEditModal: $("#actualTimeEditModal"),
+  actualTimeEditForm: $("#actualTimeEditForm"),
+  actualTimeEditTaskTitle: $("#actualTimeEditTaskTitle"),
+  actualTimeEditWorkOrderName: $("#actualTimeEditWorkOrderName"),
+  actualTimeEditCurrentValue: $("#actualTimeEditCurrentValue"),
+  actualTimeEditDeadlineValue: $("#actualTimeEditDeadlineValue"),
+  actualTimeEditHours: $("#actualTimeEditHours"),
+  actualTimeEditMinutes: $("#actualTimeEditMinutes"),
+  actualTimeEditPreview: $("#actualTimeEditPreview"),
+  saveActualTimeEditBtn: $("#saveActualTimeEditBtn"),
   adminWorkSupervisionBanner: $("#adminWorkSupervisionBanner"),
   adminWorkSupervisionMessage: $("#adminWorkSupervisionMessage"),
   adminWorkSupervisionCountdown: $("#adminWorkSupervisionCountdown"),
@@ -9526,6 +9544,9 @@ function openWorkOrderSettingsModal() {
   if (els.allowOverdueTimeExtension) {
     els.allowOverdueTimeExtension.checked = settings.allowOverdueTimeExtension;
   }
+  if (els.allowEditCompletedTaskActualTime) {
+    els.allowEditCompletedTaskActualTime.checked = settings.allowEditCompletedTaskActualTime;
+  }
   if (els.enableWorkSupervision) {
     els.enableWorkSupervision.checked = settings.workSupervisionEnabled;
   }
@@ -9722,6 +9743,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       maxExtendMinutes: limitEnabled ? selectedLimit : null,
       preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true,
       allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true,
+      allowEditCompletedTaskActualTime: els.allowEditCompletedTaskActualTime?.checked === true,
       workSupervisionEnabled: supervisionEnabled,
       workSupervisionCountdownMinutes: supervisionCountdownMinutes,
       workSupervisionLunchCreditMinutes: supervisionLunchCreditMinutes,
@@ -13156,9 +13178,19 @@ function renderRedoRequestHistoryBox(task) {
   `;
 }
 
+function canEditCompletedTaskActualTime(task) {
+  return Boolean(
+    isAdminProfile()
+    && isCompletedTaskActualTimeEditAllowed()
+    && task?.status === "completed"
+    && !isLunchBreakTask(task)
+    && !isHotelTask(task)
+  );
+}
+
 function renderResultBox(task) {
   if (isLunchBreakTask(task)) return "";
-  if (task.status !== "completed" || !task.resultType) return "";
+  if (task.status !== "completed") return "";
 
   if (isHotelTask(task)) {
     const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
@@ -13180,10 +13212,21 @@ function renderResultBox(task) {
     className = "result-box slower";
   }
 
+  const editAction = canEditCompletedTaskActualTime(task)
+    ? `
+      <button class="btn primary small completed-actual-time-edit-btn" type="button" data-action="edit-completed-actual-time" data-task-id="${escapeHtml(task.id)}">
+        Sửa thời gian thực tế
+      </button>
+    `
+    : "";
+
   return `
-    <div class="${className}">
-      <strong>Kết quả: ${summary}</strong>
-      <span>Thời gian thực tế: ${formatMinutes(displayResult.actualMinutes)} • Thời gian quy định: ${formatMinutes(displayResult.deadlineMinutes)}</span>
+    <div class="${className} completed-result-box">
+      <div class="completed-result-copy">
+        <strong>Kết quả: ${summary}</strong>
+        <span>Thời gian thực tế: ${formatMinutes(displayResult.actualMinutes)} • Thời gian quy định: ${formatMinutes(displayResult.deadlineMinutes)}</span>
+      </div>
+      ${editAction}
     </div>
   `;
 }
@@ -13428,6 +13471,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "end-assigned-task") {
     await endAssignedTask(taskId, button);
+  }
+
+  if (action === "edit-completed-actual-time") {
+    openCompletedActualTimeEditModal(taskId);
   }
 
   if (action === "redo-task") {
@@ -16618,6 +16665,166 @@ async function requestRedo(taskId, button) {
   }
 }
 
+function closeCompletedActualTimeEditModal() {
+  state.editingCompletedTaskActualTimeId = null;
+  els.actualTimeEditModal?.classList.add("hidden");
+  els.actualTimeEditModal?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("completed-actual-time-edit-open");
+}
+
+function getCompletedActualTimeEditInputMinutes() {
+  const hours = Number(els.actualTimeEditHours?.value || 0);
+  const minutes = Number(els.actualTimeEditMinutes?.value || 0);
+  if (!Number.isInteger(hours) || hours < 0 || hours > 168) return null;
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) return null;
+  const total = (hours * 60) + minutes;
+  return total <= 10080 ? total : null;
+}
+
+function updateCompletedActualTimeEditPreview() {
+  if (!els.actualTimeEditPreview) return;
+  const task = state.tasks.find((item) => item.id === state.editingCompletedTaskActualTimeId);
+  const totalMinutes = getCompletedActualTimeEditInputMinutes();
+  if (!task || totalMinutes === null) {
+    els.actualTimeEditPreview.textContent = "Vui lòng nhập thời gian hợp lệ.";
+    els.actualTimeEditPreview.classList.add("is-error");
+    return;
+  }
+
+  try {
+    const result = calculateResultFromActualMinutes(task, totalMinutes);
+    const resultText = taskResultShortText(result);
+    els.actualTimeEditPreview.textContent = `Kết quả mới dự kiến: ${resultText}. Thời gian thực tế ${formatMinutes(totalMinutes)} / quy định ${formatMinutes(task.deadlineMinutes)}.`;
+    els.actualTimeEditPreview.classList.remove("is-error");
+  } catch (error) {
+    els.actualTimeEditPreview.textContent = error.message || "Không tính được kết quả mới.";
+    els.actualTimeEditPreview.classList.add("is-error");
+  }
+}
+
+function openCompletedActualTimeEditModal(taskId) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được sửa thời gian thực tế của công việc đã hoàn thành.", "error");
+    return;
+  }
+  if (!isCompletedTaskActualTimeEditAllowed()) {
+    toast("Hãy bật “Sửa phiếu công việc đã hoàn thành” trong Cài đặt Phiếu công việc trước.", "error");
+    return;
+  }
+
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task || task.status !== "completed") {
+    toast("Chỉ có thể sửa công việc đã hoàn thành.", "error");
+    return;
+  }
+  if (isLunchBreakTask(task) || isHotelTask(task)) {
+    toast("Nghỉ trưa và Hotel đang dùng logic kết quả riêng nên không sửa bằng chức năng này.", "error");
+    return;
+  }
+
+  const currentActualMinutes = Math.max(0, Math.trunc(Number(task.actualMinutes || 0)));
+  state.editingCompletedTaskActualTimeId = task.id;
+  if (els.actualTimeEditTaskTitle) els.actualTimeEditTaskTitle.textContent = task.title || "Công việc";
+  if (els.actualTimeEditWorkOrderName) els.actualTimeEditWorkOrderName.textContent = `Phiếu: ${task.workOrderName || "Phiếu công việc"}`;
+  if (els.actualTimeEditCurrentValue) els.actualTimeEditCurrentValue.textContent = formatMinutes(currentActualMinutes);
+  if (els.actualTimeEditDeadlineValue) els.actualTimeEditDeadlineValue.textContent = formatMinutes(task.deadlineMinutes);
+  if (els.actualTimeEditHours) els.actualTimeEditHours.value = String(Math.floor(currentActualMinutes / 60));
+  if (els.actualTimeEditMinutes) els.actualTimeEditMinutes.value = String(currentActualMinutes % 60);
+  updateCompletedActualTimeEditPreview();
+
+  els.actualTimeEditModal?.classList.remove("hidden");
+  els.actualTimeEditModal?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("completed-actual-time-edit-open");
+  requestAnimationFrame(() => els.actualTimeEditHours?.focus({ preventScroll: true }));
+}
+
+async function saveCompletedActualTimeEdit(event) {
+  event.preventDefault();
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được sửa thời gian thực tế.", "error");
+    return;
+  }
+  if (!isCompletedTaskActualTimeEditAllowed()) {
+    closeCompletedActualTimeEditModal();
+    toast("Chế độ sửa Phiếu công việc đã hoàn thành đang tắt.", "error");
+    return;
+  }
+
+  const taskId = state.editingCompletedTaskActualTimeId;
+  const totalMinutes = getCompletedActualTimeEditInputMinutes();
+  if (!taskId || totalMinutes === null) {
+    toast("Thời gian thực tế không hợp lệ. Hãy nhập từ 0 đến 168 giờ 00 phút.", "error");
+    return;
+  }
+
+  setButtonLoading(els.saveActualTimeEditBtn, true, "Đang lưu...");
+  try {
+    const taskRef = doc(db, "tasks", taskId);
+    const taskSnap = await getDoc(taskRef);
+    if (!taskSnap.exists()) throw new Error("Không tìm thấy công việc.");
+    const task = { id: taskSnap.id, ...taskSnap.data() };
+
+    if (task.status !== "completed") throw new Error("Công việc này không còn ở trạng thái Đã hoàn thành.");
+    if (isLunchBreakTask(task) || isHotelTask(task)) {
+      throw new Error("Nghỉ trưa và Hotel đang dùng logic kết quả riêng nên không sửa bằng chức năng này.");
+    }
+
+    const oldActualMinutes = Math.max(0, Math.trunc(Number(task.actualMinutes || 0)));
+    const result = calculateResultFromActualMinutes(task, totalMinutes);
+    const editedAt = Timestamp.now();
+    const editedByUid = state.user?.uid || "";
+    const editedByName = state.profile?.name || state.profile?.email || state.user?.email || "Admin";
+    const updatePayload = {
+      actualMinutes: result.actualMinutes,
+      resultType: result.resultType,
+      differenceMinutes: result.differenceMinutes,
+      differencePercent: result.differencePercent,
+      actualMinutesManuallyEdited: true,
+      actualMinutesEditedAt: editedAt,
+      actualMinutesEditedByUid: editedByUid,
+      actualMinutesEditedByName: editedByName,
+      actualMinutesEditCount: increment(1),
+      actualMinutesEditHistory: arrayUnion({
+        editedAt,
+        editedByUid,
+        editedByName,
+        fromMinutes: oldActualMinutes,
+        toMinutes: result.actualMinutes,
+        resultType: result.resultType,
+        differenceMinutes: result.differenceMinutes,
+        differencePercent: result.differencePercent
+      })
+    };
+
+    if (!Number.isFinite(Number(task.actualMinutesOriginal))) {
+      updatePayload.actualMinutesOriginal = oldActualMinutes;
+    }
+
+    await updateDoc(taskRef, updatePayload);
+    closeCompletedActualTimeEditModal();
+    toast(`Đã sửa thời gian thực tế thành ${formatMinutes(result.actualMinutes)}. Kết quả mới: ${taskResultShortText(result)}.`, "success");
+  } catch (error) {
+    console.error("Không sửa được thời gian thực tế:", error);
+    toast(error.message || "Không sửa được thời gian thực tế.", "error");
+  } finally {
+    setButtonLoading(els.saveActualTimeEditBtn, false);
+  }
+}
+
+els.actualTimeEditHours?.addEventListener("input", updateCompletedActualTimeEditPreview);
+els.actualTimeEditMinutes?.addEventListener("input", updateCompletedActualTimeEditPreview);
+els.actualTimeEditForm?.addEventListener("submit", saveCompletedActualTimeEdit);
+document.querySelectorAll("[data-close-actual-time-edit]").forEach((button) => {
+  button.addEventListener("click", closeCompletedActualTimeEditModal);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.actualTimeEditModal?.classList.contains("hidden")) {
+    event.preventDefault();
+    closeCompletedActualTimeEditModal();
+  }
+});
+
 function calculateResult(task) {
   const completedAt = timestampToDate(task.approvedAt) || timestampToDate(task.submittedAt);
 
@@ -16639,6 +16846,11 @@ function calculateResultAt(task, completedAt) {
   const actualMs = accumulatedWorkedMs + Math.max(0, completedAt.getTime() - activeStartAt.getTime());
   const actualMinutes = Math.max(0, Math.ceil(actualMs / 60000));
 
+  return calculateResultFromActualMinutes(task, actualMinutes);
+}
+
+function calculateResultFromActualMinutes(task, actualMinutesInput) {
+  const actualMinutes = Math.max(0, Math.trunc(Number(actualMinutesInput || 0)));
   const deadlineMinutes = Number(task.deadlineMinutes || 0);
 
   if (deadlineMinutes <= 0) {

@@ -10096,6 +10096,111 @@
       }
     </style>
 
+
+    <style>
+      .completed-result-box {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      .completed-result-copy {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+        flex: 1 1 320px;
+      }
+
+      .completed-actual-time-edit-btn {
+        flex: 0 0 auto;
+      }
+
+      body.completed-actual-time-edit-open {
+        overflow: hidden;
+      }
+
+      .actual-time-edit-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .actual-time-edit-summary-item {
+        display: grid;
+        gap: 4px;
+        padding: 12px 14px;
+        border: 1px solid #dbeafe;
+        border-radius: 14px;
+        background: #f8fbff;
+      }
+
+      .actual-time-edit-summary-item span {
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .actual-time-edit-summary-item strong {
+        color: #0f172a;
+        font-size: 16px;
+      }
+
+      .actual-time-edit-input-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .actual-time-edit-input-shell {
+        position: relative;
+      }
+
+      .actual-time-edit-input-shell input {
+        width: 100%;
+        padding-right: 58px;
+      }
+
+      .actual-time-edit-input-shell > span {
+        position: absolute;
+        top: 50%;
+        right: 14px;
+        transform: translateY(-50%);
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 800;
+        pointer-events: none;
+      }
+
+      .actual-time-edit-preview {
+        margin: 0;
+        padding: 12px 14px;
+        border: 1px solid #bfdbfe;
+        border-radius: 14px;
+        background: #eff6ff;
+        color: #1e40af;
+        font-weight: 800;
+        line-height: 1.45;
+      }
+
+      .actual-time-edit-preview.is-error {
+        border-color: #fecaca;
+        background: #fff1f2;
+        color: #be123c;
+      }
+
+      @media (max-width: 640px) {
+        .actual-time-edit-summary,
+        .actual-time-edit-input-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .completed-actual-time-edit-btn {
+          width: 100%;
+        }
+      }
+    </style>
   </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
@@ -11131,6 +11236,17 @@
           <p id="workSupervisionSettingHelp" class="work-order-setting-help">Trang Admin hiển thị riêng từng bộ đếm; mỗi nhân viên chỉ nhìn thấy bộ đếm của chính mình.</p>
         </section>
 
+        <section class="work-order-setting-section is-overdue-setting">
+          <label class="work-order-setting-toggle-row" for="allowEditCompletedTaskActualTime">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Sửa phiếu công việc đã hoàn thành</strong>
+              <span>Khi bật, Admin có thể chỉnh lại “Thời gian thực tế” của công việc đã hoàn thành. Hệ thống sẽ tự tính lại kết quả nhanh hơn, chậm hơn hoặc đúng thời gian dựa trên thời gian quy định hiện tại của công việc.</span>
+            </span>
+            <input id="allowEditCompletedTaskActualTime" type="checkbox" />
+          </label>
+          <p class="work-order-setting-help">Áp dụng cho công việc hoàn thành thông thường và Ship (CV khác). Nghỉ trưa và Hotel tiếp tục dùng logic kết quả riêng hiện có.</p>
+        </section>
+
         <section class="work-order-setting-section is-danger-setting">
           <label class="work-order-setting-toggle-row" for="preventWorkOrderDeletion">
             <span class="work-order-setting-toggle-copy">
@@ -11186,6 +11302,60 @@
         <span class="photo-viewer-hint">Dùng phím ← → hoặc vuốt trái/phải để chuyển ảnh</span>
       </footer>
     </section>
+  </div>
+
+  <!-- EDIT COMPLETED TASK ACTUAL TIME MODAL -->
+  <div id="actualTimeEditModal" class="modal hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="actualTimeEditModalTitle">
+    <div class="modal-backdrop" data-close-actual-time-edit></div>
+    <div class="modal-card small-modal">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Đã hoàn thành</p>
+          <h3 id="actualTimeEditModalTitle">Sửa thời gian thực tế</h3>
+          <p id="actualTimeEditTaskTitle" class="muted">Công việc</p>
+          <p id="actualTimeEditWorkOrderName" class="muted">Phiếu công việc</p>
+        </div>
+        <button class="icon-btn" type="button" data-close-actual-time-edit aria-label="Đóng">×</button>
+      </div>
+
+      <form id="actualTimeEditForm" class="form-stack">
+        <div class="actual-time-edit-summary">
+          <div class="actual-time-edit-summary-item">
+            <span>Thời gian thực tế hiện tại</span>
+            <strong id="actualTimeEditCurrentValue">--</strong>
+          </div>
+          <div class="actual-time-edit-summary-item">
+            <span>Thời gian quy định</span>
+            <strong id="actualTimeEditDeadlineValue">--</strong>
+          </div>
+        </div>
+
+        <div class="actual-time-edit-input-grid">
+          <label>
+            Số giờ thực tế
+            <div class="actual-time-edit-input-shell">
+              <input id="actualTimeEditHours" type="number" min="0" max="168" step="1" inputmode="numeric" value="0" required />
+              <span>giờ</span>
+            </div>
+          </label>
+          <label>
+            Số phút thực tế
+            <div class="actual-time-edit-input-shell">
+              <input id="actualTimeEditMinutes" type="number" min="0" max="59" step="1" inputmode="numeric" value="0" required />
+              <span>phút</span>
+            </div>
+          </label>
+        </div>
+
+        <p id="actualTimeEditPreview" class="actual-time-edit-preview" aria-live="polite">Kết quả mới dự kiến</p>
+        <p class="small-note">Chỉ thay đổi thời gian thực tế và kết quả đánh giá. Thời điểm “Báo hoàn thành” và “Admin duyệt” vẫn được giữ nguyên để không làm sai lịch sử.</p>
+
+        <div class="modal-footer-actions">
+          <button class="btn ghost" type="button" data-close-actual-time-edit>Hủy</button>
+          <button id="saveActualTimeEditBtn" class="btn primary" type="submit">Lưu thời gian mới</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- EXTEND TASK TIME MODAL -->
@@ -11253,7 +11423,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260809-ios-calendar-close-v54"></script>
+  <script type="module" src="app.js?v=20260813-edit-completed-actual-time-v57"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
