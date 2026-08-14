@@ -723,6 +723,10 @@ const els = {
   employeeSearch: $("#employeeSearch"),
   employeeRoleFilter: $("#employeeRoleFilter"),
   employeeStats: $("#employeeStats"),
+  openEmployeeStatusHistoryBtn: $("#openEmployeeStatusHistoryBtn"),
+  employeeStatusHistoryModal: $("#employeeStatusHistoryModal"),
+  employeeStatusHistoryList: $("#employeeStatusHistoryList"),
+  employeeStatusHistorySummary: $("#employeeStatusHistorySummary"),
   createStaffAccountPanel: $("#createStaffAccountPanel"),
   staffAccountRole: $("#staffAccountRole"),
   createSupervisorPermissions: $("#createSupervisorPermissions"),
@@ -5312,6 +5316,8 @@ function applyManagementPermissionUI() {
   els.importDataBtn?.classList.toggle("hidden", !canImport);
   els.openGoogleCalendarImportBtn?.classList.toggle("hidden", !isAdmin);
   els.openGoogleCalendarImportMobileBtn?.classList.toggle("hidden", !isAdmin);
+  els.openEmployeeStatusHistoryBtn?.classList.toggle("hidden", !isAdmin);
+  if (!isAdmin) closeEmployeeStatusHistoryModal();
 
   const deletionLocked = isWorkOrderDeletionLocked();
   els.deleteAllWorkOrdersBtn?.classList.toggle(
@@ -5482,6 +5488,9 @@ function setupAdminDashboard() {
 
       applyManagementPermissionUI();
       renderEmployeeSelects();
+      if (els.employeeStatusHistoryModal && !els.employeeStatusHistoryModal.classList.contains("hidden")) {
+        renderEmployeeStatusHistory();
+      }
     },
     handleSnapshotError
   );
@@ -5773,23 +5782,39 @@ async function saveEmploymentStatus() {
 
   try {
     setButtonLoading(button, true);
-    await updateDoc(doc(db, "users", employee.uid), {
+    const updatePayload = {
       employmentStatus: selected,
       employmentStatusNote: note,
       employmentStatusUpdatedAt: serverTimestamp(),
       employmentStatusUpdatedBy: state.user.uid,
-      employmentStatusUpdatedByName: state.profile?.name || state.profile?.email || "Admin",
-      employmentStatusHistory: arrayUnion({
+      employmentStatusUpdatedByName: state.profile?.name || state.profile?.email || "Admin"
+    };
+
+    // Chỉ thêm một dòng Lịch sử khi trạng thái thật sự thay đổi Đang làm ↔ Đang Off.
+    // Lưu kèm tên/email tại thời điểm thay đổi để lịch sử không bị đổi nội dung nếu
+    // sau này Admin đổi tên tài khoản nhân viên.
+    if (selected !== previousStatus) {
+      updatePayload.employmentStatusHistory = arrayUnion({
+        employeeUid: employee.uid,
+        employeeName: employee.name || employee.email || "Nhân viên",
+        employeeEmail: employee.email || "",
         from: previousStatus,
         to: selected,
         note,
         changedAt: Timestamp.now(),
         changedByUid: state.user.uid,
         changedByName: state.profile?.name || state.profile?.email || "Admin"
-      })
-    });
+      });
+    }
+
+    await updateDoc(doc(db, "users", employee.uid), updatePayload);
     closeEmploymentStatusModal();
-    toast(`Đã chuyển ${employee.name || employee.email} sang trạng thái ${selected === EMPLOYMENT_STATUS_OFF ? "Đang Off" : "Đang làm"}.`, "success");
+
+    if (selected !== previousStatus) {
+      toast(`Đã chuyển ${employee.name || employee.email} sang trạng thái ${selected === EMPLOYMENT_STATUS_OFF ? "Đang Off" : "Đang làm"} và lưu vào Lịch sử.`, "success");
+    } else {
+      toast(`Trạng thái của ${employee.name || employee.email} không thay đổi.`, "info");
+    }
   } catch (error) {
     console.error(error);
     toast(error.message || "Không cập nhật được trạng thái nhân viên.", "error");
@@ -5856,6 +5881,111 @@ function renderEmployeeEmploymentStatusBanner() {
       ? `<strong>Chưa có công việc mới, có thể nghỉ ngơi và vẫn được tính công lương</strong>`
       : `<strong>Chưa có việc được giao:</strong><span>Xuống bán hàng nhận công việc mới</span>`;
   banner.insertAdjacentElement("afterend", assignmentBanner);
+}
+
+function employmentStatusHistoryDateTime(value) {
+  const date = timestampToDate(value);
+  if (!date) return "--/--/---- --:--:--";
+
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+
+  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+}
+
+function getEmployeeEmploymentStatusHistoryEntries() {
+  return (Array.isArray(state.employees) ? state.employees : [])
+    .flatMap((employee) => {
+      const history = Array.isArray(employee?.employmentStatusHistory)
+        ? employee.employmentStatusHistory
+        : [];
+
+      return history.map((item, index) => ({
+        key: `${employee.uid || employee.id || "employee"}-${index}-${timestampToDate(item?.changedAt)?.getTime() || 0}`,
+        employeeUid: item?.employeeUid || employee.uid || employee.id || "",
+        employeeName: item?.employeeName || employee.name || employee.email || "Nhân viên",
+        employeeEmail: item?.employeeEmail || employee.email || "",
+        from: item?.from === EMPLOYMENT_STATUS_OFF ? EMPLOYMENT_STATUS_OFF : EMPLOYMENT_STATUS_WORKING,
+        to: item?.to === EMPLOYMENT_STATUS_OFF ? EMPLOYMENT_STATUS_OFF : EMPLOYMENT_STATUS_WORKING,
+        note: item?.note || "",
+        changedAt: item?.changedAt || null,
+        changedByUid: item?.changedByUid || "",
+        changedByName: item?.changedByName || "Admin"
+      }));
+    })
+    // Chỉ ghi nhận các lần trạng thái thật sự thay đổi Đang làm ↔ Đang Off.
+    .filter((item) => item.from !== item.to)
+    .sort((a, b) => {
+      const aTime = timestampToDate(a.changedAt)?.getTime() || 0;
+      const bTime = timestampToDate(b.changedAt)?.getTime() || 0;
+      return bTime - aTime;
+    });
+}
+
+function renderEmployeeStatusHistory() {
+  if (!els.employeeStatusHistoryList || !els.employeeStatusHistorySummary) return;
+
+  const entries = getEmployeeEmploymentStatusHistoryEntries();
+  els.employeeStatusHistorySummary.textContent = entries.length
+    ? `${entries.length} lần thay đổi trạng thái đã được lưu. Mới nhất hiển thị trước.`
+    : "Chưa có lần thay đổi trạng thái Đang làm / Đang Off nào được ghi nhận.";
+
+  if (!entries.length) {
+    els.employeeStatusHistoryList.innerHTML = `
+      <div class="employee-status-history-empty">
+        Chưa có lịch sử thay đổi trạng thái nhân viên.
+      </div>
+    `;
+    return;
+  }
+
+  els.employeeStatusHistoryList.innerHTML = entries.map((item) => {
+    const fromLabel = item.from === EMPLOYMENT_STATUS_OFF ? "Đang Off" : "Đang làm";
+    const toLabel = item.to === EMPLOYMENT_STATUS_OFF ? "Đang Off" : "Đang làm";
+    const noteHtml = item.note
+      ? `<div class="employee-status-history-note">Ghi chú: ${escapeHtml(item.note)}</div>`
+      : "";
+    const performedBy = item.changedByName
+      ? `<span class="employee-status-history-by">Người thực hiện: ${escapeHtml(item.changedByName)}</span>`
+      : "";
+
+    return `
+      <article class="employee-status-history-item ${item.to === EMPLOYMENT_STATUS_OFF ? "to-off" : "to-working"}" data-history-key="${escapeHtml(item.key)}">
+        <div class="employee-status-history-time">${escapeHtml(employmentStatusHistoryDateTime(item.changedAt))}</div>
+        <div class="employee-status-history-message">
+          Admin đã đổi trạng thái <strong>“${escapeHtml(fromLabel)}”</strong> của
+          <strong>“${escapeHtml(item.employeeName)}”</strong> sang trạng thái
+          <strong>“${escapeHtml(toLabel)}”</strong>.
+        </div>
+        ${noteHtml}
+        ${performedBy}
+      </article>
+    `;
+  }).join("");
+}
+
+function openEmployeeStatusHistoryModal() {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được xem Lịch sử thay đổi trạng thái nhân viên.", "error");
+    return;
+  }
+
+  renderEmployeeStatusHistory();
+  els.employeeStatusHistoryModal?.classList.remove("hidden");
+  els.employeeStatusHistoryModal?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function closeEmployeeStatusHistoryModal() {
+  els.employeeStatusHistoryModal?.classList.add("hidden");
+  els.employeeStatusHistoryModal?.setAttribute("aria-hidden", "true");
+  if (!document.querySelector('.employment-status-modal:not(.hidden), .employee-status-history-modal:not(.hidden)')) {
+    document.body.classList.remove("modal-open");
+  }
 }
 
 function renderEmployees() {
@@ -6130,6 +6260,12 @@ async function deleteEmployeeData(employeeUid) {
 
 els.employeeSearch?.addEventListener("input", renderEmployees);
 els.employeeRoleFilter?.addEventListener("change", renderEmployees);
+els.openEmployeeStatusHistoryBtn?.addEventListener("click", openEmployeeStatusHistoryModal);
+els.employeeStatusHistoryModal?.addEventListener("click", (event) => {
+  if (event.target.closest('[data-action="close-employee-status-history"]')) {
+    closeEmployeeStatusHistoryModal();
+  }
+});
 
 els.employeeList?.addEventListener("click", (event) => {
   const permissionButton = event.target.closest('[data-action="edit-supervisor-permissions"]');
