@@ -178,6 +178,12 @@ const state = {
   adminHotelEndPetCount: "",
   adminHotelReportDrafts: {},
   employeeStatusFilter: "all",
+  employeeStatusHistoryDateFilter: {
+    mode: "all",
+    from: "",
+    to: ""
+  },
+  employeeStatusHistoryEmployeeFilter: "all",
   employeeCompletedTypeFilter: "all",
   employeeWorkOrderSearch: "",
   employeeWorkOrderSuggestionIndex: -1,
@@ -727,6 +733,12 @@ const els = {
   employeeStatusHistoryModal: $("#employeeStatusHistoryModal"),
   employeeStatusHistoryList: $("#employeeStatusHistoryList"),
   employeeStatusHistorySummary: $("#employeeStatusHistorySummary"),
+  employeeStatusHistoryDateMode: $("#employeeStatusHistoryDateMode"),
+  employeeStatusHistoryEmployeeFilter: $("#employeeStatusHistoryEmployeeFilter"),
+  employeeStatusHistoryCustomRange: $("#employeeStatusHistoryCustomRange"),
+  employeeStatusHistoryDateFrom: $("#employeeStatusHistoryDateFrom"),
+  employeeStatusHistoryDateTo: $("#employeeStatusHistoryDateTo"),
+  employeeStatusHistoryFilterSummary: $("#employeeStatusHistoryFilterSummary"),
   createStaffAccountPanel: $("#createStaffAccountPanel"),
   staffAccountRole: $("#staffAccountRole"),
   createSupervisorPermissions: $("#createSupervisorPermissions"),
@@ -5926,18 +5938,132 @@ function getEmployeeEmploymentStatusHistoryEntries() {
     });
 }
 
+function getEmployeeStatusHistoryDateKey(item) {
+  return toLocalDateInputValue(timestampToDate(item?.changedAt));
+}
+
+function isEmployeeStatusHistoryInDateFilter(item, filter = state.employeeStatusHistoryDateFilter) {
+  const dateKey = getEmployeeStatusHistoryDateKey(item);
+  const mode = String(filter?.mode || "all");
+  if (mode === "all") return true;
+  if (!dateKey) return false;
+
+  if (mode === "today") return dateKey === todayInputValue();
+  if (mode === "yesterday") return dateKey === yesterdayInputValue();
+
+  if (["current_month", "previous_month"].includes(mode)) {
+    const range = getMonthDateRange(mode === "current_month" ? 0 : -1);
+    return dateKey >= range.from && dateKey <= range.to;
+  }
+
+  if (mode === "range") {
+    let from = String(filter?.from || "").trim();
+    let to = String(filter?.to || "").trim();
+    if (from && to && from > to) [from, to] = [to, from];
+    const fromOk = from ? dateKey >= from : true;
+    const toOk = to ? dateKey <= to : true;
+    return fromOk && toOk;
+  }
+
+  return true;
+}
+
+function employeeStatusHistoryEmployeeKey(item) {
+  const uid = String(item?.employeeUid || "").trim();
+  if (uid) return `uid:${uid}`;
+  return `name:${normalizeSearchText(item?.employeeName || "")}`;
+}
+
+function populateEmployeeStatusHistoryEmployeeFilter(entries = []) {
+  if (!els.employeeStatusHistoryEmployeeFilter) return;
+
+  const options = new Map();
+  entries.forEach((item) => {
+    const key = employeeStatusHistoryEmployeeKey(item);
+    if (!key || key === "name:") return;
+    const name = String(item?.employeeName || item?.employeeEmail || "Nhân viên").trim() || "Nhân viên";
+    if (!options.has(key)) options.set(key, name);
+  });
+
+  const selected = String(state.employeeStatusHistoryEmployeeFilter || "all");
+  const optionHtml = Array.from(options.entries())
+    .sort((a, b) => a[1].localeCompare(b[1], "vi", { sensitivity: "base" }))
+    .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+    .join("");
+
+  els.employeeStatusHistoryEmployeeFilter.innerHTML = `<option value="all">Tất cả nhân viên</option>${optionHtml}`;
+  const canKeepSelected = selected === "all" || options.has(selected);
+  state.employeeStatusHistoryEmployeeFilter = canKeepSelected ? selected : "all";
+  els.employeeStatusHistoryEmployeeFilter.value = state.employeeStatusHistoryEmployeeFilter;
+}
+
+function refreshEmployeeStatusHistoryFilterControls() {
+  const filter = state.employeeStatusHistoryDateFilter || { mode: "all", from: "", to: "" };
+  const isRange = filter.mode === "range";
+
+  if (els.employeeStatusHistoryDateMode) els.employeeStatusHistoryDateMode.value = filter.mode || "all";
+  if (els.employeeStatusHistoryDateFrom) els.employeeStatusHistoryDateFrom.value = filter.from || "";
+  if (els.employeeStatusHistoryDateTo) els.employeeStatusHistoryDateTo.value = filter.to || "";
+  els.employeeStatusHistoryCustomRange?.classList.toggle("hidden", !isRange);
+}
+
+function getEmployeeStatusHistoryFilterSummary() {
+  const filter = state.employeeStatusHistoryDateFilter || { mode: "all", from: "", to: "" };
+  let timeLabel = "tất cả thời gian";
+
+  if (filter.mode === "today") timeLabel = `hôm nay (${formatDateOnly(todayInputValue())})`;
+  if (filter.mode === "yesterday") timeLabel = `hôm qua (${formatDateOnly(yesterdayInputValue())})`;
+  if (filter.mode === "current_month") {
+    const range = getMonthDateRange(0);
+    timeLabel = `tháng này (${formatDateOnly(range.from)}–${formatDateOnly(range.to)})`;
+  }
+  if (filter.mode === "previous_month") {
+    const range = getMonthDateRange(-1);
+    timeLabel = `tháng trước (${formatDateOnly(range.from)}–${formatDateOnly(range.to)})`;
+  }
+  if (filter.mode === "range") {
+    let from = String(filter.from || "").trim();
+    let to = String(filter.to || "").trim();
+    if (from && to && from > to) [from, to] = [to, from];
+    if (from && to) timeLabel = `từ ${formatDateOnly(from)} đến ${formatDateOnly(to)}`;
+    else if (from) timeLabel = `từ ${formatDateOnly(from)} trở đi`;
+    else if (to) timeLabel = `đến ${formatDateOnly(to)}`;
+    else timeLabel = "thời gian tùy chọn";
+  }
+
+  const selectedEmployeeKey = String(state.employeeStatusHistoryEmployeeFilter || "all");
+  const employeeLabel = selectedEmployeeKey === "all"
+    ? "tất cả nhân viên"
+    : (els.employeeStatusHistoryEmployeeFilter?.selectedOptions?.[0]?.textContent || "nhân viên đã chọn");
+
+  return `Đang lọc: ${timeLabel} • ${employeeLabel}.`;
+}
+
 function renderEmployeeStatusHistory() {
   if (!els.employeeStatusHistoryList || !els.employeeStatusHistorySummary) return;
 
-  const entries = getEmployeeEmploymentStatusHistoryEntries();
-  els.employeeStatusHistorySummary.textContent = entries.length
-    ? `${entries.length} lần thay đổi trạng thái đã được lưu. Mới nhất hiển thị trước.`
+  const allEntries = getEmployeeEmploymentStatusHistoryEntries();
+  populateEmployeeStatusHistoryEmployeeFilter(allEntries);
+  refreshEmployeeStatusHistoryFilterControls();
+
+  const employeeFilter = String(state.employeeStatusHistoryEmployeeFilter || "all");
+  const entries = allEntries.filter((item) => (
+    isEmployeeStatusHistoryInDateFilter(item)
+    && (employeeFilter === "all" || employeeStatusHistoryEmployeeKey(item) === employeeFilter)
+  ));
+
+  els.employeeStatusHistorySummary.textContent = allEntries.length
+    ? `${entries.length}/${allEntries.length} lần thay đổi trạng thái phù hợp bộ lọc. Mới nhất hiển thị trước.`
     : "Chưa có lần thay đổi trạng thái Đang làm / Đang Off nào được ghi nhận.";
+
+  if (els.employeeStatusHistoryFilterSummary) {
+    els.employeeStatusHistoryFilterSummary.textContent = getEmployeeStatusHistoryFilterSummary();
+  }
 
   if (!entries.length) {
     els.employeeStatusHistoryList.innerHTML = `
       <div class="employee-status-history-empty">
-        Chưa có lịch sử thay đổi trạng thái nhân viên.
+        ${allEntries.length ? "Không có lịch sử phù hợp với hai bộ lọc hiện tại." : "Chưa có lịch sử thay đổi trạng thái nhân viên."}
       </div>
     `;
     return;
@@ -6261,6 +6387,36 @@ async function deleteEmployeeData(employeeUid) {
 els.employeeSearch?.addEventListener("input", renderEmployees);
 els.employeeRoleFilter?.addEventListener("change", renderEmployees);
 els.openEmployeeStatusHistoryBtn?.addEventListener("click", openEmployeeStatusHistoryModal);
+els.employeeStatusHistoryDateMode?.addEventListener("change", () => {
+  const mode = els.employeeStatusHistoryDateMode?.value || "all";
+  const previous = state.employeeStatusHistoryDateFilter || { mode: "all", from: "", to: "" };
+  state.employeeStatusHistoryDateFilter = {
+    mode,
+    from: mode === "range" ? (previous.from || todayInputValue()) : "",
+    to: mode === "range" ? (previous.to || todayInputValue()) : ""
+  };
+  renderEmployeeStatusHistory();
+});
+els.employeeStatusHistoryDateFrom?.addEventListener("change", () => {
+  state.employeeStatusHistoryDateFilter = {
+    ...(state.employeeStatusHistoryDateFilter || {}),
+    mode: "range",
+    from: els.employeeStatusHistoryDateFrom?.value || ""
+  };
+  renderEmployeeStatusHistory();
+});
+els.employeeStatusHistoryDateTo?.addEventListener("change", () => {
+  state.employeeStatusHistoryDateFilter = {
+    ...(state.employeeStatusHistoryDateFilter || {}),
+    mode: "range",
+    to: els.employeeStatusHistoryDateTo?.value || ""
+  };
+  renderEmployeeStatusHistory();
+});
+els.employeeStatusHistoryEmployeeFilter?.addEventListener("change", () => {
+  state.employeeStatusHistoryEmployeeFilter = els.employeeStatusHistoryEmployeeFilter?.value || "all";
+  renderEmployeeStatusHistory();
+});
 els.employeeStatusHistoryModal?.addEventListener("click", (event) => {
   if (event.target.closest('[data-action="close-employee-status-history"]')) {
     closeEmployeeStatusHistoryModal();

@@ -10731,6 +10731,36 @@
         <p class="eyebrow">LỊCH SỬ NHÂN VIÊN</p>
         <h3 id="employeeStatusHistoryTitle">Lịch sử thay đổi trạng thái</h3>
         <p id="employeeStatusHistorySummary" class="muted">Chưa có dữ liệu.</p>
+        <div class="employee-status-history-filters" aria-label="Bộ lọc Lịch sử thay đổi trạng thái">
+          <label class="employee-status-history-filter-field">
+            <span>Thời gian</span>
+            <select id="employeeStatusHistoryDateMode">
+              <option value="all">Tất cả thời gian</option>
+              <option value="today">Hôm nay</option>
+              <option value="yesterday">Hôm qua</option>
+              <option value="current_month">Tháng này</option>
+              <option value="previous_month">Tháng trước</option>
+              <option value="range">Thời gian tùy chọn</option>
+            </select>
+          </label>
+          <label class="employee-status-history-filter-field">
+            <span>Nhân viên</span>
+            <select id="employeeStatusHistoryEmployeeFilter">
+              <option value="all">Tất cả nhân viên</option>
+            </select>
+          </label>
+          <div id="employeeStatusHistoryCustomRange" class="employee-status-history-custom-range hidden">
+            <label class="employee-status-history-filter-field">
+              <span>Ngày đầu</span>
+              <input id="employeeStatusHistoryDateFrom" type="date" />
+            </label>
+            <label class="employee-status-history-filter-field">
+              <span>Ngày cuối</span>
+              <input id="employeeStatusHistoryDateTo" type="date" />
+            </label>
+          </div>
+        </div>
+        <p id="employeeStatusHistoryFilterSummary" class="employee-status-history-filter-summary"></p>
         <div id="employeeStatusHistoryList" class="employee-status-history-list" aria-live="polite"></div>
       </section>
     </div>
@@ -11815,8 +11845,27 @@
       position:absolute; top:16px; right:16px; z-index:2; width:44px; height:44px; border:0;
       border-radius:14px; background:#eef2f7; color:#0f172a; font:800 28px/1 Arial,sans-serif; cursor:pointer;
     }
+    .employee-status-history-filters {
+      display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px 12px; margin-top:16px;
+      padding:14px; border:1px solid #dbeafe; border-radius:18px; background:#f8fbff;
+    }
+    .employee-status-history-filter-field { display:grid; gap:6px; min-width:0; }
+    .employee-status-history-filter-field > span { color:#334155; font-size:.82rem; font-weight:900; }
+    .employee-status-history-filter-field select,
+    .employee-status-history-filter-field input {
+      width:100%; min-width:0; min-height:44px; padding:9px 12px; border:1px solid #cbd5e1;
+      border-radius:13px; background:#fff; color:#0f172a; font-family:inherit; font-size:.9rem; font-weight:700; line-height:1.2; box-sizing:border-box;
+      outline:none;
+    }
+    .employee-status-history-filter-field select:focus,
+    .employee-status-history-filter-field input:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,.12); }
+    .employee-status-history-custom-range {
+      grid-column:1 / -1; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px 12px;
+    }
+    .employee-status-history-custom-range.hidden { display:none; }
+    .employee-status-history-filter-summary { margin:9px 2px 0; color:#64748b; font-size:.82rem; line-height:1.4; }
     .employee-status-history-list {
-      display:grid; gap:10px; min-height:0; margin-top:16px; padding:2px 4px 4px 0; overflow:auto;
+      display:grid; gap:10px; min-height:0; margin-top:12px; padding:2px 4px 4px 0; overflow:auto;
       overscroll-behavior:contain; -webkit-overflow-scrolling:touch;
     }
     .employee-status-history-item {
@@ -11883,6 +11932,8 @@
         width:100%; max-height:calc(100dvh - 20px); padding:20px 14px calc(16px + env(safe-area-inset-bottom));
         border-radius:22px;
       }
+      .employee-status-history-filters { grid-template-columns:1fr; padding:12px; }
+      .employee-status-history-custom-range { grid-template-columns:1fr 1fr; }
       .employee-status-history-list { padding-right:0; }
       .employee-status-history-item { grid-template-columns:1fr; gap:6px; padding:13px 14px; }
       .employee-status-history-time { grid-row:auto; font-size:.82rem; }
