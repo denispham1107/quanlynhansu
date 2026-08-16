@@ -12643,6 +12643,19 @@ function getEmployeeDisplayNameByUid(uid, fallbackName = "") {
   return fallbackName || employee?.name || employee?.email || "--";
 }
 
+// Phiếu Nghỉ trưa được Giám sát công việc tự tạo luôn gắn với đúng một nhân viên
+// ngay từ lúc tạo. Không hiển thị lại ô “Nhân viên” trong thẻ công việc để tránh
+// trường hợp sau khi task từng được đưa về “Chờ chọn người” giao diện hiển thị
+// thông tin gây hiểu nhầm, trong khi tên nhân viên đã có ngay trên tên Phiếu.
+function isAutoWorkSupervisionLunchTask(task) {
+  if (!task || !isLunchBreakTask(task)) return false;
+
+  return task.autoCreatedByWorkSupervision === true
+    || Boolean(task.workSupervisionCycleId)
+    || String(task.workOrderId || "").startsWith("supervisionLunch_")
+    || String(task.id || "").startsWith("supervisionLunch_");
+}
+
 function getHotelPetCount(task) {
   const count = normalizeHotelPetCount(task?.hotelPetCount);
   return count || (isHotelTask(task) ? HOTEL_BASE_PET_COUNT : 0);
@@ -12669,6 +12682,8 @@ function renderHotelInfoBox(task) {
 }
 
 function renderAssignedEmployeeMetaBox(task, mode, displayStatus) {
+  if (isAutoWorkSupervisionLunchTask(task)) return "";
+
   const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
 
   if (!canAdminReassignTask(task, mode, displayStatus)) {
@@ -12823,17 +12838,19 @@ function toggleTaskMobileDetails(button) {
 }
 
 function renderDesktopTaskSummary(task, mode, employeeName, initialCountdownText) {
+  const hideAssignee = isAutoWorkSupervisionLunchTask(task);
   const photoState = getTaskPhotoCompletionState(task);
   const photoText = photoState.required
     ? `${photoState.validCount}/${photoState.requiredCount} hợp lệ${photoState.invalidCount ? ` • ${photoState.invalidCount} không hợp lệ` : ""}`
     : `${photoState.totalCount} hình`;
 
   return `
-    <div class="task-desktop-summary" aria-label="Tóm tắt công việc trên desktop">
+    <div class="task-desktop-summary ${hideAssignee ? "is-auto-supervision-lunch" : ""}" aria-label="Tóm tắt công việc trên desktop">
+      ${hideAssignee ? "" : `
       <div class="task-desktop-summary-item is-employee">
         <span>Nhân viên</span>
         <strong title="${escapeHtml(employeeName)}">${escapeHtml(employeeName)}</strong>
-      </div>
+      </div>`}
       <div class="task-desktop-summary-item is-date">
         <span>Ngày giao</span>
         <strong title="${escapeHtml(formatDateOnly(getTaskDateValue(task)))}">${escapeHtml(formatDateOnly(getTaskDateValue(task)))}</strong>
@@ -12930,6 +12947,7 @@ function renderTaskCard(task, mode) {
   const mobileToggleText = activeExpanded ? "Thu gọn" : "Chi tiết";
   const mobileDetailsId = `task-mobile-details-${String(task.id || "task").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+  const hideAutoSupervisionLunchAssignee = isAutoWorkSupervisionLunchTask(task);
   const initialCountdownText = getInitialCountdownText(task);
   const mobilePhotoState = getTaskPhotoCompletionState(task);
   const mobilePhotoCount = mobilePhotoState.totalCount;
@@ -12989,11 +13007,12 @@ function renderTaskCard(task, mode) {
         <span class="status-pill status-${displayStatus}">${statusLabel(displayStatus)}</span>
       </div>
 
-      <div class="task-mobile-summary" aria-label="Tóm tắt công việc">
+      <div class="task-mobile-summary ${hideAutoSupervisionLunchAssignee ? "is-auto-supervision-lunch" : ""}" aria-label="Tóm tắt công việc">
+        ${hideAutoSupervisionLunchAssignee ? "" : `
         <div class="task-mobile-summary-item">
           <span>Nhân viên</span>
           <strong>${escapeHtml(employeeName)}</strong>
-        </div>
+        </div>`}
         <div class="task-mobile-summary-item is-countdown">
           <span>Đếm ngược</span>
           <strong data-countdown>${initialCountdownText}</strong>
@@ -13025,7 +13044,7 @@ function renderTaskCard(task, mode) {
       </div>
 
       <div class="task-mobile-details" id="${escapeHtml(mobileDetailsId)}">
-        <div class="task-meta task-meta-primary">
+        <div class="task-meta task-meta-primary ${hideAutoSupervisionLunchAssignee ? "is-auto-supervision-lunch" : ""}">
           ${renderAssignedEmployeeMetaBox(task, mode, displayStatus)}
           <div class="meta-box">
             <span>Ngày giao</span>

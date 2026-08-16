@@ -10201,7 +10201,30 @@
         }
       }
     </style>
-  </head>
+  
+  <style id="auto-supervision-lunch-hide-assignee-style">
+    /* Phiếu Nghỉ trưa do Giám sát công việc tự tạo đã có tên nhân viên ngay
+       trên tên Phiếu, vì vậy ẩn riêng ô Nhân viên trong thẻ để tránh hiển thị
+       “Chờ chọn người” gây hiểu nhầm. */
+    .task-desktop-summary.is-auto-supervision-lunch {
+      grid-template-columns: 0.92fr 1.45fr 0.75fr 0.78fr !important;
+    }
+
+    .task-mobile-summary.is-auto-supervision-lunch {
+      grid-template-columns: 1.45fr 1fr !important;
+    }
+
+    .task-meta.task-meta-primary.is-auto-supervision-lunch {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+
+    @media (max-width: 768px) {
+      .task-meta.task-meta-primary.is-auto-supervision-lunch {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      }
+    }
+  </style>
+</head>
 <body>
   <div id="toastHost" class="toast-host"></div>
 
