@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260816-auto-lunch-history-v61";
+const CACHE_NAME = "culao-task-shell-v20260816-supervision-history-events-v62";
 const APP_SHELL = [
   "./",
   "./index.html",

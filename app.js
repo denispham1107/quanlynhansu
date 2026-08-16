@@ -11756,7 +11756,9 @@ function getAdminSearchedTicketGroups(computedTasks) {
 }
 
 function getAssignmentHistoryAssignedDate(history) {
-  return timestampToDate(history?.assignedAt);
+  return timestampToDate(history?.assignedAt)
+    || timestampToDate(history?.countdownEndedAt)
+    || timestampToDate(history?.countdownStartedAt);
 }
 
 function getAssignmentHistoryWorkOrderCreatedDate(history) {
@@ -12139,6 +12141,18 @@ function getAssignmentHistoryTaskText(history) {
   return storedTaskNames.length ? storedTaskNames.join(", ") : "--";
 }
 
+function formatWorkSupervisionElapsedSeconds(value) {
+  const totalSeconds = Math.max(0, Math.floor(Number(value || 0)));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
+  if (hours) parts.push(`${hours} giờ`);
+  if (minutes) parts.push(`${minutes} phút`);
+  if (seconds || !parts.length) parts.push(`${seconds} giây`);
+  return parts.join(" ");
+}
+
 function renderWorkAssignmentHistory(historyItems = []) {
   if (!historyItems.length) return "";
 
@@ -12161,20 +12175,43 @@ function renderWorkAssignmentHistory(historyItems = []) {
       ? `cho các nhân viên: ${employeeNames.join(", ")}`
       : `cho nhân viên: ${employeeNames[0] || "--"}`;
     const taskText = getAssignmentHistoryTaskText(history);
+    const historyType = String(history?.historyType || "");
+    const isCountdownStarted = historyType === "work_supervision_countdown_started";
+    const isCountdownEnded = historyType === "work_supervision_countdown_ended";
     const isAutomaticSupervisionLunch = history?.autoCreatedByWorkSupervision === true
-      || String(history?.historyType || "") === "automatic_lunch_break"
+      || historyType === "automatic_lunch_break"
       || String(history?.source || "") === "work_supervision_auto_lunch"
       || String(history?.workOrderId || "").startsWith("supervisionLunch_");
-    const lineText = isAutomaticSupervisionLunch
-      ? `${history.workOrderName || "Phiếu nghỉ trưa tự động"} - ${createdDateText} - ${createdTimeText} - Giám sát công việc đã tạo Phiếu nghỉ trưa tự động lúc: ${assignedTimeText} ${employeeText}`
-      : `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc: ${taskText} lúc: ${assignedTimeText} ${employeeText}`;
-    const historyBadgeText = isAutomaticSupervisionLunch ? "Nghỉ trưa tự động" : "Lịch sử giao việc";
+    const isGreenSupervisionHistory = isAutomaticSupervisionLunch || isCountdownStarted || isCountdownEnded;
+    const supervisionEmployeeName = String(
+      history?.workSupervisionEmployeeName
+      || history?.assignedEmployeeNames?.[0]
+      || "Nhân viên"
+    ).trim() || "Nhân viên";
+    const countdownMinutes = Math.max(1, Number(history?.countdownMinutes || 0));
+    const elapsedText = formatWorkSupervisionElapsedSeconds(history?.elapsedSeconds);
+
+    let lineText;
+    let historyBadgeText;
+    if (isCountdownStarted) {
+      lineText = `Giám sát công việc - ${createdDateText} - ${assignedTimeText} - bắt đầu đếm ngược ${countdownMinutes} phút cho nhân viên: ${supervisionEmployeeName}`;
+      historyBadgeText = "Bắt đầu giám sát";
+    } else if (isCountdownEnded) {
+      lineText = `Giám sát công việc - ${createdDateText} - ${assignedTimeText} - kết thúc đếm ngược cho nhân viên: ${supervisionEmployeeName} - đã đếm ngược ${elapsedText}`;
+      historyBadgeText = "Kết thúc giám sát";
+    } else if (isAutomaticSupervisionLunch) {
+      lineText = `${history.workOrderName || "Phiếu nghỉ trưa tự động"} - ${createdDateText} - ${createdTimeText} - Giám sát công việc đã tạo Phiếu nghỉ trưa tự động lúc: ${assignedTimeText} ${employeeText}`;
+      historyBadgeText = "Nghỉ trưa tự động";
+    } else {
+      lineText = `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc: ${taskText} lúc: ${assignedTimeText} ${employeeText}`;
+      historyBadgeText = "Lịch sử giao việc";
+    }
     const deleteButton = canDeleteHistory
       ? `<button class="work-assignment-history-delete-btn" data-action="delete-assignment-history" data-assignment-history-id="${escapeHtml(history.id || "")}" type="button" aria-label="Xóa dòng Lịch sử giao việc này" title="Xóa dòng Lịch sử giao việc này">🗑 Xóa</button>`
       : "";
 
     return `
-      <article class="work-assignment-history-row${historyIndex >= 2 && !isHistoryExpanded ? " is-compact-hidden" : ""}" data-assignment-history-id="${escapeHtml(history.id || "")}">
+      <article class="work-assignment-history-row${isGreenSupervisionHistory ? " is-work-supervision-history" : ""}${historyIndex >= 2 && !isHistoryExpanded ? " is-compact-hidden" : ""}" data-assignment-history-id="${escapeHtml(history.id || "")}">
         <div class="work-assignment-history-row-content">
           <span class="work-assignment-history-badge">${escapeHtml(historyBadgeText)}</span>
           <strong>${escapeHtml(lineText)}</strong>
