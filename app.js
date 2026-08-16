@@ -604,10 +604,13 @@ function handleTaskReviewAlertAutoEnableGesture() {
   void enableTaskReviewAlertFromUserGesture({ automatic: true, silentFailure: true });
 }
 
-document.addEventListener("pointerdown", handleTaskReviewAlertAutoEnableGesture, { capture: true });
-document.addEventListener("touchstart", handleTaskReviewAlertAutoEnableGesture, { capture: true, passive: true });
-document.addEventListener("click", handleTaskReviewAlertAutoEnableGesture, { capture: true });
-document.addEventListener("keydown", handleTaskReviewAlertAutoEnableGesture, { capture: true });
+// Không bắt pointerdown/touchstart ở capture phase nữa. Trên một số trình duyệt
+// (đặc biệt iOS/Android), việc gọi audio.play() quá sớm trong capture phase có thể
+// làm thao tác đầu tiên trên nút/select bị cảm giác "khựng" hoặc không phản hồi.
+// Dùng click/keydown ở bubble phase: handler của chính nút chạy trước, sau đó mới
+// thử mở khóa âm thanh nhưng vẫn còn trong cùng user activation.
+document.addEventListener("click", handleTaskReviewAlertAutoEnableGesture);
+document.addEventListener("keydown", handleTaskReviewAlertAutoEnableGesture);
 
 // Khởi động tải file âm báo ngay từ lúc app.js chạy, thay vì đợi đăng nhập xong.
 // File chỉ khoảng vài trăm KB và sau lần đầu sẽ được Service Worker/HTTP cache giữ lại.
@@ -5266,8 +5269,11 @@ onAuthStateChanged(auth, async (user) => {
     showApp();
     setupNotificationListener();
     setupChatFeature();
-    await syncPushSubscriptionIfAllowed();
 
+    // Ưu tiên khởi tạo toàn bộ giao diện và event handler trước. Trước đây app
+    // chờ đồng bộ FCM/Web Push xong rồi mới setup dashboard; nếu getToken hoặc
+    // Callable chậm 1-2 phút thì màn hình đã hiện nhưng các nút/ô thống kê chưa
+    // có listener, tạo cảm giác toàn bộ app bị một lớp vô hình chặn.
     if (isManagementProfile()) {
       setupAdminDashboard();
     } else {
@@ -5275,6 +5281,12 @@ onAuthStateChanged(auth, async (user) => {
     }
 
     if (state.pendingPushTaskId) queuePushTaskOpen(state.pendingPushTaskId);
+
+    // Đồng bộ thông báo nền là tác vụ phụ, chạy nền và tuyệt đối không được chặn
+    // khả năng tương tác với giao diện chính. Hàm tự catch lỗi và cập nhật nút.
+    window.setTimeout(() => {
+      void syncPushSubscriptionIfAllowed();
+    }, 0);
   } catch (error) {
     console.error(error);
     toast("Không tải được hồ sơ người dùng. Kiểm tra Firestore Rules.", "error");

@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260816-fast-auto-audio-v63";
+const CACHE_NAME = "culao-task-shell-v20260816-ui-ready-first-v64";
 const APP_SHELL = [
   "./",
   "./index.html",
