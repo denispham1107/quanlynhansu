@@ -111,6 +111,10 @@ const deleteAllWorkAssignmentHistoryCallable = httpsCallable(
   functions,
   "deleteAllWorkAssignmentHistory"
 );
+const backfillAutomaticLunchBreakAssignmentHistoryCallable = httpsCallable(
+  functions,
+  "backfillAutomaticLunchBreakAssignmentHistory"
+);
 const backfillInvalidTaskHistoryCallable = httpsCallable(
   functions,
   "backfillInvalidTaskHistory"
@@ -150,6 +154,7 @@ const state = {
   workOrders: [],
   workAssignmentHistory: [],
   workAssignmentHistoryExpanded: false,
+  automaticLunchHistoryBackfillRequested: false,
   invalidTaskHistory: [],
   invalidTaskHistoryExpanded: false,
   invalidTaskHistoryBackfillRequested: false,
@@ -5115,6 +5120,7 @@ onAuthStateChanged(auth, async (user) => {
   state.workOrders = [];
   state.workAssignmentHistory = [];
   state.workAssignmentHistoryExpanded = false;
+  state.automaticLunchHistoryBackfillRequested = false;
   state.invalidTaskHistory = [];
   state.invalidTaskHistoryExpanded = false;
   state.invalidTaskHistoryBackfillRequested = false;
@@ -5536,6 +5542,7 @@ function setupAdminDashboard() {
       state.tasks = nextTasks;
       renderAdminTasks();
       syncTaskReviewAlertSound();
+      requestAutomaticLunchHistoryBackfillOnce();
       requestInvalidTaskHistoryBackfillOnce();
 
       if (!state.adminTaskSnapshotReady) {
@@ -11854,6 +11861,19 @@ function getFilteredInvalidTaskHistory(searchQuery = state.adminWorkOrderSearch)
     ));
 }
 
+async function requestAutomaticLunchHistoryBackfillOnce() {
+  if (!isAdminProfile() || state.automaticLunchHistoryBackfillRequested) return;
+  state.automaticLunchHistoryBackfillRequested = true;
+
+  try {
+    await backfillAutomaticLunchBreakAssignmentHistoryCallable();
+  } catch (error) {
+    // Không chặn giao diện nếu Function mới chưa được deploy. Các Phiếu nghỉ trưa
+    // tự động tạo sau khi deploy trigger vẫn sẽ được ghi lịch sử realtime.
+    console.warn("Không backfill được Lịch sử Phiếu nghỉ trưa tự động:", error);
+  }
+}
+
 async function requestInvalidTaskHistoryBackfillOnce() {
   if (!isAdminProfile() || state.invalidTaskHistoryBackfillRequested) return;
   state.invalidTaskHistoryBackfillRequested = true;
@@ -12141,7 +12161,14 @@ function renderWorkAssignmentHistory(historyItems = []) {
       ? `cho các nhân viên: ${employeeNames.join(", ")}`
       : `cho nhân viên: ${employeeNames[0] || "--"}`;
     const taskText = getAssignmentHistoryTaskText(history);
-    const lineText = `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc: ${taskText} lúc: ${assignedTimeText} ${employeeText}`;
+    const isAutomaticSupervisionLunch = history?.autoCreatedByWorkSupervision === true
+      || String(history?.historyType || "") === "automatic_lunch_break"
+      || String(history?.source || "") === "work_supervision_auto_lunch"
+      || String(history?.workOrderId || "").startsWith("supervisionLunch_");
+    const lineText = isAutomaticSupervisionLunch
+      ? `${history.workOrderName || "Phiếu nghỉ trưa tự động"} - ${createdDateText} - ${createdTimeText} - Giám sát công việc đã tạo Phiếu nghỉ trưa tự động lúc: ${assignedTimeText} ${employeeText}`
+      : `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc: ${taskText} lúc: ${assignedTimeText} ${employeeText}`;
+    const historyBadgeText = isAutomaticSupervisionLunch ? "Nghỉ trưa tự động" : "Lịch sử giao việc";
     const deleteButton = canDeleteHistory
       ? `<button class="work-assignment-history-delete-btn" data-action="delete-assignment-history" data-assignment-history-id="${escapeHtml(history.id || "")}" type="button" aria-label="Xóa dòng Lịch sử giao việc này" title="Xóa dòng Lịch sử giao việc này">🗑 Xóa</button>`
       : "";
@@ -12149,7 +12176,7 @@ function renderWorkAssignmentHistory(historyItems = []) {
     return `
       <article class="work-assignment-history-row${historyIndex >= 2 && !isHistoryExpanded ? " is-compact-hidden" : ""}" data-assignment-history-id="${escapeHtml(history.id || "")}">
         <div class="work-assignment-history-row-content">
-          <span class="work-assignment-history-badge">Lịch sử giao việc</span>
+          <span class="work-assignment-history-badge">${escapeHtml(historyBadgeText)}</span>
           <strong>${escapeHtml(lineText)}</strong>
         </div>
         ${deleteButton}
@@ -12161,7 +12188,7 @@ function renderWorkAssignmentHistory(historyItems = []) {
     ? `<button class="work-assignment-history-delete-all-btn" data-action="delete-all-assignment-history" type="button">🗑 Xóa hết lịch sử</button>`
     : "";
   const expandButton = historyItems.length > 2
-    ? `<button class="work-assignment-history-expand-btn" data-action="toggle-assignment-history-expanded" type="button" aria-expanded="${isHistoryExpanded ? "true" : "false"}">${isHistoryExpanded ? "Thu gọn còn 2 dòng mới nhất" : `Xem toàn bộ ${historyItems.length} dòng lịch sử giao việc`}</button>`
+    ? `<button class="work-assignment-history-expand-btn" data-action="toggle-assignment-history-expanded" type="button" aria-expanded="${isHistoryExpanded ? "true" : "false"}">${isHistoryExpanded ? "Thu gọn còn 2 dòng mới nhất" : `Xem toàn bộ ${historyItems.length} dòng lịch sử công việc`}</button>`
     : "";
 
   return `
@@ -12169,7 +12196,7 @@ function renderWorkAssignmentHistory(historyItems = []) {
       <div class="work-assignment-history-title">
         <strong>Lịch sử giao việc</strong>
         <div class="work-assignment-history-title-actions">
-          <span>${historyItems.length} lần giao việc</span>
+          <span>${historyItems.length} dòng lịch sử</span>
           ${deleteAllButton}
         </div>
       </div>

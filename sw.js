@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260816-hide-auto-lunch-assignee-v60";
+const CACHE_NAME = "culao-task-shell-v20260816-auto-lunch-history-v61";
 const APP_SHELL = [
   "./",
   "./index.html",
