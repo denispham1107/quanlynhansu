@@ -329,6 +329,8 @@ function isManagementProfile(profile = state.profile) {
 // Âm báo lặp khi có công việc chờ Admin xác nhận
 // =========================
 const TASK_REVIEW_ALERT_FILE = "./task-review-alert-max.wav";
+const TASK_REVIEW_ALERT_AUTO_PLAY_TIMEOUT_MS = 1800;
+
 
 function getPendingTaskReviewCount(excludedTaskId = "") {
   const excludedId = String(excludedTaskId || "").trim();
@@ -367,14 +369,66 @@ function updateTaskReviewAlertControls() {
 function ensureTaskReviewAlertAudio() {
   if (state.taskReviewAlertAudio) return state.taskReviewAlertAudio;
 
-  const audio = new Audio(TASK_REVIEW_ALERT_FILE);
+  const audio = new Audio();
   audio.preload = "auto";
   audio.loop = true;
   audio.volume = 1;
   audio.setAttribute("playsinline", "");
   audio.setAttribute("webkit-playsinline", "");
+  audio.src = TASK_REVIEW_ALERT_FILE;
+
+  // Nạp file âm báo càng sớm càng tốt. Trước đây audio chỉ bắt đầu tải đúng lúc
+  // gọi play(), nên trên iOS/Android hoặc mạng chậm Promise play() có thể treo rất
+  // lâu và nút bị kẹt ở trạng thái “Đang bật âm báo...”.
+  try {
+    audio.load();
+  } catch (_) {
+    // Một số WebView có thể tự tải ngay khi gán src và không cần load() thủ công.
+  }
+
   state.taskReviewAlertAudio = audio;
   return audio;
+}
+
+function warmTaskReviewAlertAudio() {
+  const audio = ensureTaskReviewAlertAudio();
+  if (audio.readyState >= 2) return;
+
+  try {
+    audio.load();
+  } catch (_) {
+    // Không chặn quá trình khởi động ứng dụng nếu trình duyệt không hỗ trợ preload.
+  }
+}
+
+async function playTaskReviewAlertWithTimeout(audio, timeoutMs = TASK_REVIEW_ALERT_AUTO_PLAY_TIMEOUT_MS) {
+  let timeoutId = null;
+  // Phải gọi play() đồng bộ ngay trong call stack của thao tác chạm/click. Điều này
+  // đặc biệt quan trọng trên iOS vì user activation có thể bị mất nếu trì hoãn sang
+  // một task khác trước khi gọi play().
+  let rawPlayPromise;
+  try {
+    rawPlayPromise = audio.play();
+  } catch (error) {
+    throw error;
+  }
+  const playPromise = Promise.resolve(rawPlayPromise);
+  // Luôn gắn catch cho promise gốc để không tạo unhandled rejection nếu timeout
+  // xảy ra trước khi trình duyệt trả kết quả play().
+  playPromise.catch(() => undefined);
+
+  try {
+    return await Promise.race([
+      playPromise.then(() => true),
+      new Promise((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(new Error("TASK_REVIEW_ALERT_PLAY_TIMEOUT"));
+        }, Math.max(500, Number(timeoutMs) || TASK_REVIEW_ALERT_AUTO_PLAY_TIMEOUT_MS));
+      })
+    ]);
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
 }
 
 function stopTaskReviewAlertSound({ rewind = true } = {}) {
@@ -469,7 +523,7 @@ async function enableTaskReviewAlertFromUserGesture({ automatic = false, silentF
       // File có thể chưa nạp xong ở lần mở đầu tiên.
     }
 
-    await audio.play();
+    await playTaskReviewAlertWithTimeout(audio);
 
     state.taskReviewAlertUnlocked = true;
     state.taskReviewAlertAutoEnablePending = false;
@@ -495,6 +549,14 @@ async function enableTaskReviewAlertFromUserGesture({ automatic = false, silentF
     return true;
   } catch (error) {
     console.warn("Thiết bị chưa mở khóa âm báo:", error);
+    // Không để một play() đang chờ tài nguyên giữ nút ở trạng thái “Đang bật...”
+    // hàng chục giây/phút. Nếu trình duyệt chặn autoplay, lần chạm đầu tiên vào
+    // ứng dụng sẽ thử lại ngay trong user gesture.
+    try {
+      audio.pause();
+    } catch (_) {
+      // Bỏ qua nếu media element chưa sẵn sàng.
+    }
     state.taskReviewAlertUnlocked = false;
     state.taskReviewAlertAutoEnablePending = true;
 
@@ -515,14 +577,16 @@ async function enableTaskReviewAlertFromUserGesture({ automatic = false, silentF
 function scheduleTaskReviewAlertAutoEnable() {
   if (!state.user || !isAdminProfile()) return;
 
+  // Bắt đầu tải WAV ngay khi xác định đây là tài khoản Admin, trước cả lúc thử play.
+  warmTaskReviewAlertAudio();
   state.taskReviewAlertAutoEnablePending = true;
   updateTaskReviewAlertControls();
 
-  // Thử tự bật ngay khi trang Admin khởi động. Desktop có thể cho phép ngay.
-  // Trên iOS/Android, nếu autoplay bị chặn thì lần chạm đầu tiên vào bất kỳ
-  // vị trí nào trong ứng dụng sẽ tự mở khóa âm báo, không cần bấm riêng nút.
+  // Thử tự bật ngay khi trang Admin khởi động. Desktop/PWA đã được trình duyệt
+  // cho phép autoplay sẽ bật gần như tức thì. Nếu iOS/Android chặn autoplay,
+  // lần chạm đầu tiên ở bất kỳ đâu trong ứng dụng sẽ mở khóa ngay.
   window.setTimeout(() => {
-    if (!state.taskReviewAlertUnlocked) {
+    if (!state.taskReviewAlertUnlocked && !state.taskReviewAlertEnableInFlight) {
       void enableTaskReviewAlertFromUserGesture({ automatic: true, silentFailure: true });
     }
   }, 0);
@@ -542,7 +606,25 @@ function handleTaskReviewAlertAutoEnableGesture() {
 
 document.addEventListener("pointerdown", handleTaskReviewAlertAutoEnableGesture, { capture: true });
 document.addEventListener("touchstart", handleTaskReviewAlertAutoEnableGesture, { capture: true, passive: true });
+document.addEventListener("click", handleTaskReviewAlertAutoEnableGesture, { capture: true });
 document.addEventListener("keydown", handleTaskReviewAlertAutoEnableGesture, { capture: true });
+
+// Khởi động tải file âm báo ngay từ lúc app.js chạy, thay vì đợi đăng nhập xong.
+// File chỉ khoảng vài trăm KB và sau lần đầu sẽ được Service Worker/HTTP cache giữ lại.
+warmTaskReviewAlertAudio();
+
+window.addEventListener("pageshow", () => {
+  if (state.user && isAdminProfile() && !state.taskReviewAlertUnlocked) {
+    scheduleTaskReviewAlertAutoEnable();
+  }
+});
+
+window.addEventListener("focus", () => {
+  if (state.user && isAdminProfile() && !state.taskReviewAlertUnlocked && !state.taskReviewAlertEnableInFlight) {
+    state.taskReviewAlertAutoEnablePending = true;
+    warmTaskReviewAlertAudio();
+  }
+});
 
 function markTaskReviewDecisionLocally(taskId, nextStatus) {
   const task = state.tasks.find((item) => item.id === taskId);
