@@ -111,7 +111,8 @@ service cloud.firestore {
         "task_reassigned",
         "task_reassigned_removed",
         "task_reassigned_admin",
-        "work_order_draft_saved"
+        "work_order_draft_saved",
+        "chat_message"
       ];
     }
 
@@ -171,6 +172,22 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Mỗi nhân viên có một document đếm ngược riêng trong workSupervision/{uid}.
+    // Tài khoản quản lý được đọc danh sách để theo dõi toàn bộ bộ đếm; nhân viên
+    // chỉ được đọc đúng document mang UID của chính mình.
+    match /workSupervision/{stateId} {
+      allow get: if isManagement()
+        || (signedIn() && stateId == request.auth.uid);
+      allow list: if isManagement();
+      allow create, update, delete: if false;
+    }
+
+    // Cấu hình Google Calendar chỉ Cloud Functions (Admin SDK) được đọc/ghi.
+    // Trình duyệt, kể cả tài khoản Admin, không được truy cập trực tiếp API Key.
+    match /serverSecrets/{secretId} {
+      allow read, create, update, delete: if false;
+    }
+
     match /workOrders/{workOrderId} {
       // Admin đọc toàn bộ phiếu. Nhân viên cũng được đọc metadata phiếu
       // (tên phiếu, tổng số công việc) để tiêu đề phiếu hiển thị giống trang Admin.
@@ -228,6 +245,77 @@ service cloud.firestore {
         || hasPermission("deleteAllWorkOrders")
         || hasPermission("manageEmployeeAccounts")
         || hasPermission("importData");
+    }
+
+    match /workAssignmentHistory/{historyId} {
+      // Lịch sử giao việc chỉ hiển thị trên trang quản lý.
+      allow read: if isManagement();
+
+      // Ghi một dòng lịch sử ngay trong cùng batch khi Phiếu được giao thành công.
+      allow create: if hasPermission("dispatchWorkOrder")
+        && request.resource.data.keys().hasOnly([
+          "id",
+          "workOrderId",
+          "workOrderName",
+          "workOrderCreatedAt",
+          "assignedAt",
+          "assignedByUid",
+          "assignedByName",
+          "assignedEmployeeUids",
+          "assignedEmployeeNames",
+          "taskIds",
+          "taskNames",
+          "taskAssignments",
+          "taskCount",
+          "source"
+        ])
+        && request.resource.data.id == historyId
+        && request.resource.data.workOrderId is string
+        && request.resource.data.workOrderId.size() > 0
+        && request.resource.data.workOrderName is string
+        && request.resource.data.workOrderName.size() > 0
+        && request.resource.data.workOrderCreatedAt is timestamp
+        && request.resource.data.assignedAt == request.time
+        && request.resource.data.assignedByUid == request.auth.uid
+        && request.resource.data.assignedByName is string
+        && request.resource.data.assignedEmployeeUids is list
+        && request.resource.data.assignedEmployeeUids.size() > 0
+        && request.resource.data.assignedEmployeeNames is list
+        && request.resource.data.assignedEmployeeNames.size() == request.resource.data.assignedEmployeeUids.size()
+        && request.resource.data.taskIds is list
+        && (!request.resource.data.keys().hasAny(["taskNames"])
+          || request.resource.data.taskNames is list)
+        && (!request.resource.data.keys().hasAny(["taskAssignments"])
+          || request.resource.data.taskAssignments is list)
+        && request.resource.data.taskCount is int
+        && request.resource.data.taskCount > 0
+        && request.resource.data.source in [
+          "created_and_dispatched",
+          "draft_edited_and_dispatched",
+          "draft_dispatched",
+          "assigned_from_waiting"
+        ];
+
+      // Cho phép khôi phục collection này từ file sao lưu JSON.
+      allow create, update: if hasPermission("importData");
+
+      // Không cho bất kỳ mã chạy trong trình duyệt xóa trực tiếp Lịch sử giao việc.
+      // Hai nút xóa chuyên dụng gọi Cloud Functions và được kiểm tra quyền Admin
+      // ở phía máy chủ. Nhờ vậy thao tác xóa Phiếu, sửa Phiếu, nhập dữ liệu hoặc
+      // các luồng tự động khác không thể vô tình xóa lịch sử.
+      allow delete: if false;
+    }
+
+    match /invalidTaskHistory/{historyId} {
+      // Danh sách cảnh báo chất lượng chỉ hiển thị cho tài khoản quản lý.
+      // Bản ghi thông thường được Cloud Functions tạo bằng Admin SDK.
+      allow read: if isManagement();
+
+      // Cho phép Admin khôi phục collection từ file sao lưu JSON.
+      allow create, update: if hasPermission("importData");
+
+      // Chưa có chức năng xóa ở giao diện; không cho client tự xóa lịch sử này.
+      allow delete: if false;
     }
 
     match /tasks/{taskId} {
@@ -751,6 +839,53 @@ service cloud.firestore {
         || hasPermission("deleteAllWorkOrders")
         || hasPermission("manageEmployeeAccounts")
         || hasPermission("importData");
+    }
+
+
+    match /chatConversations/{conversationId} {
+      // Người dùng chỉ được đọc trực tiếp một phòng Chat mà mình tham gia.
+      // Việc lấy danh sách Chat của nhân viên không còn query collection này;
+      // nó dùng chỉ mục riêng chatUserConversations/{uid}/conversations để
+      // tránh lỗi Rules khi Firestore đánh giá tập kết quả tiềm năng.
+      allow get: if isAdmin()
+        || (
+          signedIn()
+          && resource.data.participantIds is list
+          && request.auth.uid in resource.data.participantIds
+        );
+
+      // Chỉ Admin cần liệt kê toàn bộ phòng trong trang Quản lý Chat.
+      allow list: if isAdmin();
+
+      // Mọi thao tác tạo tin, đánh dấu đã đọc và xóa lịch sử đều đi qua
+      // Cloud Functions để không thể giả mạo người gửi hoặc tự xóa lịch sử.
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isAdmin()
+          || (
+            signedIn()
+            && exists(/databases/$(database)/documents/chatConversations/$(conversationId))
+            && get(/databases/$(database)/documents/chatConversations/$(conversationId)).data.participantIds is list
+            && request.auth.uid in get(/databases/$(database)/documents/chatConversations/$(conversationId)).data.participantIds
+          );
+        allow create, update, delete: if false;
+      }
+    }
+
+    // Chỉ mục danh sách Chat riêng cho từng tài khoản. Cloud Functions dùng
+    // Admin SDK để tạo/cập nhật dữ liệu; trình duyệt chỉ được đọc đúng nhánh UID
+    // của tài khoản đang đăng nhập. Cấu trúc đường dẫn này giúp Rules xác thực
+    // trực tiếp, không phụ thuộc điều kiện array-contains trên document.
+    match /chatUserConversations/{ownerUid}/conversations/{conversationId} {
+      allow get, list: if signedIn() && request.auth.uid == ownerUid;
+      allow create, update, delete: if false;
+    }
+
+    match /chatDeletionLogs/{logId} {
+      // Nhật ký chỉ lưu thao tác xóa, không lưu lại nội dung tin nhắn.
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
     }
 
 

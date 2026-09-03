@@ -55,6 +55,32 @@ service firebase.storage {
         );
     }
 
+    function chatConversationDoc(conversationId) {
+      return firestore.get(/databases/(default)/documents/chatConversations/$(conversationId));
+    }
+
+    function isChatParticipant(conversationId) {
+      return signedIn()
+        && chatConversationDoc(conversationId).data.participantIds is list
+        && request.auth.uid in chatConversationDoc(conversationId).data.participantIds;
+    }
+
+    function isAllowedChatFileType(contentType) {
+      return contentType == "application/pdf"
+        || contentType == "application/msword"
+        || contentType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        || contentType == "application/vnd.ms-excel"
+        || contentType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        || contentType == "application/vnd.ms-powerpoint"
+        || contentType == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        || contentType == "text/plain"
+        || contentType == "text/csv"
+        || contentType == "application/json"
+        || contentType == "application/zip"
+        || contentType == "application/vnd.rar"
+        || contentType == "application/x-7z-compressed";
+    }
+
     match /task-work-photos/{ownerUid}/{rowId}/{fileName} {
       // Ảnh CV chỉ dành cho tài khoản quản lý. Nhân viên không được đăng hoặc sửa.
       allow read: if isManagement();
@@ -76,6 +102,42 @@ service firebase.storage {
 
       allow update: if false;
       allow delete: if canDeleteTaskPhoto(taskId);
+    }
+
+    match /chat-media/{conversationId}/{senderUid}/{uploadId}/{fileName} {
+      // Chỉ hai thành viên của cuộc trò chuyện và Admin được xem tệp Chat.
+      allow read: if isAdmin() || isChatParticipant(conversationId);
+
+      // Người gửi chỉ được tải hình, video hoặc tệp được hỗ trợ vào đúng phòng Chat của mình.
+      allow create: if signedIn()
+        && request.auth.uid == senderUid
+        && isChatParticipant(conversationId)
+        && request.resource.metadata.uploaderUid == request.auth.uid
+        && request.resource.metadata.conversationId == conversationId
+        && request.resource.metadata.uploadId == uploadId
+        && (
+          (
+            request.resource.contentType.matches('image/.*')
+            && request.resource.size > 0
+            && request.resource.size <= 15 * 1024 * 1024
+          )
+          ||
+          (
+            request.resource.contentType.matches('video/.*')
+            && request.resource.size > 0
+            && request.resource.size <= 100 * 1024 * 1024
+          )
+          ||
+          (
+            isAllowedChatFileType(request.resource.contentType)
+            && request.resource.metadata.kind == "file"
+            && request.resource.size > 0
+            && request.resource.size <= 50 * 1024 * 1024
+          )
+        );
+
+      // Không cho trình duyệt sửa hoặc tự xóa lịch sử. Admin xóa qua Cloud Function.
+      allow update, delete: if false;
     }
   }
 }
