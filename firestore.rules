@@ -75,6 +75,30 @@ service cloud.firestore {
       return /databases/$(database)/documents/workOrders/$(workOrderId);
     }
 
+    function workOrderControlSettingsDoc() {
+      return /databases/$(database)/documents/appSettings/workOrderControls;
+    }
+
+    function isDispatchedPhotoRequirementEditingLocked(taskData) {
+      return taskData.status != "draft"
+        && exists(workOrderControlSettingsDoc())
+        && get(workOrderControlSettingsDoc()).data.keys().hasAny(["preventDispatchedPhotoRequirementEditing"])
+        && get(workOrderControlSettingsDoc()).data.preventDispatchedPhotoRequirementEditing == true;
+    }
+
+    function respectsDispatchedPhotoRequirementEditingLock(beforeData, afterData) {
+      return !afterData.diff(beforeData).affectedKeys().hasAny([
+          "photoRequired",
+          "requiredPhotoCount",
+          "photoRequirementHistory",
+          "photoRequirementChangeCount",
+          "lastPhotoRequirementChangedAt",
+          "lastPhotoRequirementChangedByUid",
+          "lastPhotoRequirementChangedByName"
+        ])
+        || !isDispatchedPhotoRequirementEditingLocked(beforeData);
+    }
+
     // Cho phép các task cũ tạo trước khi có tính năng bắt buộc đăng hình
     // vẫn được nhân viên bấm Hoàn thành nếu chưa có field photoRequired.
     function isTaskPhotoRequirementSatisfied(taskData) {
@@ -324,7 +348,9 @@ service cloud.firestore {
         || (signedIn() && resource.data.assignedToUid == request.auth.uid);
 
       // Admin được nhập/khôi phục dữ liệu task từ file backup JSON.
-      allow create, update: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+        && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data);
 
       // Chỉ Admin được giao việc. Cho phép tạo ở trạng thái "draft" (chưa giao việc,
       // thông tin có thể chưa đầy đủ) hoặc "doing" (đã giao việc chính thức, bắt đầu đếm giờ).
@@ -597,6 +623,7 @@ service cloud.firestore {
       // và đồng bộ trạng thái. Các ràng buộc cơ bản bên dưới giữ nguyên id/người giao
       // và chỉ cho assignedToUid rỗng hoặc trỏ tới user nhân viên hợp lệ.
       allow update: if isAdmin()
+        && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.assignedByUid == resource.data.assignedByUid
@@ -618,6 +645,7 @@ service cloud.firestore {
 
       // Admin được duyệt hoàn thành, yêu cầu làm lại, hoặc đánh dấu quá hạn.
       allow update: if isAdmin()
+        && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.assignedToUid == resource.data.assignedToUid
         && request.resource.data.assignedByUid == resource.data.assignedByUid
@@ -726,6 +754,7 @@ service cloud.firestore {
 
       // Chỉnh số lượng ảnh báo cáo bắt buộc.
       allow update: if hasPermission("managePhotoRequirements")
+        && !isDispatchedPhotoRequirementEditingLocked(resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "photoRequired",
           "requiredPhotoCount",
@@ -764,7 +793,8 @@ service cloud.firestore {
         && request.resource.data.workOrderTaskCount > 0;
 
       // Nhập dữ liệu có thể khôi phục toàn bộ field task, nhưng không cho phép qua collection users.
-      allow update: if hasPermission("importData");
+      allow update: if hasPermission("importData")
+        && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data);
 
       allow delete: if isAdmin()
         || hasPermission("deleteWorkOrder")

@@ -7626,6 +7626,11 @@
       background: linear-gradient(145deg, #fff7ed, #fffdf8 62%);
     }
 
+    .work-order-setting-section.is-photo-setting {
+      border-color: #93c5fd;
+      background: linear-gradient(145deg, #eff6ff, #f8fbff 62%);
+    }
+
     .work-order-setting-section.is-danger-setting {
       border-color: #fecaca;
       background: linear-gradient(145deg, #fff7ed, #fffafa 62%);
@@ -11333,6 +11338,17 @@
           <p class="work-order-setting-help">Áp dụng cho công việc hoàn thành thông thường và Ship (CV khác). Nghỉ trưa và Hotel tiếp tục dùng logic kết quả riêng hiện có.</p>
         </section>
 
+        <section class="work-order-setting-section is-photo-setting">
+          <label class="work-order-setting-toggle-row" for="preventDispatchedPhotoRequirementEditing">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Không cho chỉnh số Ảnh báo cáo</strong>
+              <span>Khi bật, tài khoản quản lý không thể thay đổi số ảnh báo cáo bắt buộc sau khi Phiếu đã được bấm “Giao việc”.</span>
+            </span>
+            <input id="preventDispatchedPhotoRequirementEditing" type="checkbox" />
+          </label>
+          <p class="work-order-setting-help">Phiếu “Chưa giao việc” vẫn có thể thiết lập lại số ảnh trước khi giao.</p>
+        </section>
+
         <section class="work-order-setting-section is-danger-setting">
           <label class="work-order-setting-toggle-row" for="preventWorkOrderDeletion">
             <span class="work-order-setting-toggle-copy">
@@ -11509,7 +11525,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260816-ui-ready-first-v64"></script>
+  <script type="module" src="app.js?v=20260905-lock-report-photo-count-v65"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

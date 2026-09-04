@@ -230,6 +230,7 @@ const state = {
   workOrderControlSettings: {
     maxExtendMinutes: null,
     preventWorkOrderDeletion: false,
+    preventDispatchedPhotoRequirementEditing: false,
     allowOverdueTimeExtension: false,
     allowEditCompletedTaskActualTime: false,
     workSupervisionEnabled: false,
@@ -696,6 +697,7 @@ function normalizeWorkOrderControlSettings(value = {}) {
   return {
     maxExtendMinutes: WORK_ORDER_EXTENSION_LIMIT_OPTIONS.includes(parsedMax) ? parsedMax : null,
     preventWorkOrderDeletion: input.preventWorkOrderDeletion === true,
+    preventDispatchedPhotoRequirementEditing: input.preventDispatchedPhotoRequirementEditing === true,
     allowOverdueTimeExtension: input.allowOverdueTimeExtension === true,
     allowEditCompletedTaskActualTime: input.allowEditCompletedTaskActualTime === true,
     workSupervisionEnabled: input.workSupervisionEnabled === true,
@@ -775,6 +777,18 @@ function isOverdueTimeExtensionAllowed() {
 
 function isCompletedTaskActualTimeEditAllowed() {
   return getWorkOrderControlSettings().allowEditCompletedTaskActualTime === true;
+}
+
+function isDispatchedPhotoRequirementEditingLocked(task = {}) {
+  return getWorkOrderControlSettings().preventDispatchedPhotoRequirementEditing === true
+    && task.status !== "draft";
+}
+
+function canEditTaskPhotoRequirement(task = {}, mode = "admin") {
+  return mode === "admin"
+    && hasPermission("managePhotoRequirements")
+    && task.status !== "completed"
+    && !isDispatchedPhotoRequirementEditingLocked(task);
 }
 
 function getTaskExtensionTotalMinutes(task = {}) {
@@ -909,6 +923,7 @@ const els = {
   enableMaxExtendMinutes: $("#enableMaxExtendMinutes"),
   maxExtendMinutesOptions: $("#maxExtendMinutesOptions"),
   preventWorkOrderDeletion: $("#preventWorkOrderDeletion"),
+  preventDispatchedPhotoRequirementEditing: $("#preventDispatchedPhotoRequirementEditing"),
   allowOverdueTimeExtension: $("#allowOverdueTimeExtension"),
   allowEditCompletedTaskActualTime: $("#allowEditCompletedTaskActualTime"),
   enableWorkSupervision: $("#enableWorkSupervision"),
@@ -9934,6 +9949,9 @@ function openWorkOrderSettingsModal() {
   if (els.preventWorkOrderDeletion) {
     els.preventWorkOrderDeletion.checked = settings.preventWorkOrderDeletion;
   }
+  if (els.preventDispatchedPhotoRequirementEditing) {
+    els.preventDispatchedPhotoRequirementEditing.checked = settings.preventDispatchedPhotoRequirementEditing;
+  }
   if (els.allowOverdueTimeExtension) {
     els.allowOverdueTimeExtension.checked = settings.allowOverdueTimeExtension;
   }
@@ -10135,6 +10153,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       authorizationToken: state.workOrderSettingsAuthorizationToken,
       maxExtendMinutes: limitEnabled ? selectedLimit : null,
       preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true,
+      preventDispatchedPhotoRequirementEditing: els.preventDispatchedPhotoRequirementEditing?.checked === true,
       allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true,
       allowEditCompletedTaskActualTime: els.allowEditCompletedTaskActualTime?.checked === true,
       workSupervisionEnabled: supervisionEnabled,
@@ -13034,9 +13053,7 @@ function renderDesktopTaskQuickActions(task, mode) {
   const workPhotoCount = getTaskWorkPhotos(task).length;
   const photoCount = getTaskPhotoCount(task);
   const canViewPhotos = photoCount > 0 && (mode === "admin" || mode === "employee");
-  const canEditPhotoRequirement = mode === "admin"
-    && hasPermission("managePhotoRequirements")
-    && task.status !== "completed";
+  const canEditPhotoRequirement = canEditTaskPhotoRequirement(task, mode);
 
   // Ảnh CV là ảnh hướng dẫn/mẫu của công việc, vì vậy mọi tài khoản có thể
   // nhìn thấy công việc đều được mở xem ngay cả khi thẻ đang Thu gọn trên desktop.
@@ -13404,7 +13421,11 @@ function renderPhotoReportBox(task, mode) {
   }
 
   const canView = photoCount > 0 && (mode === "admin" || mode === "employee");
-  const editableByAdmin = hasPermission("managePhotoRequirements") && !["completed"].includes(task.status);
+  const editableByAdmin = canEditTaskPhotoRequirement(task, mode);
+  const editingLockedAfterDispatch = mode === "admin"
+    && hasPermission("managePhotoRequirements")
+    && task.status !== "completed"
+    && isDispatchedPhotoRequirementEditingLocked(task);
   const titleText = editableByAdmin
     ? "Admin bấm để chỉnh số lượng ảnh báo cáo bắt buộc"
     : "";
@@ -13419,6 +13440,7 @@ function renderPhotoReportBox(task, mode) {
         <span>${escapeHtml(summary)} • ${escapeHtml(statusText)}</span>
         ${required && photoState.invalidCount > 0 ? `<small class="photo-report-invalid-note">⚠ ${photoState.invalidCount} ảnh không hợp lệ không được tính vào số lượng bắt buộc và đang khóa nút “Hoàn thành”.</small>` : ""}
         ${editableByAdmin ? `<small class="photo-report-hint">Admin bấm vào ô này hoặc nút “Chỉnh số ảnh” để sửa số lượng ảnh bắt buộc.</small>` : ""}
+        ${editingLockedAfterDispatch ? `<small class="photo-report-hint">🔒 Số ảnh báo cáo đã bị khóa sau khi Phiếu được giao.</small>` : ""}
       </div>
       ${(editableByAdmin || canView) ? `
         <div class="photo-report-actions">
@@ -13531,6 +13553,11 @@ async function editTaskPhotoRequirement(taskId) {
 
   if (task.status === "completed") {
     showToast("Task đã hoàn thành, không cần chỉnh số lượng ảnh báo cáo nữa.");
+    return;
+  }
+
+  if (isDispatchedPhotoRequirementEditingLocked(task)) {
+    showToast("Cài đặt hiện tại không cho chỉnh số ảnh báo cáo sau khi Phiếu đã được giao.");
     return;
   }
 

@@ -237,6 +237,13 @@ exports.saveWorkOrderControlSettings = onCall({
     ? null
     : Number(rawMaxExtendMinutes);
   const preventWorkOrderDeletion = request.data?.preventWorkOrderDeletion;
+  const rawPreventDispatchedPhotoRequirementEditing = request.data?.preventDispatchedPhotoRequirementEditing;
+  const existingSettingsSnap = rawPreventDispatchedPhotoRequirementEditing === undefined
+    ? await db.doc("appSettings/workOrderControls").get()
+    : null;
+  const preventDispatchedPhotoRequirementEditing = rawPreventDispatchedPhotoRequirementEditing === undefined
+    ? existingSettingsSnap?.data()?.preventDispatchedPhotoRequirementEditing === true
+    : rawPreventDispatchedPhotoRequirementEditing;
   const allowOverdueTimeExtension = request.data?.allowOverdueTimeExtension;
   const rawAllowEditCompletedTaskActualTime = request.data?.allowEditCompletedTaskActualTime;
   const allowEditCompletedTaskActualTime = rawAllowEditCompletedTaskActualTime === undefined
@@ -266,6 +273,9 @@ exports.saveWorkOrderControlSettings = onCall({
   }
   if (typeof preventWorkOrderDeletion !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị khóa xóa Phiếu không hợp lệ.");
+  }
+  if (typeof preventDispatchedPhotoRequirementEditing !== "boolean") {
+    throw new HttpsError("invalid-argument", "Giá trị khóa chỉnh số Ảnh báo cáo không hợp lệ.");
   }
   if (typeof allowOverdueTimeExtension !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị cho phép thêm giờ công việc quá hạn không hợp lệ.");
@@ -324,6 +334,7 @@ exports.saveWorkOrderControlSettings = onCall({
   const settings = {
     maxExtendMinutes,
     preventWorkOrderDeletion,
+    preventDispatchedPhotoRequirementEditing,
     allowOverdueTimeExtension,
     allowEditCompletedTaskActualTime,
     workSupervisionEnabled,
@@ -351,7 +362,9 @@ exports.saveWorkOrderControlSettings = onCall({
     settings: {
       maxExtendMinutes,
       preventWorkOrderDeletion,
+      preventDispatchedPhotoRequirementEditing,
       allowOverdueTimeExtension,
+      allowEditCompletedTaskActualTime,
       workSupervisionEnabled,
       workSupervisionCountdownMinutes,
       workSupervisionLunchCreditMinutes,
@@ -3392,4 +3405,3 @@ exports.sendPushForNotification = onDocumentCreated({
     if (staleDeletes.length) await Promise.allSettled(staleDeletes);
   }
 });
-
