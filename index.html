@@ -4249,8 +4249,8 @@
         margin: 0 !important;
       }
 
-      /* Hai nút quản trị “Xóa CV” và “Kết thúc” luôn có sẵn trong DOM nhưng
-         chỉ hiện khi chính thẻ công việc đang mở Chi tiết. Điều này tránh lỗi
+      /* Hai nút quản trị “Xóa CV” và “Kết thúc” có sẵn trong DOM khi
+         đủ quyền/cài đặt và chỉ hiện khi thẻ công việc đang mở Chi tiết. Điều này tránh lỗi
          bấm Chi tiết nhưng nút không xuất hiện do thẻ không được render lại. */
       .task-card .task-detail-only-action {
         display: none !important;
@@ -7629,6 +7629,11 @@
     .work-order-setting-section.is-photo-setting {
       border-color: #93c5fd;
       background: linear-gradient(145deg, #eff6ff, #f8fbff 62%);
+    }
+
+    .work-order-setting-section.is-end-action-setting {
+      border-color: #c4b5fd;
+      background: linear-gradient(145deg, #f5f3ff, #fafaff 62%);
     }
 
     .work-order-setting-section.is-danger-setting {
@@ -11349,6 +11354,17 @@
           <p class="work-order-setting-help">Phiếu “Chưa giao việc” vẫn có thể thiết lập lại số ảnh trước khi giao.</p>
         </section>
 
+        <section class="work-order-setting-section is-end-action-setting">
+          <label class="work-order-setting-toggle-row" for="hideEndTaskButton">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Không cho xuất hiện nút Kết thúc trong phiếu công việc</strong>
+              <span>Khi bật, nút “Kết thúc” sẽ không hiển thị trong các Phiếu công việc của tài khoản quản lý.</span>
+            </span>
+            <input id="hideEndTaskButton" type="checkbox" />
+          </label>
+          <p class="work-order-setting-help">Không ảnh hưởng nút “Hoàn thành” của nhân viên hoặc nút “Xác nhận hoàn thành” khi duyệt kết quả.</p>
+        </section>
+
         <section class="work-order-setting-section is-danger-setting">
           <label class="work-order-setting-toggle-row" for="preventWorkOrderDeletion">
             <span class="work-order-setting-toggle-copy">
@@ -11525,7 +11541,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260905-lock-report-photo-count-v65"></script>
+  <script type="module" src="app.js?v=20260905-hide-end-task-button-v66"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

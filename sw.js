@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260905-lock-report-photo-count-v65";
+const CACHE_NAME = "culao-task-shell-v20260905-hide-end-task-button-v66";
 const APP_SHELL = [
   "./",
   "./index.html",

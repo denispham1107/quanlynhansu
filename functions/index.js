@@ -238,12 +238,17 @@ exports.saveWorkOrderControlSettings = onCall({
     : Number(rawMaxExtendMinutes);
   const preventWorkOrderDeletion = request.data?.preventWorkOrderDeletion;
   const rawPreventDispatchedPhotoRequirementEditing = request.data?.preventDispatchedPhotoRequirementEditing;
+  const rawHideEndTaskButton = request.data?.hideEndTaskButton;
   const existingSettingsSnap = rawPreventDispatchedPhotoRequirementEditing === undefined
+    || rawHideEndTaskButton === undefined
     ? await db.doc("appSettings/workOrderControls").get()
     : null;
   const preventDispatchedPhotoRequirementEditing = rawPreventDispatchedPhotoRequirementEditing === undefined
     ? existingSettingsSnap?.data()?.preventDispatchedPhotoRequirementEditing === true
     : rawPreventDispatchedPhotoRequirementEditing;
+  const hideEndTaskButton = rawHideEndTaskButton === undefined
+    ? existingSettingsSnap?.data()?.hideEndTaskButton === true
+    : rawHideEndTaskButton;
   const allowOverdueTimeExtension = request.data?.allowOverdueTimeExtension;
   const rawAllowEditCompletedTaskActualTime = request.data?.allowEditCompletedTaskActualTime;
   const allowEditCompletedTaskActualTime = rawAllowEditCompletedTaskActualTime === undefined
@@ -276,6 +281,9 @@ exports.saveWorkOrderControlSettings = onCall({
   }
   if (typeof preventDispatchedPhotoRequirementEditing !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị khóa chỉnh số Ảnh báo cáo không hợp lệ.");
+  }
+  if (typeof hideEndTaskButton !== "boolean") {
+    throw new HttpsError("invalid-argument", "Giá trị ẩn nút Kết thúc không hợp lệ.");
   }
   if (typeof allowOverdueTimeExtension !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị cho phép thêm giờ công việc quá hạn không hợp lệ.");
@@ -335,6 +343,7 @@ exports.saveWorkOrderControlSettings = onCall({
     maxExtendMinutes,
     preventWorkOrderDeletion,
     preventDispatchedPhotoRequirementEditing,
+    hideEndTaskButton,
     allowOverdueTimeExtension,
     allowEditCompletedTaskActualTime,
     workSupervisionEnabled,
@@ -363,6 +372,7 @@ exports.saveWorkOrderControlSettings = onCall({
       maxExtendMinutes,
       preventWorkOrderDeletion,
       preventDispatchedPhotoRequirementEditing,
+      hideEndTaskButton,
       allowOverdueTimeExtension,
       allowEditCompletedTaskActualTime,
       workSupervisionEnabled,

@@ -231,6 +231,7 @@ const state = {
     maxExtendMinutes: null,
     preventWorkOrderDeletion: false,
     preventDispatchedPhotoRequirementEditing: false,
+    hideEndTaskButton: false,
     allowOverdueTimeExtension: false,
     allowEditCompletedTaskActualTime: false,
     workSupervisionEnabled: false,
@@ -698,6 +699,7 @@ function normalizeWorkOrderControlSettings(value = {}) {
     maxExtendMinutes: WORK_ORDER_EXTENSION_LIMIT_OPTIONS.includes(parsedMax) ? parsedMax : null,
     preventWorkOrderDeletion: input.preventWorkOrderDeletion === true,
     preventDispatchedPhotoRequirementEditing: input.preventDispatchedPhotoRequirementEditing === true,
+    hideEndTaskButton: input.hideEndTaskButton === true,
     allowOverdueTimeExtension: input.allowOverdueTimeExtension === true,
     allowEditCompletedTaskActualTime: input.allowEditCompletedTaskActualTime === true,
     workSupervisionEnabled: input.workSupervisionEnabled === true,
@@ -782,6 +784,10 @@ function isCompletedTaskActualTimeEditAllowed() {
 function isDispatchedPhotoRequirementEditingLocked(task = {}) {
   return getWorkOrderControlSettings().preventDispatchedPhotoRequirementEditing === true
     && task.status !== "draft";
+}
+
+function isEndTaskButtonHidden() {
+  return getWorkOrderControlSettings().hideEndTaskButton === true;
 }
 
 function canEditTaskPhotoRequirement(task = {}, mode = "admin") {
@@ -924,6 +930,7 @@ const els = {
   maxExtendMinutesOptions: $("#maxExtendMinutesOptions"),
   preventWorkOrderDeletion: $("#preventWorkOrderDeletion"),
   preventDispatchedPhotoRequirementEditing: $("#preventDispatchedPhotoRequirementEditing"),
+  hideEndTaskButton: $("#hideEndTaskButton"),
   allowOverdueTimeExtension: $("#allowOverdueTimeExtension"),
   allowEditCompletedTaskActualTime: $("#allowEditCompletedTaskActualTime"),
   enableWorkSupervision: $("#enableWorkSupervision"),
@@ -9952,6 +9959,9 @@ function openWorkOrderSettingsModal() {
   if (els.preventDispatchedPhotoRequirementEditing) {
     els.preventDispatchedPhotoRequirementEditing.checked = settings.preventDispatchedPhotoRequirementEditing;
   }
+  if (els.hideEndTaskButton) {
+    els.hideEndTaskButton.checked = settings.hideEndTaskButton;
+  }
   if (els.allowOverdueTimeExtension) {
     els.allowOverdueTimeExtension.checked = settings.allowOverdueTimeExtension;
   }
@@ -10154,6 +10164,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       maxExtendMinutes: limitEnabled ? selectedLimit : null,
       preventWorkOrderDeletion: els.preventWorkOrderDeletion?.checked === true,
       preventDispatchedPhotoRequirementEditing: els.preventDispatchedPhotoRequirementEditing?.checked === true,
+      hideEndTaskButton: els.hideEndTaskButton?.checked === true,
       allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true,
       allowEditCompletedTaskActualTime: els.allowEditCompletedTaskActualTime?.checked === true,
       workSupervisionEnabled: supervisionEnabled,
@@ -13754,7 +13765,12 @@ function normalizeTaskResultForDisplay(task) {
 }
 
 function canAdminEndAssignedTask(task, mode) {
-  if (mode !== "admin" || !hasPermission("reviewTasks") || !task?.assignedToUid) return false;
+  if (
+    mode !== "admin"
+    || !hasPermission("reviewTasks")
+    || !task?.assignedToUid
+    || isEndTaskButtonHidden()
+  ) return false;
 
   // Admin được chủ động kết thúc mọi công việc đã giao đang còn chạy.
   // Không hiện nút cho Phiếu nháp, Chờ chọn người, Chờ xác nhận hoặc Đã hoàn thành.
@@ -16980,6 +16996,12 @@ async function approveTask(taskId, button) {
 
 async function endAssignedTask(taskId, button) {
   if (!requirePermission("reviewTasks", "Tài khoản của bạn chưa được cấp quyền chủ động kết thúc công việc.")) return;
+
+  if (isEndTaskButtonHidden()) {
+    toast("Cài đặt hiện tại không cho hiển thị hoặc sử dụng nút Kết thúc trong Phiếu công việc.", "error");
+    return;
+  }
+
   setButtonLoading(button, true, "Đang kết thúc...");
 
   try {
