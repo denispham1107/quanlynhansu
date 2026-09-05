@@ -8,5 +8,5 @@ export const firebaseConfig = {
   measurementId: "G-NYBQE7WI2N",
 
   // Web Push VAPID Public Key
-  messagingVapidKey: "BD0OmumOPRJoSoeeSNF9Ga5ir-2NNwE1YBOYBConkNqRpP56IvyW2f4xcSQtndEshYdkl1yG7a7y0NQiL7Eivgo"
+  messagingVapidKey: "BNr4xQlY8tBg3IifMr6G98XkO7TJ_kfTVA9DV_pOKJUnMsmy2CqVq4blEFhCvyICxb9rO3_fyGZAEV_dzSSgaVk"
 };

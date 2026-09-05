@@ -1,4 +1,4 @@
-import { firebaseConfig } from "./firebase-config.js";
+import { firebaseConfig } from "./firebase-config.js?v=20260905-push-vapid-fix-v67";
 import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getAuth,
@@ -2413,6 +2413,45 @@ function getConfiguredVapidKey() {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isFcmSubscriptionCredentialError(error) {
+  const details = `${error?.code || ""} ${error?.message || error || ""}`.toLowerCase();
+  return details.includes("messaging/token-subscribe-failed")
+    || (details.includes("subscrib") && details.includes("authentication credential"));
+}
+
+async function resetStalePushSubscription(messaging, registration) {
+  try {
+    await deleteMessagingToken(messaging);
+  } catch (error) {
+    console.warn("Không xóa được đăng ký FCM cũ bằng Firebase SDK:", error);
+  }
+
+  try {
+    const subscription = await registration?.pushManager?.getSubscription?.();
+    if (subscription) await subscription.unsubscribe();
+  } catch (error) {
+    console.warn("Không xóa được Web Push subscription cũ:", error);
+  }
+
+  state.pushToken = "";
+  state.pushTokenOwnerUid = "";
+  localStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+  localStorage.removeItem(PUSH_TOKEN_OWNER_STORAGE_KEY);
+  updateNotificationPermissionButton();
+}
+
+async function getMessagingTokenWithRecovery(messaging, tokenOptions) {
+  try {
+    return await getMessagingToken(messaging, tokenOptions);
+  } catch (error) {
+    if (!isFcmSubscriptionCredentialError(error)) throw error;
+
+    console.warn("Đăng ký FCM cũ không còn hợp lệ, đang làm mới một lần:", error);
+    await resetStalePushSubscription(messaging, tokenOptions.serviceWorkerRegistration);
+    return getMessagingToken(messaging, tokenOptions);
+  }
+}
+
 async function getPushMessaging() {
   if (state.pushMessaging) return state.pushMessaging;
   if (!(await isMessagingSupported())) return null;
@@ -2484,7 +2523,7 @@ async function registerCurrentDeviceForPush({ showSuccessToast = false } = {}) {
   const vapidKey = getConfiguredVapidKey();
   if (vapidKey) tokenOptions.vapidKey = vapidKey;
 
-  const token = await getMessagingToken(messaging, tokenOptions);
+  const token = await getMessagingTokenWithRecovery(messaging, tokenOptions);
   if (!token) {
     throw new Error("Không lấy được mã nhận thông báo của thiết bị.");
   }
@@ -2578,10 +2617,13 @@ async function requestNotificationPermission() {
     }
   } catch (error) {
     console.error("PUSH REGISTRATION ERROR:", error);
+    const message = isFcmSubscriptionCredentialError(error)
+      ? "FCM chưa xác thực được thiết bị. Ứng dụng đã làm mới đăng ký; hãy tải lại trang rồi bấm bật thông báo thêm một lần"
+      : (error?.message || String(error));
     const vapidHint = getConfiguredVapidKey()
       ? ""
       : " Nếu vẫn lỗi, hãy thêm Web Push VAPID public key vào firebaseConfig.messagingVapidKey.";
-    toast(`Không bật được thông báo nền: ${error?.message || String(error)}.${vapidHint}`, "error");
+    toast(`Không bật được thông báo nền: ${message}.${vapidHint}`, "error");
   }
 }
 
