@@ -75,6 +75,27 @@ service cloud.firestore {
       return /databases/$(database)/documents/workOrders/$(workOrderId);
     }
 
+    function hotelDailyBudgetDoc(dateKey) {
+      return /databases/$(database)/documents/hotelDailyBudgets/$(dateKey);
+    }
+
+    function hasValidHotelDailyBudget(data) {
+      return !dataIsHotel(data)
+        || (
+          data.taskDate.size() > 0
+          && existsAfter(hotelDailyBudgetDoc(data.taskDate))
+          && getAfter(hotelDailyBudgetDoc(data.taskDate)).data.petCount == data.hotelPetCount
+          && getAfter(hotelDailyBudgetDoc(data.taskDate)).data.totalAllowedSeconds == data.hotelAllowedMinutes * 60
+          && getAfter(hotelDailyBudgetDoc(data.taskDate)).data.consumedSeconds < getAfter(hotelDailyBudgetDoc(data.taskDate)).data.totalAllowedSeconds
+          && data.deadlineMinutes * 60
+            >= getAfter(hotelDailyBudgetDoc(data.taskDate)).data.totalAllowedSeconds
+              - getAfter(hotelDailyBudgetDoc(data.taskDate)).data.consumedSeconds - 0.01
+          && data.deadlineMinutes * 60
+            <= getAfter(hotelDailyBudgetDoc(data.taskDate)).data.totalAllowedSeconds
+              - getAfter(hotelDailyBudgetDoc(data.taskDate)).data.consumedSeconds + 0.01
+        );
+    }
+
     function workOrderControlSettingsDoc() {
       return /databases/$(database)/documents/appSettings/workOrderControls;
     }
@@ -350,7 +371,16 @@ service cloud.firestore {
       // Admin được nhập/khôi phục dữ liệu task từ file backup JSON.
       allow create: if isAdmin();
       allow update: if isAdmin()
-        && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data);
+        && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
+        && (
+          !dataIsHotel(resource.data)
+          || request.resource.data.deadlineMinutes == resource.data.deadlineMinutes
+          || (
+            resource.data.status == "draft"
+            && request.resource.data.status in ["waiting_assignee", "hotel"]
+            && hasValidHotelDailyBudget(request.resource.data)
+          )
+        );
 
       // Chỉ Admin được giao việc. Cho phép tạo ở trạng thái "draft" (chưa giao việc,
       // thông tin có thể chưa đầy đủ) hoặc "doing" (đã giao việc chính thức, bắt đầu đếm giờ).
@@ -372,6 +402,7 @@ service cloud.firestore {
           "deadlineMinutes",
           "isLunchBreak",
           "isHotel",
+          "isShip",
           "hotelPetCount",
           "hotelAllowedMinutes",
           "deadlineAt",
@@ -421,16 +452,17 @@ service cloud.firestore {
         && request.resource.data.rowIndex is int
         && request.resource.data.rowIndex >= 0
         && request.resource.data.createdAt == request.time
-        && request.resource.data.deadlineMinutes is int
+        && request.resource.data.deadlineMinutes is number
         && request.resource.data.deadlineMinutes >= 0
         && request.resource.data.deadlineMinutes <= 10080
         && request.resource.data.isLunchBreak is bool
         && request.resource.data.isHotel is bool
+        && request.resource.data.isShip is bool
         && !(request.resource.data.isLunchBreak == true && request.resource.data.isHotel == true)
         && request.resource.data.hotelPetCount is int
         && request.resource.data.hotelPetCount >= 0
         && request.resource.data.hotelPetCount <= 500
-        && request.resource.data.hotelAllowedMinutes is int
+        && request.resource.data.hotelAllowedMinutes is number
         && request.resource.data.hotelAllowedMinutes >= 0
         && request.resource.data.hotelAllowedMinutes <= 10080
         && (
@@ -438,6 +470,7 @@ service cloud.firestore {
           || (request.resource.data.hotelPetCount == 0
             && request.resource.data.hotelAllowedMinutes == 0)
         )
+        && hasValidHotelDailyBudget(request.resource.data)
         && (
           !request.resource.data.isLunchBreak
           || (request.resource.data.deadlineMinutes > 0 && request.resource.data.deadlineMinutes <= 30)
@@ -638,7 +671,7 @@ service cloud.firestore {
           )
         )
         && request.resource.data.assignedToName is string
-        && request.resource.data.deadlineMinutes is int
+        && request.resource.data.deadlineMinutes is number
         && request.resource.data.deadlineMinutes >= 0
         && request.resource.data.deadlineMinutes <= 10080
         && isValidTaskStatus(request.resource.data.status);
@@ -661,9 +694,13 @@ service cloud.firestore {
           "deadlineAt",
           "pauseStartedAt",
           "remainingMsAtPause",
-          "accumulatedWorkedMs"
+          "accumulatedWorkedMs",
+          "deadlineMinutes",
+          "hotelPetCount",
+          "hotelAllowedMinutes"
         ])
-        && request.resource.data.status in ["waiting_assignee", "doing", "lunch_break", "hotel"];
+        && request.resource.data.status in ["waiting_assignee", "doing", "lunch_break", "hotel"]
+        && hasValidHotelDailyBudget(request.resource.data);
 
       // Đổi nhân viên, chuyển về Chờ chọn người hoặc bắt đầu lại task đang chờ.
       allow update: if hasPermission("reassignTasks")
@@ -698,6 +735,7 @@ service cloud.firestore {
 
       // Thêm giờ và lưu lịch sử thêm giờ.
       allow update: if hasPermission("extendTaskTime")
+        && !dataIsHotel(resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.assignedToUid == resource.data.assignedToUid
         && request.resource.data.assignedByUid == resource.data.assignedByUid
@@ -712,7 +750,7 @@ service cloud.firestore {
           "lastTimeExtendedByUid",
           "lastTimeExtendedByName"
         ])
-        && request.resource.data.deadlineMinutes is int
+        && request.resource.data.deadlineMinutes is number
         && request.resource.data.deadlineMinutes >= resource.data.deadlineMinutes
         && request.resource.data.deadlineMinutes <= 10080
         && isValidTaskStatus(request.resource.data.status);
@@ -931,6 +969,50 @@ service cloud.firestore {
       allow delete: if isAdmin()
         || hasPermission("deleteAllWorkOrders")
         || hasPermission("importData");
+    }
+
+    match /hotelDailyBudgets/{dateKey} {
+      // Mọi tài khoản đã đăng nhập cần đọc thời gian Hotel còn lại để hiển thị
+      // thống nhất trên Phiếu; chỉ lần tạo Phiếu Hotel đầu tiên trong ngày mới
+      // được chốt số lượng bé. Phần đã làm do Cloud Function cập nhật.
+      allow read: if signedIn();
+
+      allow create: if (hasPermission("createWorkOrder") || hasPermission("editWorkOrder"))
+        && request.resource.data.keys().hasOnly([
+          "id",
+          "date",
+          "petCount",
+          "secondsPerPet",
+          "totalAllowedSeconds",
+          "consumedSeconds",
+          "createdByUid",
+          "createdByName",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.id == dateKey
+        && request.resource.data.date == dateKey
+        && request.resource.data.petCount is int
+        && request.resource.data.petCount > 0
+        && request.resource.data.petCount <= 500
+        && request.resource.data.secondsPerPet == 270
+        && request.resource.data.totalAllowedSeconds == request.resource.data.petCount * 270
+        && request.resource.data.consumedSeconds == 0
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdByName is string
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow create, update: if hasPermission("importData");
+      allow delete: if isAdmin()
+        || hasPermission("deleteAllWorkOrders")
+        || hasPermission("importData");
+    }
+
+    match /hotelBudgetContributions/{taskId} {
+      // Sổ cái chống cộng trùng do Firestore trigger có thể chạy lại.
+      // Chỉ Cloud Functions (Admin SDK) được ghi và đọc collection này.
+      allow read, create, update, delete: if false;
     }
 
     match /workTemplates/{templateId} {

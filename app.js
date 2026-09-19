@@ -161,6 +161,7 @@ const state = {
   timeExtensionReasons: [],
   workTemplates: [],
   hotelDailyReports: [],
+  hotelDailyBudgets: [],
   notifications: [],
   knownNotificationIds: new Set(),
   notificationsReady: false,
@@ -2028,13 +2029,16 @@ function getTaskDateValue(task) {
 }
 
 function formatMinutes(totalMinutes = 0) {
-  const minutes = Number(totalMinutes) || 0;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
+  const totalSeconds = Math.max(0, Math.round((Number(totalMinutes) || 0) * 60));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
 
-  if (h && m) return `${h} giờ ${m} phút`;
-  if (h) return `${h} giờ`;
-  return `${m} phút`;
+  if (hours) parts.push(`${hours} giờ`);
+  if (minutes) parts.push(`${minutes} phút`);
+  if (seconds) parts.push(`${seconds} giây`);
+  return parts.join(" ") || "0 phút";
 }
 
 function formatCountdown(ms) {
@@ -5283,6 +5287,8 @@ onAuthStateChanged(auth, async (user) => {
   hideAdminWorkOrderSuggestions();
   state.timeExtensionReasons = [];
   state.workTemplates = [];
+  state.hotelDailyReports = [];
+  state.hotelDailyBudgets = [];
   state.notifications = [];
   state.knownNotificationIds = new Set();
   state.notificationsReady = false;
@@ -5812,6 +5818,19 @@ function setupAdminDashboard() {
     }
   );
 
+  const unsubHotelDailyBudgets = onSnapshot(
+    collection(db, "hotelDailyBudgets"),
+    (snapshot) => {
+      state.hotelDailyBudgets = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      syncAllHotelTaskRows();
+      renderAdminTasks();
+    },
+    (error) => {
+      console.error(error);
+      toast("Không đọc được hạn mức Hotel hằng ngày. Hãy deploy Firestore Rules mới nhất.", "error");
+    }
+  );
+
   const workOrderSettingsRef = doc(db, "appSettings", WORK_ORDER_CONTROL_SETTINGS_DOC_ID);
   const unsubWorkOrderControlSettings = onSnapshot(
     workOrderSettingsRef,
@@ -5842,6 +5861,7 @@ function setupAdminDashboard() {
     unsubWorkTemplates,
     unsubTimeExtensionReasons,
     unsubHotelDailyReports,
+    unsubHotelDailyBudgets,
     unsubWorkOrderControlSettings,
     unsubWorkSupervision
   );
@@ -7239,6 +7259,12 @@ function setTaskDurationInputsLocked(row, locked, template = null) {
 function syncWorkTemplateDurationLock(row, { applyDuration = true } = {}) {
   if (!row) return null;
 
+  if (row.querySelector(".row-hotel")?.checked) {
+    setTaskDurationInputsLocked(row, false);
+    syncHotelRowControls(row);
+    return null;
+  }
+
   const title = row.querySelector(".row-title")?.value || "";
   const template = findWorkTemplateByName(title);
   const deadlineMinutes = Number(template?.deadlineMinutes || 0);
@@ -7278,7 +7304,8 @@ const BACKUP_COLLECTIONS = [
   "workTemplates",
   "timeExtensionReasons",
   "notifications",
-  "hotelDailyReports"
+  "hotelDailyReports",
+  "hotelDailyBudgets"
 ];
 
 function encodeBackupValue(value) {
@@ -7735,6 +7762,32 @@ function calculateHotelAllowedMinutes(petCount) {
   return (count * HOTEL_SECONDS_PER_PET) / 60;
 }
 
+function getHotelDailyBudget(dateKey) {
+  const cleanDateKey = String(dateKey || "").trim();
+  if (!cleanDateKey) return null;
+
+  const budget = state.hotelDailyBudgets.find((item) => item.id === cleanDateKey || item.date === cleanDateKey);
+  if (!budget) return null;
+
+  const petCount = normalizeHotelPetCount(budget.petCount);
+  const totalAllowedSeconds = Math.max(0, Math.round(Number(
+    budget.totalAllowedSeconds ?? (petCount * HOTEL_SECONDS_PER_PET)
+  ) || 0));
+  const consumedSeconds = Math.max(0, Math.round(Number(budget.consumedSeconds || 0)));
+
+  if (!petCount || !totalAllowedSeconds) return null;
+
+  return {
+    ...budget,
+    id: cleanDateKey,
+    date: cleanDateKey,
+    petCount,
+    totalAllowedSeconds,
+    consumedSeconds,
+    remainingSeconds: Math.max(0, totalAllowedSeconds - consumedSeconds)
+  };
+}
+
 function formatHotelDuration(totalMinutes = 0) {
   const totalSeconds = Math.max(0, Math.round((Number(totalMinutes) || 0) * 60));
   const hours = Math.floor(totalSeconds / 3600);
@@ -7749,25 +7802,94 @@ function formatHotelDuration(totalMinutes = 0) {
   return parts.join(" ") || "0 phút";
 }
 
-function applyHotelTimeFromPetCount(row) {
+function setHotelDurationInputsLocked(row, locked) {
+  if (!row) return;
+
+  row.classList.toggle("is-hotel-duration-locked", Boolean(locked));
+  [row.querySelector(".row-hours"), row.querySelector(".row-minutes")].forEach((input) => {
+    if (!input) return;
+    input.readOnly = Boolean(locked);
+    input.setAttribute("aria-readonly", String(Boolean(locked)));
+    input.classList.toggle("is-hotel-duration-locked", Boolean(locked));
+    if (locked) {
+      input.title = "Thời gian Hotel được hệ thống tự tính và không thể chỉnh sửa.";
+    } else if (!input.dataset.templateLocked) {
+      input.removeAttribute("title");
+    }
+  });
+}
+
+function syncHotelRowControls(row) {
   if (!row) return;
 
   const hotelCheckbox = row.querySelector(".row-hotel");
-  if (!hotelCheckbox?.checked) return;
-
+  const hotelPetBox = row.querySelector(".hotel-pet-box");
   const hotelPetCountInput = row.querySelector(".row-hotel-pet-count");
+  const hotelTimePreview = row.querySelector(".hotel-time-preview");
+  const taskDate = row.querySelector(".row-date")?.value || "";
   const hoursInput = row.querySelector(".row-hours");
   const minutesInput = row.querySelector(".row-minutes");
 
-  if (!hotelPetCountInput || !hoursInput || !minutesInput) return;
-
-  if (!normalizeHotelPetCount(hotelPetCountInput.value)) {
-    hotelPetCountInput.value = HOTEL_BASE_PET_COUNT;
+  if (!hotelCheckbox?.checked) {
+    hotelPetBox?.classList.add("hidden");
+    row.classList.remove("has-existing-hotel-budget");
+    delete row.dataset.hotelTotalAllowedSeconds;
+    delete row.dataset.hotelRemainingSeconds;
+    if (hotelPetCountInput) {
+      hotelPetCountInput.readOnly = false;
+      hotelPetCountInput.removeAttribute("aria-readonly");
+      hotelPetCountInput.removeAttribute("title");
+    }
+    if (minutesInput) minutesInput.step = "1";
+    setHotelDurationInputsLocked(row, false);
+    return;
   }
 
-  const allowedMinutes = calculateHotelAllowedMinutes(hotelPetCountInput.value);
-  hoursInput.value = Math.floor(allowedMinutes / 60);
-  minutesInput.value = allowedMinutes % 60;
+  hotelPetBox?.classList.remove("hidden");
+  if (!hotelPetCountInput || !hoursInput || !minutesInput) return;
+
+  const dailyBudget = getHotelDailyBudget(taskDate);
+  const budgetLocked = Boolean(dailyBudget);
+  const petCount = dailyBudget?.petCount || normalizeHotelPetCount(hotelPetCountInput.value);
+
+  if (budgetLocked) {
+    hotelPetCountInput.value = String(dailyBudget.petCount);
+  }
+
+  hotelPetCountInput.readOnly = budgetLocked;
+  hotelPetCountInput.setAttribute("aria-readonly", String(budgetLocked));
+  hotelPetCountInput.title = budgetLocked
+    ? "Số lượng bé đã được chốt từ Phiếu Hotel đầu tiên trong ngày này."
+    : "Nhập số lượng bé đang ở Hotel để hệ thống tự tính thời gian.";
+  row.classList.toggle("has-existing-hotel-budget", budgetLocked);
+
+  const totalAllowedSeconds = dailyBudget?.totalAllowedSeconds
+    || (petCount * HOTEL_SECONDS_PER_PET);
+  const remainingSeconds = dailyBudget?.remainingSeconds ?? totalAllowedSeconds;
+
+  row.dataset.hotelTotalAllowedSeconds = String(totalAllowedSeconds || 0);
+  row.dataset.hotelRemainingSeconds = String(remainingSeconds || 0);
+
+  const durationMinutes = Math.max(0, remainingSeconds / 60);
+  hoursInput.value = Math.floor(durationMinutes / 60);
+  minutesInput.value = Number((durationMinutes % 60).toFixed(2));
+  minutesInput.step = "0.01";
+  minutesInput.max = "59.99";
+  setHotelDurationInputsLocked(row, true);
+
+  if (hotelTimePreview) {
+    if (!petCount) {
+      hotelTimePreview.innerHTML = "Nhập <strong>Số lượng bé</strong> để hệ thống tính thời gian Hotel.";
+    } else if (budgetLocked) {
+      hotelTimePreview.innerHTML = `Số lượng bé đã khóa: <strong>${petCount} bé</strong> • Thời gian còn lại làm Hotel: <strong>${escapeHtml(formatHotelDuration(remainingSeconds / 60))}</strong>.`;
+    } else {
+      hotelTimePreview.innerHTML = `${petCount} bé × 4 phút 30 giây = <strong>${escapeHtml(formatHotelDuration(totalAllowedSeconds / 60))}</strong>. Thời gian này được khóa tự động.`;
+    }
+  }
+}
+
+function syncAllHotelTaskRows() {
+  $$("#taskRowsContainer .task-row").forEach((row) => syncHotelRowControls(row));
 }
 
 function isAutoSpecialTitle(value, titles) {
@@ -7855,6 +7977,13 @@ function createTaskRowElement(prefill = null) {
     </div>
     <p class="small-note task-type-note lunch-break-note hidden">Phiếu Nghỉ trưa tối đa 30 phút. Mỗi nhân viên chỉ được có 1 phiếu Nghỉ trưa đang chạy.</p>
     <p class="small-note task-type-note hotel-note hidden">Phiếu Hotel sẽ áp dụng đúng cài đặt đăng hình của Admin ở bên dưới. <strong>Thời gian quy định dọn dẹp chuồng, vệ sinh chung, rửa chén, nấu cơm cho mỗi bé là 4 phút 30 giây.</strong></p>
+    <div class="hotel-pet-box hidden">
+      <label class="task-row-field">
+        <span class="task-field-label">Số lượng bé</span>
+        <input type="number" class="row-hotel-pet-count" min="1" max="500" step="1" inputmode="numeric" placeholder="Nhập số lượng bé đang ở Hotel" />
+      </label>
+      <p class="small-note hotel-time-preview">Nhập <strong>Số lượng bé</strong> để hệ thống tính thời gian Hotel.</p>
+    </div>
     <div class="two-col task-row-duration-grid">
       <label class="task-row-field">
         <span class="task-field-label">Số giờ</span>
@@ -7895,6 +8024,7 @@ function createTaskRowElement(prefill = null) {
 
     if (prefill.isHotel) {
       wrapper.querySelector(".row-hotel").checked = true;
+      wrapper.querySelector(".row-hotel-pet-count").value = normalizeHotelPetCount(prefill.hotelPetCount) || "";
     }
 
     if (prefill.isShip) {
@@ -7905,6 +8035,7 @@ function createTaskRowElement(prefill = null) {
   if (!taskRowWorkPhotos.has(rowId)) taskRowWorkPhotos.set(rowId, []);
   syncLunchBreakRowControls(wrapper);
   syncWorkTemplateDurationLock(wrapper, { applyDuration: true });
+  syncHotelRowControls(wrapper);
   syncTaskRowSummary(wrapper);
   syncTaskRowWorkPhotoButtons(wrapper);
   return wrapper;
@@ -8108,9 +8239,12 @@ function syncLunchBreakRowControls(row, changedInput = null) {
 
     hoursInput.max = 168;
     minutesInput.min = 0;
-    minutesInput.max = 59;
+    minutesInput.max = 59.99;
+    syncHotelRowControls(row);
     return;
   }
+
+  syncHotelRowControls(row);
 
   if (cleaningCheckbox?.checked && titleInput && !titleInput.value.trim()) {
     titleInput.value = CLEANING_AUTO_TITLE;
@@ -8246,6 +8380,10 @@ els.taskRowsContainer.addEventListener("input", (event) => {
   const row = event.target.closest(".task-row");
   if (!row) return;
 
+  if (event.target.matches(".row-hotel-pet-count")) {
+    syncHotelRowControls(row);
+  }
+
   if (event.target.matches(".row-title")) {
     syncTaskRowSummary(row);
     syncWorkTemplateDurationLock(row, { applyDuration: true });
@@ -8256,9 +8394,10 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   const row = event.target.closest(".task-row");
   if (!row) return;
 
-  if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning, .row-hours, .row-minutes")) {
+  if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning, .row-hours, .row-minutes, .row-date, .row-hotel-pet-count")) {
     syncLunchBreakRowControls(row, event.target);
     syncWorkTemplateDurationLock(row, { applyDuration: true });
+    syncHotelRowControls(row);
     syncTaskRowSummary(row);
 
     if (event.target.matches(".row-lunch-break, .row-hotel, .row-ship, .row-cleaning")) {
@@ -8370,15 +8509,21 @@ function readTaskRowsData() {
     const isLunchBreak = Boolean(row.querySelector(".row-lunch-break")?.checked);
     const isHotel = Boolean(row.querySelector(".row-hotel")?.checked);
     const isShip = Boolean(row.querySelector(".row-ship")?.checked);
-    const hotelPetCount = 0;
-    const hotelAllowedMinutes = 0;
+    const hotelPetCount = isHotel
+      ? normalizeHotelPetCount(row.querySelector(".row-hotel-pet-count")?.value)
+      : 0;
+    const hotelAllowedMinutes = isHotel
+      ? Math.max(0, Number(row.dataset.hotelTotalAllowedSeconds || 0) / 60)
+      : 0;
     const hours = Number(row.querySelector(".row-hours").value || 0);
     const minutes = Number(row.querySelector(".row-minutes").value || 0);
     const matchedTemplate = findWorkTemplateByName(title);
     const templateDeadlineMinutes = Number(matchedTemplate?.deadlineMinutes || 0);
     // Bảo vệ lớp dữ liệu: nếu tên công việc khớp chính xác với Danh sách công việc,
     // luôn dùng thời gian của công việc mẫu kể cả khi DOM bị chỉnh thủ công.
-    const deadlineMinutes = templateDeadlineMinutes > 0
+    const deadlineMinutes = isHotel
+      ? Math.max(0, Number(row.dataset.hotelRemainingSeconds || 0) / 60)
+      : templateDeadlineMinutes > 0
       ? templateDeadlineMinutes
       : (hours * 60 + minutes);
     const assignedEmployee = state.employees.find((employee) => employee.uid === assignedToUid);
@@ -8414,7 +8559,18 @@ function validateTaskRows(rows) {
     if (row.assignedToUid && !row.assignedEmployee) return `${rowLabel}: nhân viên được chọn không hợp lệ.`;
     if (row.isLunchBreak && row.isHotel) return `${rowLabel}: chỉ được chọn Nghỉ trưa hoặc Hotel, không chọn cả hai.`;
     if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
+    if (row.isHotel && !row.hotelPetCount) return `${rowLabel}: vui lòng nhập Số lượng bé đang ở Hotel.`;
+    if (row.isHotel && row.hotelPetCount > 500) return `${rowLabel}: Số lượng bé tối đa là 500.`;
+    if (row.isHotel && row.deadlineMinutes <= 0) return `${rowLabel}: thời gian Hotel trong ngày này đã được sử dụng hết.`;
     if (row.deadlineMinutes <= 0) return `${rowLabel}: thời gian cần hoàn thành phải lớn hơn 0 phút.`;
+  }
+
+  const duplicateHotelDate = rows.find((row, index) => (
+    row.isHotel
+    && rows.some((other, otherIndex) => otherIndex !== index && other.isHotel && other.taskDate === row.taskDate)
+  ));
+  if (duplicateHotelDate) {
+    return "Mỗi Phiếu chỉ được tạo 1 công việc Hotel cho cùng một ngày. Sau khi hoàn thành, hãy tạo Phiếu Hotel tiếp theo để hệ thống trừ đúng thời gian đã làm.";
   }
 
   return validateLunchBreakRowsForDispatch(rows);
@@ -8427,7 +8583,87 @@ function validateTaskRowsForDraft(rows) {
     return "Phiếu cần có ít nhất 1 công việc (có thể để trống thông tin, điền sau).";
   }
 
+  const invalidHotelRow = rows.find((row) => row.isHotel && (!row.taskDate || !row.hotelPetCount || row.deadlineMinutes <= 0));
+  if (invalidHotelRow) {
+    return `Công việc #${invalidHotelRow.index + 1}: Phiếu Hotel cần ngày giao việc, Số lượng bé và thời gian Hotel còn lại lớn hơn 0.`;
+  }
+
+  const duplicateHotelDate = rows.find((row, index) => (
+    row.isHotel
+    && rows.some((other, otherIndex) => otherIndex !== index && other.isHotel && other.taskDate === row.taskDate)
+  ));
+  if (duplicateHotelDate) {
+    return "Mỗi Phiếu chỉ được lưu 1 công việc Hotel cho cùng một ngày.";
+  }
+
   return validateLunchBreakBasicRows(rows);
+}
+
+async function prepareHotelRowsForPersistence(rows) {
+  const hotelRows = rows.filter((row) => row.isHotel);
+  if (!hotelRows.length) return [];
+
+  const dateKeys = Array.from(new Set(hotelRows.map((row) => String(row.taskDate || "").trim()).filter(Boolean)));
+  const snapshots = await Promise.all(
+    dateKeys.map((dateKey) => getDoc(doc(db, "hotelDailyBudgets", dateKey)))
+  );
+  const budgetsByDate = new Map();
+  const newBudgets = [];
+
+  snapshots.forEach((snapshot, index) => {
+    const dateKey = dateKeys[index];
+    if (!snapshot.exists()) return;
+
+    const data = { id: snapshot.id, ...snapshot.data() };
+    const petCount = normalizeHotelPetCount(data.petCount);
+    const totalAllowedSeconds = Math.max(0, Math.round(Number(
+      data.totalAllowedSeconds ?? (petCount * HOTEL_SECONDS_PER_PET)
+    ) || 0));
+    const consumedSeconds = Math.max(0, Math.round(Number(data.consumedSeconds || 0)));
+
+    if (!petCount || !totalAllowedSeconds) {
+      throw new Error(`Hạn mức Hotel ngày ${dateKey} không hợp lệ. Vui lòng liên hệ Admin kiểm tra dữ liệu.`);
+    }
+
+    budgetsByDate.set(dateKey, {
+      petCount,
+      totalAllowedSeconds,
+      consumedSeconds,
+      remainingSeconds: Math.max(0, totalAllowedSeconds - consumedSeconds)
+    });
+  });
+
+  hotelRows.forEach((row) => {
+    const dateKey = String(row.taskDate || "").trim();
+    let budget = budgetsByDate.get(dateKey);
+
+    if (!budget) {
+      const petCount = normalizeHotelPetCount(row.hotelPetCount);
+      if (!petCount) {
+        throw new Error(`Công việc #${row.index + 1}: vui lòng nhập Số lượng bé đang ở Hotel.`);
+      }
+
+      const totalAllowedSeconds = petCount * HOTEL_SECONDS_PER_PET;
+      budget = {
+        petCount,
+        totalAllowedSeconds,
+        consumedSeconds: 0,
+        remainingSeconds: totalAllowedSeconds
+      };
+      budgetsByDate.set(dateKey, budget);
+      newBudgets.push({ dateKey, ...budget });
+    }
+
+    if (budget.remainingSeconds <= 0) {
+      throw new Error(`Thời gian Hotel ngày ${dateKey} đã được sử dụng hết, không thể tạo thêm Phiếu Hotel.`);
+    }
+
+    row.hotelPetCount = budget.petCount;
+    row.hotelAllowedMinutes = budget.totalAllowedSeconds / 60;
+    row.deadlineMinutes = budget.remainingSeconds / 60;
+  });
+
+  return newBudgets;
 }
 
 // =========================
@@ -8784,6 +9020,7 @@ async function persistWorkOrder(dispatch, button) {
     }
 
     const rows = readTaskRowsData();
+    const newHotelBudgets = await prepareHotelRowsForPersistence(rows);
     const validationError = dispatch ? validateTaskRows(rows) : validateTaskRowsForDraft(rows);
 
     if (validationError) {
@@ -8807,6 +9044,21 @@ async function persistWorkOrder(dispatch, button) {
     }
 
     const batch = writeBatch(db);
+
+    newHotelBudgets.forEach((budget) => {
+      batch.set(doc(db, "hotelDailyBudgets", budget.dateKey), {
+        id: budget.dateKey,
+        date: budget.dateKey,
+        petCount: budget.petCount,
+        secondsPerPet: HOTEL_SECONDS_PER_PET,
+        totalAllowedSeconds: budget.totalAllowedSeconds,
+        consumedSeconds: 0,
+        createdByUid: state.user.uid,
+        createdByName: state.profile?.name || state.user.email || "Admin",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    });
 
     // Nếu đang sửa 1 phiếu nháp có sẵn: xoá phiếu + công việc cũ, sau đó tạo lại từ đầu.
     // Luôn giữ nguyên mốc tạo/lưu đầu tiên của Phiếu để Lịch sử giao việc hiển thị
@@ -9030,19 +9282,7 @@ async function dispatchWorkOrder(workOrderId, button) {
     return;
   }
 
-  const missingInfo = tasksInGroup.find((task) => (
-    !task.title ||
-    !task.taskDate ||
-    !Number(task.deadlineMinutes) ||
-    Number(task.deadlineMinutes) <= 0
-  ));
-
-  if (missingInfo) {
-    toast("Phiếu còn thiếu thông tin (tên công việc/ngày giao/thời gian). Bấm “Sửa phiếu” để hoàn thiện trước khi giao việc.", "error");
-    return;
-  }
-
-  const lunchValidationError = validateLunchBreakRowsForDispatch(tasksInGroup.map((task, index) => ({
+  const validationRows = tasksInGroup.map((task, index) => ({
     index,
     taskId: task.id,
     title: task.title,
@@ -9055,7 +9295,37 @@ async function dispatchWorkOrder(workOrderId, button) {
     isShip: Boolean(task.isShip),
     hotelPetCount: Number(task.hotelPetCount || 0),
     hotelAllowedMinutes: Number(task.hotelAllowedMinutes || 0)
-  })));
+  }));
+
+  let newHotelBudgets = [];
+  try {
+    newHotelBudgets = await prepareHotelRowsForPersistence(validationRows);
+  } catch (error) {
+    toast(error.message || "Không kiểm tra được thời gian Hotel còn lại.", "error");
+    return;
+  }
+
+  validationRows.forEach((row, index) => {
+    Object.assign(tasksInGroup[index], {
+      deadlineMinutes: row.deadlineMinutes,
+      hotelPetCount: row.hotelPetCount,
+      hotelAllowedMinutes: row.hotelAllowedMinutes
+    });
+  });
+
+  const missingInfo = validationRows.find((task) => (
+    !task.title ||
+    !task.taskDate ||
+    !Number(task.deadlineMinutes) ||
+    Number(task.deadlineMinutes) <= 0
+  ));
+
+  if (missingInfo) {
+    toast("Phiếu còn thiếu thông tin (tên công việc/ngày giao/thời gian). Bấm “Sửa phiếu” để hoàn thiện trước khi giao việc.", "error");
+    return;
+  }
+
+  const lunchValidationError = validateTaskRows(validationRows);
 
   if (lunchValidationError) {
     toast(lunchValidationError, "error");
@@ -9074,6 +9344,21 @@ async function dispatchWorkOrder(workOrderId, button) {
     const batch = writeBatch(db);
     const notificationItems = [];
 
+    newHotelBudgets.forEach((budget) => {
+      batch.set(doc(db, "hotelDailyBudgets", budget.dateKey), {
+        id: budget.dateKey,
+        date: budget.dateKey,
+        petCount: budget.petCount,
+        secondsPerPet: HOTEL_SECONDS_PER_PET,
+        totalAllowedSeconds: budget.totalAllowedSeconds,
+        consumedSeconds: 0,
+        createdByUid: state.user.uid,
+        createdByName: state.profile?.name || state.user.email || "Admin",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    });
+
     // Hàng đợi seed từ các công việc ĐÃ GIAO khác (ngoài chính phiếu này, vì các task
     // trong tasksInGroup hiện vẫn đang ở trạng thái "draft" nên tự động bị loại khỏi map).
     const employeeQueueEnd = getEmployeeQueueEndMap(tasksInGroup.map((task) => task.assignedToUid));
@@ -9085,6 +9370,9 @@ async function dispatchWorkOrder(workOrderId, button) {
           pauseStartedAt: serverTimestamp(),
           remainingMsAtPause: null,
           accumulatedWorkedMs: Number(task.accumulatedWorkedMs || 0),
+          deadlineMinutes: Number(task.deadlineMinutes || 0),
+          hotelPetCount: isHotelTask(task) ? Number(task.hotelPetCount || 0) : 0,
+          hotelAllowedMinutes: isHotelTask(task) ? Number(task.hotelAllowedMinutes || 0) : 0,
           dispatchedAt: null,
           queueStartAt: null,
           deadlineAt: null
@@ -9106,7 +9394,10 @@ async function dispatchWorkOrder(workOrderId, button) {
         deadlineAt: Timestamp.fromDate(deadlineDate),
         pauseStartedAt: null,
         remainingMsAtPause: null,
-        accumulatedWorkedMs: Number(task.accumulatedWorkedMs || 0)
+        accumulatedWorkedMs: Number(task.accumulatedWorkedMs || 0),
+        deadlineMinutes: Number(task.deadlineMinutes || 0),
+        hotelPetCount: isHotelTask(task) ? Number(task.hotelPetCount || 0) : 0,
+        hotelAllowedMinutes: isHotelTask(task) ? Number(task.hotelAllowedMinutes || 0) : 0
       });
 
       const isQueued = queueStartDate.getTime() > now.getTime();
@@ -9404,6 +9695,7 @@ async function deleteAllWorkOrders(button) {
     state.tasks.length
     || state.workOrders.length
     || state.hotelDailyReports.length
+    || state.hotelDailyBudgets.length
     || state.notifications.length
   );
 
@@ -9447,6 +9739,7 @@ async function deleteAllWorkOrders(button) {
     // Lịch sử giao việc là dữ liệu lưu trữ độc lập và chỉ được xóa bằng
     // hai nút chuyên dụng: Xóa từng dòng hoặc Xóa hết lịch sử.
     operations.push(...await getCollectionDeleteOperations("hotelDailyReports"));
+    operations.push(...await getCollectionDeleteOperations("hotelDailyBudgets"));
     operations.push(...await getCollectionDeleteOperations("notifications"));
 
     await commitInChunks(operations);
@@ -11151,8 +11444,23 @@ function setupEmployeeDashboard() {
     }
   );
 
+  const unsubHotelDailyBudgets = onSnapshot(
+    collection(db, "hotelDailyBudgets"),
+    (snapshot) => {
+      state.hotelDailyBudgets = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderEmployeeTasks();
+    },
+    handleSnapshotError
+  );
+
   const unsubWorkSupervision = setupWorkSupervisionListener();
-  state.unsubs.push(unsubOwnProfile, unsubTasks, unsubEmployeeWorkOrders, unsubWorkSupervision);
+  state.unsubs.push(
+    unsubOwnProfile,
+    unsubTasks,
+    unsubEmployeeWorkOrders,
+    unsubHotelDailyBudgets,
+    unsubWorkSupervision
+  );
 }
 
 // =========================
@@ -11172,6 +11480,9 @@ function getCompletedTaskGroup(task) {
 }
 
 function getCompletedTaskActualMinutes(task) {
+  const hotelActualSeconds = Number(task.hotelActualSeconds || 0);
+  if (isHotelTask(task) && hotelActualSeconds > 0) return hotelActualSeconds / 60;
+
   const storedMinutes = Number(task.actualMinutes || 0);
 
   if (storedMinutes > 0) return storedMinutes;
@@ -12899,14 +13210,35 @@ function getTaskHotelAllowedMinutes(task) {
   return fromPetCount || Number(task?.deadlineMinutes || 0);
 }
 
+function getHotelRemainingSecondsForTask(task) {
+  const dailyBudget = getHotelDailyBudget(getTaskDateValue(task));
+  if (dailyBudget) return dailyBudget.remainingSeconds;
+
+  const totalAllowedSeconds = Math.max(0, Math.round(getTaskHotelAllowedMinutes(task) * 60));
+  const taskDate = getTaskDateValue(task);
+  const consumedSeconds = state.tasks
+    .filter((item) => isHotelTask(item) && item.status === "completed" && getTaskDateValue(item) === taskDate)
+    .reduce((sum, item) => {
+      const exactSeconds = Number(item.hotelActualSeconds || 0);
+      return sum + (exactSeconds > 0 ? exactSeconds : Math.round(Number(item.actualMinutes || 0) * 60));
+    }, 0);
+
+  return Math.max(0, totalAllowedSeconds - consumedSeconds);
+}
+
 function renderHotelInfoBox(task) {
   if (!isHotelTask(task)) return "";
+
+  const petCount = getHotelPetCount(task);
+  const remainingSeconds = getHotelRemainingSecondsForTask(task);
 
   return `
     <div class="hotel-info-box">
       <strong>
         Thời gian quy định dọn dẹp chuồng, vệ sinh chung, rửa chén, nấu cơm cho mỗi bé là <span class="hotel-highlight">4 phút 30 giây</span>.
       </strong>
+      <span>Số lượng bé Hotel: <strong>${petCount} bé</strong>.</span>
+      <span>Thời gian còn lại làm Hotel: <strong class="hotel-highlight">${escapeHtml(formatHotelDuration(remainingSeconds / 60))}</strong>.</span>
     </div>
   `;
 }
@@ -13444,8 +13776,10 @@ function renderLunchBreakHistoryBox(task) {
       </div>
       <ul class="extension-list">
         <li>
-          <strong>${escapeHtml(employeeName)} đã nghỉ trưa được ${actualMinutes} phút</strong>
-          <span>Thời gian tính từ lúc bắt đầu nghỉ trưa đến khi hoàn thành.</span>
+          <strong>${escapeHtml(employeeName)} đã nghỉ trưa được ${escapeHtml(formatMinutes(actualMinutes))}</strong>
+          <span>${task.autoCreatedByHotelOvertime === true
+            ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Hotel quá quy định."
+            : "Thời gian tính từ lúc bắt đầu nghỉ trưa đến khi hoàn thành."}</span>
         </li>
       </ul>
     </div>
@@ -13743,9 +14077,12 @@ function renderResultBox(task) {
 
   if (isHotelTask(task)) {
     const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+    const actualMinutes = Number(task.hotelActualSeconds || 0) > 0
+      ? Number(task.hotelActualSeconds) / 60
+      : Number(task.actualMinutes || 0);
     return `
       <div class="result-box hotel-result-box">
-        <strong>${escapeHtml(employeeName)} làm hotel được ${formatMinutes(task.actualMinutes)}</strong>
+        <strong>${escapeHtml(employeeName)} làm hotel được ${formatMinutes(actualMinutes)}</strong>
       </div>
     `;
   }
@@ -13831,6 +14168,7 @@ function isTaskOverdueForTimeExtension(task, nowMs = Date.now()) {
 
 function canAdminExtendTaskTime(task, mode) {
   if (mode !== "admin" || !hasPermission("extendTaskTime") || !task) return false;
+  if (isHotelTask(task)) return false;
 
   const isOverdue = isTaskOverdueForTimeExtension(task);
   if (isOverdue && !isOverdueTimeExtensionAllowed()) return false;
@@ -16643,6 +16981,11 @@ function openExtendTimeModal(taskId) {
     return;
   }
 
+  if (isHotelTask(task)) {
+    toast("Thời gian Phiếu Hotel do hệ thống tự tính và không cho phép chỉnh sửa hoặc thêm giờ.", "error");
+    return;
+  }
+
   if (isTaskOverdueForTimeExtension(task) && !isOverdueTimeExtensionAllowed()) {
     toast("Quá hạn thời gian không thể thêm giờ", "error");
     return;
@@ -16803,6 +17146,10 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
   }
 
   const currentTask = state.tasks.find((item) => item.id === taskId);
+  if (isHotelTask(currentTask)) {
+    toast("Thời gian Phiếu Hotel do hệ thống tự tính và không cho phép chỉnh sửa hoặc thêm giờ.", "error");
+    return;
+  }
   const remainingBeforeSubmit = currentTask ? getRemainingExtendMinutes(currentTask) : null;
   if (remainingBeforeSubmit !== null && minutes > remainingBeforeSubmit) {
     toast(`Chỉ còn được thêm tối đa ${remainingBeforeSubmit} phút cho công việc này.`, "error");

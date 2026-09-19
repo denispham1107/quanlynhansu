@@ -2332,6 +2332,27 @@
       color: #1d4ed8;
     }
 
+    .hotel-pet-box input[readonly],
+    #taskModal .duration-input-shell input.is-hotel-duration-locked {
+      cursor: not-allowed !important;
+      color: #1e40af !important;
+      border-color: #bfdbfe !important;
+      background: #eff6ff !important;
+      opacity: 1 !important;
+      -webkit-text-fill-color: #1e40af !important;
+    }
+
+    #taskModal .task-row.is-hotel-duration-locked .task-row-duration-grid::after {
+      content: "🔒 Thời gian Hotel được hệ thống tự tính, không thể chỉnh sửa hoặc thêm giờ";
+      grid-column: 1 / -1;
+      display: block;
+      margin-top: -2px;
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
     .hotel-info-box {
       display: grid;
       gap: 8px;
@@ -11541,7 +11562,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260905-push-vapid-fix-v67"></script>
+  <script type="module" src="app.js?v=20260920-hotel-daily-budget-v68"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

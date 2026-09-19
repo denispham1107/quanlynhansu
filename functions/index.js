@@ -34,6 +34,7 @@ const WORK_SUPERVISION_MAX_LUNCH_CREDIT_MINUTES = 30;
 const WORK_SUPERVISION_LUNCH_TOTAL_MINUTES = 30;
 const WORK_SUPERVISION_TIME_ZONE = "Asia/Ho_Chi_Minh";
 const WORK_SUPERVISION_ACTIVE_TASK_STATUSES = ["doing", "lunch_break", "hotel", "redo", "overdue"];
+const HOTEL_SECONDS_PER_PET = 4 * 60 + 30;
 
 function pushTokenDocumentId(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -1153,6 +1154,248 @@ exports.monitorWorkSupervisionOnUserChange = onDocumentWritten({
   await evaluateWorkSupervision({ source: "user_change" });
 });
 
+function hotelTaskActualSeconds(task = {}) {
+  if (task.status !== "completed" || task.isHotel !== true) return 0;
+
+  const storedSeconds = Number(task.hotelActualSeconds || 0);
+  if (Number.isFinite(storedSeconds) && storedSeconds > 0) return Math.round(storedSeconds);
+
+  const completedAt = firestoreTimestampOrNull(task.approvedAt)
+    || firestoreTimestampOrNull(task.submittedAt);
+  const startedAt = firestoreTimestampOrNull(task.queueStartAt)
+    || firestoreTimestampOrNull(task.dispatchedAt)
+    || firestoreTimestampOrNull(task.createdAt);
+  const accumulatedWorkedMs = Math.max(0, Number(task.accumulatedWorkedMs || 0));
+
+  if (completedAt && startedAt) {
+    const activeMs = Math.max(0, completedAt.toMillis() - startedAt.toMillis());
+    return Math.max(0, Math.ceil((accumulatedWorkedMs + activeMs) / 1000));
+  }
+
+  return Math.max(0, Math.round(Number(task.actualMinutes || 0) * 60));
+}
+
+function formatHotelSeconds(totalSecondsInput) {
+  const totalSeconds = Math.max(0, Math.round(Number(totalSecondsInput || 0)));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
+  if (hours) parts.push(`${hours} giờ`);
+  if (minutes) parts.push(`${minutes} phút`);
+  if (seconds) parts.push(`${seconds} giây`);
+  return parts.join(" ") || "0 phút";
+}
+
+async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
+  const sourceTask = afterTask || beforeTask;
+  if (!sourceTask || sourceTask.isHotel !== true) return;
+
+  const dateKey = String(sourceTask.taskDate || "").trim();
+  if (!dateKey) return;
+
+  const afterSeconds = hotelTaskActualSeconds(afterTask || {});
+  const newlyCompleted = Boolean(
+    beforeTask
+    && afterTask?.isHotel === true
+    && afterTask.status === "completed"
+    && beforeTask?.status !== "completed"
+  );
+  const deadlineSeconds = Math.max(0, Math.round(Number(afterTask?.deadlineMinutes || 0) * 60));
+  const overtimeSeconds = newlyCompleted ? Math.max(0, afterSeconds - deadlineSeconds) : 0;
+  const budgetRef = db.doc(`hotelDailyBudgets/${dateKey}`);
+  const contributionRef = db.doc(`hotelBudgetContributions/${taskId}`);
+  const sourceTaskRef = db.doc(`tasks/${taskId}`);
+  const autoWorkOrderId = `hotelOvertimeLunch_${taskId}`;
+  const autoTaskId = `hotelOvertimeLunch_${taskId}`;
+  const autoWorkOrderRef = db.doc(`workOrders/${autoWorkOrderId}`);
+  const autoTaskRef = db.doc(`tasks/${autoTaskId}`);
+
+  await db.runTransaction(async (transaction) => {
+    const budgetSnapshot = await transaction.get(budgetRef);
+    const contributionSnapshot = await transaction.get(contributionRef);
+    const autoTaskSnapshot = overtimeSeconds > 0
+      ? await transaction.get(autoTaskRef)
+      : null;
+    const recordedContributionSeconds = contributionSnapshot.exists
+      && contributionSnapshot.data()?.date === dateKey
+        ? Math.max(0, Math.round(Number(contributionSnapshot.data()?.seconds || 0)))
+        : 0;
+    const contributionDelta = afterSeconds - recordedContributionSeconds;
+    const petCount = Math.max(0, Math.trunc(Number(
+      budgetSnapshot.data()?.petCount || sourceTask.hotelPetCount || 0
+    )));
+
+    if (budgetSnapshot.exists) {
+      if (contributionDelta !== 0) {
+        const currentConsumedSeconds = Math.max(0, Math.round(Number(
+          budgetSnapshot.data()?.consumedSeconds || 0
+        )));
+        transaction.set(budgetRef, {
+          consumedSeconds: Math.max(0, currentConsumedSeconds + contributionDelta),
+          updatedAt: Timestamp.now()
+        }, { merge: true });
+      }
+    } else if (afterTask && petCount > 0) {
+      transaction.set(budgetRef, {
+        id: dateKey,
+        date: dateKey,
+        petCount,
+        secondsPerPet: HOTEL_SECONDS_PER_PET,
+        totalAllowedSeconds: petCount * HOTEL_SECONDS_PER_PET,
+        consumedSeconds: Math.max(0, afterSeconds),
+        createdByUid: String(sourceTask.assignedByUid || "system"),
+        createdByName: String(sourceTask.assignedByName || "Hệ thống"),
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        restoredByServer: true
+      }, { merge: false });
+    }
+
+    if (afterTask && afterSeconds > 0) {
+      transaction.set(contributionRef, {
+        taskId,
+        date: dateKey,
+        seconds: afterSeconds,
+        updatedAt: Timestamp.now()
+      }, { merge: false });
+    } else if (contributionSnapshot.exists) {
+      transaction.delete(contributionRef);
+    }
+
+    if (newlyCompleted && afterTask && (
+      Number(afterTask.hotelActualSeconds || 0) !== afterSeconds
+      || Number(afterTask.hotelOvertimeSeconds || 0) !== overtimeSeconds
+    )) {
+      transaction.set(sourceTaskRef, {
+        hotelActualSeconds: afterSeconds,
+        hotelOvertimeSeconds: overtimeSeconds,
+        hotelBudgetSyncedAt: Timestamp.now()
+      }, { merge: true });
+    }
+
+    if (overtimeSeconds <= 0 || autoTaskSnapshot?.exists || !afterTask?.assignedToUid) return;
+
+    const now = Timestamp.now();
+    const employeeUid = String(afterTask.assignedToUid);
+    const employeeName = String(afterTask.assignedToName || "Nhân viên");
+    const assignedByUid = String(afterTask.assignedByUid || "system");
+    const overtimeMinutes = overtimeSeconds / 60;
+    const workOrderName = `Nghỉ trưa bù do làm Hotel quá giờ - ${employeeName}`.slice(0, 180);
+    const description = `Tự động tạo và hoàn thành do Phiếu Hotel “${String(afterTask.title || "Làm hotel")}” làm quá ${formatHotelSeconds(overtimeSeconds)} so với thời gian quy định.`;
+
+    transaction.set(autoWorkOrderRef, {
+      id: autoWorkOrderId,
+      name: workOrderName,
+      createdByUid: assignedByUid,
+      createdByName: "Hệ thống Hotel",
+      createdAt: now,
+      updatedAt: now,
+      taskCount: 1,
+      status: "dispatched",
+      autoCreatedByHotelOvertime: true,
+      sourceHotelTaskId: taskId
+    }, { merge: false });
+
+    transaction.set(autoTaskRef, {
+      id: autoTaskId,
+      title: "Phiếu nghỉ trưa",
+      description,
+      taskDate: dateKey,
+      assignedToUid: employeeUid,
+      assignedToName: employeeName,
+      assignedByUid,
+      assignedByName: "Hệ thống Hotel",
+      workOrderId: autoWorkOrderId,
+      workOrderName,
+      workOrderTaskCount: 1,
+      rowIndex: 0,
+      createdAt: now,
+      deadlineMinutes: overtimeMinutes,
+      isLunchBreak: true,
+      isHotel: false,
+      isShip: false,
+      hotelPetCount: 0,
+      hotelAllowedMinutes: 0,
+      deadlineAt: now,
+      dispatchedAt: now,
+      queueStartAt: now,
+      pauseStartedAt: null,
+      remainingMsAtPause: null,
+      accumulatedWorkedMs: overtimeSeconds * 1000,
+      submittedAt: now,
+      approvedAt: now,
+      status: "completed",
+      actualMinutes: overtimeMinutes,
+      resultType: "on_time",
+      differenceMinutes: 0,
+      differencePercent: 0,
+      autoCreatedByHotelOvertime: true,
+      sourceHotelTaskId: taskId,
+      hotelOvertimeSeconds: overtimeSeconds,
+      workPhotos: [],
+      workPhotoCount: 0,
+      lastWorkPhotoUploadedAt: null,
+      photoRequired: false,
+      requiredPhotoCount: 0,
+      photos: [],
+      photoCount: 0,
+      lastPhotoUploadedAt: null
+    }, { merge: false });
+
+    const employeeNotificationId = `hotelOvertimeLunch_${taskId}_${crypto.createHash("sha256").update(employeeUid).digest("hex").slice(0, 18)}`;
+    transaction.set(db.doc(`notifications/${employeeNotificationId}`), {
+      id: employeeNotificationId,
+      recipientUid: employeeUid,
+      type: "hotel_overtime_lunch_created",
+      title: "Đã cộng Phiếu nghỉ trưa do làm Hotel quá giờ",
+      message: `Bạn làm Hotel quá ${formatHotelSeconds(overtimeSeconds)}. Hệ thống đã tự tạo và hoàn thành Phiếu nghỉ trưa đúng bằng thời gian này.`,
+      taskId: autoTaskId,
+      taskTitle: "Phiếu nghỉ trưa",
+      actorUid: "system",
+      actorName: "Hệ thống Hotel",
+      createdAt: now,
+      readAt: null
+    }, { merge: false });
+
+    if (assignedByUid && assignedByUid !== "system") {
+      const adminNotificationId = `hotelOvertimeLunchAdmin_${taskId}_${crypto.createHash("sha256").update(assignedByUid).digest("hex").slice(0, 18)}`;
+      transaction.set(db.doc(`notifications/${adminNotificationId}`), {
+        id: adminNotificationId,
+        recipientUid: assignedByUid,
+        type: "hotel_overtime_lunch_created_admin",
+        title: "Đã tạo Phiếu nghỉ trưa do Hotel quá giờ",
+        message: `${employeeName} làm Hotel quá ${formatHotelSeconds(overtimeSeconds)}. Hệ thống đã tự tạo và hoàn thành Phiếu nghỉ trưa tương ứng.`,
+        taskId: autoTaskId,
+        taskTitle: "Phiếu nghỉ trưa",
+        actorUid: "system",
+        actorName: "Hệ thống Hotel",
+        createdAt: now,
+        readAt: null
+      }, { merge: false });
+    }
+  });
+}
+
+exports.syncHotelBudgetAndOvertimeLunch = onDocumentWritten({
+  document: "tasks/{taskId}",
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (event) => {
+  const beforeSnapshot = event.data?.before;
+  const afterSnapshot = event.data?.after;
+  const beforeTask = beforeSnapshot?.exists ? beforeSnapshot.data() : null;
+  const afterTask = afterSnapshot?.exists ? afterSnapshot.data() : null;
+
+  await syncHotelBudgetAndOvertimeLunch(
+    event.params.taskId,
+    beforeTask,
+    afterTask
+  );
+});
+
 
 // =========================
 // Google Calendar -> Phiếu công việc nháp
@@ -2066,9 +2309,12 @@ function normalizeHistoryDocumentId(value) {
 
 function isAutomaticSupervisionLunchHistory(history = {}) {
   return history?.autoCreatedByWorkSupervision === true
+    || history?.autoCreatedByHotelOvertime === true
     || String(history?.historyType || "") === "automatic_lunch_break"
     || String(history?.source || "") === "work_supervision_auto_lunch"
-    || String(history?.workOrderId || "").startsWith("supervisionLunch_");
+    || String(history?.source || "") === "hotel_overtime_auto_lunch"
+    || String(history?.workOrderId || "").startsWith("supervisionLunch_")
+    || String(history?.workOrderId || "").startsWith("hotelOvertimeLunch_");
 }
 
 function automaticLunchHistoryDeletionMarkerRef(historyId) {
@@ -2176,12 +2422,15 @@ async function ensureInitialWorkAssignmentHistory(workOrderId, beforeData, after
 
   const isAutomaticSupervisionLunch = afterData.autoCreatedByWorkSupervision === true
     || String(workOrderId || "").startsWith("supervisionLunch_");
+  const isHotelOvertimeLunch = afterData.autoCreatedByHotelOvertime === true
+    || String(workOrderId || "").startsWith("hotelOvertimeLunch_");
+  const isAutomaticLunch = isAutomaticSupervisionLunch || isHotelOvertimeLunch;
 
   // Nếu Admin đã chủ động xóa dòng lịch sử của Phiếu nghỉ trưa tự động thì tuyệt đối
   // không được tự tạo lại ở các lần backfill/trigger sau. Marker chỉ được ghi bởi
   // Cloud Function xóa lịch sử và không phụ thuộc vào việc Phiếu gốc còn tồn tại.
   const deterministicHistoryId = `initial_${workOrderId}`.slice(0, 180);
-  if (isAutomaticSupervisionLunch) {
+  if (isAutomaticLunch) {
     const deletionMarker = await db.doc(`workAssignmentHistoryDeletionMarkers/${deterministicHistoryId}`).get();
     if (deletionMarker.exists) return;
   }
@@ -2271,9 +2520,13 @@ async function ensureInitialWorkAssignmentHistory(workOrderId, beforeData, after
     taskCount: Math.max(1, Number(afterData.taskCount || taskIds.length || 1)),
     source: isAutomaticSupervisionLunch
       ? "work_supervision_auto_lunch"
+      : isHotelOvertimeLunch
+        ? "hotel_overtime_auto_lunch"
       : (beforeData?.status === "draft" ? "draft_dispatched" : "created_and_dispatched"),
-    historyType: isAutomaticSupervisionLunch ? "automatic_lunch_break" : "assignment",
+    historyType: isAutomaticLunch ? "automatic_lunch_break" : "assignment",
     autoCreatedByWorkSupervision: isAutomaticSupervisionLunch,
+    autoCreatedByHotelOvertime: isHotelOvertimeLunch,
+    sourceHotelTaskId: isHotelOvertimeLunch ? String(afterData.sourceHotelTaskId || "") : "",
     workSupervisionCycleId: isAutomaticSupervisionLunch
       ? String(afterData.workSupervisionCycleId || "")
       : "",
