@@ -1175,8 +1175,10 @@ function hotelTaskActualSeconds(task = {}) {
     return Math.max(0, Math.round(storedSeconds));
   }
 
-  const completedAt = firestoreTimestampOrNull(task.approvedAt)
-    || firestoreTimestampOrNull(task.submittedAt);
+  // Hotel chốt thời gian tại lúc nhân viên bấm “Hoàn thành”, không cộng thêm
+  // thời gian chờ Admin duyệt vào thời gian thực tế của Phiếu.
+  const completedAt = firestoreTimestampOrNull(task.submittedAt)
+    || firestoreTimestampOrNull(task.approvedAt);
   const startedAt = firestoreTimestampOrNull(task.queueStartAt)
     || firestoreTimestampOrNull(task.dispatchedAt)
     || firestoreTimestampOrNull(task.createdAt);
@@ -1188,6 +1190,218 @@ function hotelTaskActualSeconds(task = {}) {
   }
 
   return Math.max(0, Math.round(Number(task.actualMinutes || 0) * 60));
+}
+
+function hotelTaskEndedSeconds(task = {}) {
+  if (task.isHotel !== true || !["submitted", "completed"].includes(String(task.status || ""))) return 0;
+  if (task.status === "completed") return hotelTaskActualSeconds(task);
+
+  const completedAt = firestoreTimestampOrNull(task.submittedAt);
+  const startedAt = firestoreTimestampOrNull(task.queueStartAt)
+    || firestoreTimestampOrNull(task.dispatchedAt)
+    || firestoreTimestampOrNull(task.createdAt);
+  const accumulatedWorkedMs = Math.max(0, Number(task.accumulatedWorkedMs || 0));
+  if (!completedAt || !startedAt) return 0;
+
+  const activeMs = Math.max(0, completedAt.toMillis() - startedAt.toMillis());
+  return Math.max(0, Math.ceil((accumulatedWorkedMs + activeMs) / 1000));
+}
+
+function hotelPhotoIsInvalid(photo = {}) {
+  const validationStatus = String(photo.validationStatus || photo.validity || "").trim().toLowerCase();
+  const capturedBeforeAssignment = photo.capturedBeforeAssignment === true
+    || photo.takenBeforeDispatch === true
+    || String(photo.capturedBeforeAssignment || "").trim().toLowerCase() === "true"
+    || String(photo.takenBeforeDispatch || "").trim().toLowerCase() === "true";
+  return capturedBeforeAssignment
+    || photo.invalid === true
+    || photo.isInvalid === true
+    || validationStatus === "invalid";
+}
+
+function hotelTaskValidPhotoCount(task = {}) {
+  const photos = Array.isArray(task.photos) ? task.photos : [];
+  return photos.filter((photo) => photo?.url && !hotelPhotoIsInvalid(photo)).length;
+}
+
+async function reconcileHotelDailyPhotoRequirement(dateKeyInput) {
+  const dateKey = String(dateKeyInput || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
+
+  const budgetRef = db.doc(`hotelDailyBudgets/${dateKey}`);
+  const autoWorkOrderId = `hotelPhotoMissingLunch_${dateKey}`;
+  const autoTaskId = `hotelPhotoMissingLunch_${dateKey}`;
+  const autoWorkOrderRef = db.doc(`workOrders/${autoWorkOrderId}`);
+  const autoTaskRef = db.doc(`tasks/${autoTaskId}`);
+  const employeeNotificationRef = db.doc(`notifications/hotelPhotoMissingLunchEmployee_${dateKey}`);
+  const adminNotificationRef = db.doc(`notifications/hotelPhotoMissingLunchAdmin_${dateKey}`);
+  const [tasksSnapshot, budgetSnapshot, autoWorkOrderSnapshot, autoTaskSnapshot] = await Promise.all([
+    db.collection("tasks").where("taskDate", "==", dateKey).get(),
+    budgetRef.get(),
+    autoWorkOrderRef.get(),
+    autoTaskRef.get()
+  ]);
+  if (!budgetSnapshot.exists) return;
+
+  const hotelTasks = tasksSnapshot.docs
+    .map((snapshot) => ({ id: snapshot.id, ...snapshot.data() }))
+    .filter((task) => task.isHotel === true);
+  const petCount = Math.max(0, Math.trunc(Number(
+    budgetSnapshot.data()?.petCount || hotelTasks[0]?.hotelPetCount || 0
+  )));
+  const totalRequiredPhotoCount = Math.max(0, Math.trunc(Number(
+    budgetSnapshot.data()?.totalRequiredPhotoCount ?? (petCount + 10)
+  )));
+  const uploadedPhotoCount = hotelTasks.reduce(
+    (sum, task) => sum + hotelTaskValidPhotoCount(task),
+    0
+  );
+  const endedHotelTasks = hotelTasks
+    .map((task) => ({ ...task, endedSeconds: hotelTaskEndedSeconds(task) }))
+    .filter((task) => task.endedSeconds > 0);
+  const qualifyingTasks = endedHotelTasks.filter((task) => (
+    task.endedSeconds >= Math.max(0, Math.round(Number(task.deadlineMinutes || 0) * 60))
+  ));
+  const totalActualSeconds = endedHotelTasks.reduce((sum, task) => sum + task.endedSeconds, 0);
+  const shouldCreateLunch = totalRequiredPhotoCount > 0
+    && uploadedPhotoCount < totalRequiredPhotoCount
+    && qualifyingTasks.length > 0
+    && totalActualSeconds > 0;
+  const now = Timestamp.now();
+  const batch = db.batch();
+
+  batch.set(budgetRef, {
+    totalRequiredPhotoCount,
+    uploadedPhotoCount,
+    hotelPhotoUpdatedAt: now,
+    updatedAt: now
+  }, { merge: true });
+
+  if (!shouldCreateLunch) {
+    if (autoTaskSnapshot.exists) batch.delete(autoTaskRef);
+    if (autoWorkOrderSnapshot.exists) batch.delete(autoWorkOrderRef);
+    batch.delete(employeeNotificationRef);
+    batch.delete(adminNotificationRef);
+    await batch.commit();
+    return;
+  }
+
+  const sourceTask = qualifyingTasks
+    .slice()
+    .sort((left, right) => {
+      const rightMs = firestoreTimestampOrNull(right.approvedAt)?.toMillis()
+        || firestoreTimestampOrNull(right.submittedAt)?.toMillis()
+        || 0;
+      const leftMs = firestoreTimestampOrNull(left.approvedAt)?.toMillis()
+        || firestoreTimestampOrNull(left.submittedAt)?.toMillis()
+        || 0;
+      return rightMs - leftMs;
+    })[0];
+  const employeeUid = String(sourceTask.assignedToUid || "");
+  if (!employeeUid) {
+    await batch.commit();
+    return;
+  }
+
+  const employeeName = String(sourceTask.assignedToName || "Nhân viên");
+  const assignedByUid = String(sourceTask.assignedByUid || "system");
+  const lunchMinutes = totalActualSeconds / 60;
+  const missingPhotoCount = Math.max(0, totalRequiredPhotoCount - uploadedPhotoCount);
+  const workOrderName = `Nghỉ trưa do Hotel thiếu ảnh - ${dateKey}`.slice(0, 180);
+  const description = `Tự động tạo và hoàn thành vì tổng ảnh Hotel ngày ${dateKey} còn thiếu ${missingPhotoCount} hình sau khi thời gian thực tế đã đạt hoặc vượt thời gian quy định. Thời gian nghỉ bằng tổng thời gian thực tế của các Phiếu Hotel: ${formatHotelSeconds(totalActualSeconds)}.`;
+
+  batch.set(autoWorkOrderRef, {
+    id: autoWorkOrderId,
+    name: workOrderName,
+    createdByUid: assignedByUid,
+    createdByName: "Hệ thống Hotel",
+    createdAt: autoWorkOrderSnapshot.data()?.createdAt || now,
+    updatedAt: now,
+    taskCount: 1,
+    status: "dispatched",
+    autoCreatedByHotelMissingPhotos: true,
+    sourceHotelDate: dateKey
+  }, { merge: false });
+  batch.set(autoTaskRef, {
+    id: autoTaskId,
+    title: "Phiếu nghỉ trưa",
+    description,
+    taskDate: dateKey,
+    assignedToUid: employeeUid,
+    assignedToName: employeeName,
+    assignedByUid,
+    assignedByName: "Hệ thống Hotel",
+    workOrderId: autoWorkOrderId,
+    workOrderName,
+    workOrderTaskCount: 1,
+    rowIndex: 0,
+    createdAt: autoTaskSnapshot.data()?.createdAt || now,
+    deadlineMinutes: lunchMinutes,
+    isLunchBreak: true,
+    isHotel: false,
+    isShip: false,
+    hotelPetCount: 0,
+    hotelAllowedMinutes: 0,
+    deadlineAt: now,
+    dispatchedAt: now,
+    queueStartAt: now,
+    pauseStartedAt: null,
+    remainingMsAtPause: null,
+    accumulatedWorkedMs: totalActualSeconds * 1000,
+    submittedAt: now,
+    approvedAt: now,
+    status: "completed",
+    actualMinutes: lunchMinutes,
+    resultType: "on_time",
+    differenceMinutes: 0,
+    differencePercent: 0,
+    autoCreatedByHotelMissingPhotos: true,
+    sourceHotelDate: dateKey,
+    hotelMissingPhotoCount: missingPhotoCount,
+    hotelRequiredPhotoCount: totalRequiredPhotoCount,
+    hotelUploadedPhotoCount: uploadedPhotoCount,
+    workPhotos: [],
+    workPhotoCount: 0,
+    lastWorkPhotoUploadedAt: null,
+    photoRequired: false,
+    requiredPhotoCount: 0,
+    photos: [],
+    photoCount: 0,
+    lastPhotoUploadedAt: null
+  }, { merge: false });
+  batch.set(employeeNotificationRef, {
+    id: employeeNotificationRef.id,
+    recipientUid: employeeUid,
+    type: "hotel_photo_missing_lunch_created",
+    title: "Đã cộng Phiếu nghỉ trưa do Hotel thiếu ảnh",
+    message: `Hotel ngày ${dateKey} còn thiếu ${missingPhotoCount}/${totalRequiredPhotoCount} hình. Hệ thống đã tạo Phiếu nghỉ trưa ${formatHotelSeconds(totalActualSeconds)}.`,
+    taskId: autoTaskId,
+    taskTitle: "Phiếu nghỉ trưa",
+    actorUid: "system",
+    actorName: "Hệ thống Hotel",
+    createdAt: now,
+    readAt: null
+  }, { merge: false });
+
+  if (assignedByUid && assignedByUid !== "system") {
+    batch.set(adminNotificationRef, {
+      id: adminNotificationRef.id,
+      recipientUid: assignedByUid,
+      type: "hotel_photo_missing_lunch_created_admin",
+      title: "Đã tạo Phiếu nghỉ trưa do Hotel thiếu ảnh",
+      message: `Hotel ngày ${dateKey} còn thiếu ${missingPhotoCount}/${totalRequiredPhotoCount} hình. Đã tạo Phiếu nghỉ trưa ${formatHotelSeconds(totalActualSeconds)} cho ${employeeName}.`,
+      taskId: autoTaskId,
+      taskTitle: "Phiếu nghỉ trưa",
+      actorUid: "system",
+      actorName: "Hệ thống Hotel",
+      createdAt: now,
+      readAt: null
+    }, { merge: false });
+  } else {
+    batch.delete(adminNotificationRef);
+  }
+
+  await batch.commit();
 }
 
 function formatHotelSeconds(totalSecondsInput) {
@@ -1225,6 +1439,10 @@ async function cleanupHotelDailyDataIfNoTasks(dateKeyInput) {
   const refsToDelete = [
     db.doc(`hotelDailyBudgets/${dateKey}`),
     db.doc(`hotelDailyReports/${dateKey}`),
+    db.doc(`tasks/hotelPhotoMissingLunch_${dateKey}`),
+    db.doc(`workOrders/hotelPhotoMissingLunch_${dateKey}`),
+    db.doc(`notifications/hotelPhotoMissingLunchEmployee_${dateKey}`),
+    db.doc(`notifications/hotelPhotoMissingLunchAdmin_${dateKey}`),
     ...contributionSnapshot.docs.map((snapshot) => snapshot.ref)
   ];
 
@@ -1560,6 +1778,8 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
         secondsPerPet: HOTEL_SECONDS_PER_PET,
         totalAllowedSeconds: petCount * HOTEL_SECONDS_PER_PET,
         consumedSeconds: Math.max(0, afterSeconds),
+        totalRequiredPhotoCount: petCount + 10,
+        uploadedPhotoCount: hotelTaskValidPhotoCount(afterTask),
         createdByUid: String(sourceTask.assignedByUid || "system"),
         createdByName: String(sourceTask.assignedByName || "Hệ thống"),
         createdAt: Timestamp.now(),
@@ -1702,6 +1922,8 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
       }, { merge: false });
     }
   });
+
+  await reconcileHotelDailyPhotoRequirement(dateKey);
 
   if (beforeTask?.isHotel === true && !afterTask) {
     await cleanupHotelDailyDataIfNoTasks(dateKey);

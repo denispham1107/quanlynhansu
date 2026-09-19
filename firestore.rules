@@ -124,6 +124,7 @@ service cloud.firestore {
     // vẫn được nhân viên bấm Hoàn thành nếu chưa có field photoRequired.
     function isTaskPhotoRequirementSatisfied(taskData) {
       return !taskData.keys().hasAny(["photoRequired"])
+        || dataIsHotel(taskData)
         || taskData.photoRequired == false
         || (
           taskData.photoRequired == true
@@ -405,6 +406,10 @@ service cloud.firestore {
           "isShip",
           "hotelPetCount",
           "hotelAllowedMinutes",
+          "hotelPhotoRequired",
+          "hotelTotalRequiredPhotoCount",
+          "hotelRequiredPhotoCount",
+          "hotelPhotoInstruction",
           "deadlineAt",
           "dispatchedAt",
           "queueStartAt",
@@ -465,10 +470,29 @@ service cloud.firestore {
         && request.resource.data.hotelAllowedMinutes is number
         && request.resource.data.hotelAllowedMinutes >= 0
         && request.resource.data.hotelAllowedMinutes <= 10080
+        && request.resource.data.hotelPhotoRequired is bool
+        && request.resource.data.hotelTotalRequiredPhotoCount is int
+        && request.resource.data.hotelTotalRequiredPhotoCount >= 0
+        && request.resource.data.hotelTotalRequiredPhotoCount <= 510
+        && request.resource.data.hotelRequiredPhotoCount is int
+        && request.resource.data.hotelRequiredPhotoCount >= 0
+        && request.resource.data.hotelRequiredPhotoCount <= 510
+        && request.resource.data.hotelPhotoInstruction is string
         && (
-          request.resource.data.isHotel == true
-          || (request.resource.data.hotelPetCount == 0
-            && request.resource.data.hotelAllowedMinutes == 0)
+          (
+            request.resource.data.isHotel == true
+            && request.resource.data.hotelPhotoRequired == true
+            && request.resource.data.hotelTotalRequiredPhotoCount == request.resource.data.hotelPetCount + 10
+            && request.resource.data.hotelRequiredPhotoCount <= request.resource.data.hotelTotalRequiredPhotoCount
+          )
+          || (
+            request.resource.data.hotelPetCount == 0
+            && request.resource.data.hotelAllowedMinutes == 0
+            && request.resource.data.hotelPhotoRequired == false
+            && request.resource.data.hotelTotalRequiredPhotoCount == 0
+            && request.resource.data.hotelRequiredPhotoCount == 0
+            && request.resource.data.hotelPhotoInstruction == ""
+          )
         )
         && hasValidHotelDailyBudget(request.resource.data)
         && (
@@ -697,7 +721,11 @@ service cloud.firestore {
           "accumulatedWorkedMs",
           "deadlineMinutes",
           "hotelPetCount",
-          "hotelAllowedMinutes"
+          "hotelAllowedMinutes",
+          "hotelPhotoRequired",
+          "hotelTotalRequiredPhotoCount",
+          "hotelRequiredPhotoCount",
+          "hotelPhotoInstruction"
         ])
         && request.resource.data.status in ["waiting_assignee", "doing", "lunch_break", "hotel"]
         && hasValidHotelDailyBudget(request.resource.data);
@@ -985,6 +1013,8 @@ service cloud.firestore {
           "secondsPerPet",
           "totalAllowedSeconds",
           "consumedSeconds",
+          "totalRequiredPhotoCount",
+          "uploadedPhotoCount",
           "createdByUid",
           "createdByName",
           "createdAt",
@@ -998,6 +1028,8 @@ service cloud.firestore {
         && request.resource.data.secondsPerPet == 270
         && request.resource.data.totalAllowedSeconds == request.resource.data.petCount * 270
         && request.resource.data.consumedSeconds == 0
+        && request.resource.data.totalRequiredPhotoCount == request.resource.data.petCount + 10
+        && request.resource.data.uploadedPhotoCount == 0
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.createdByName is string
         && request.resource.data.createdAt == request.time

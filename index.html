@@ -6018,6 +6018,22 @@
         linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(255, 255, 255, 0.98)) !important;
     }
 
+    #taskModal .photo-requirement-box.is-disabled-by-hotel {
+      opacity: .55;
+      filter: grayscale(.25);
+    }
+
+    #taskModal .hotel-photo-requirement-box {
+      border-color: #34d399 !important;
+      background: linear-gradient(135deg, rgba(236, 253, 245, .98), rgba(240, 253, 250, .98)) !important;
+    }
+
+    #taskModal .hotel-photo-requirement-box .photo-count-field input:disabled {
+      border-color: #6ee7b7 !important;
+      background: #ecfdf5 !important;
+      color: #047857 !important;
+    }
+
     #taskModal .photo-requirement-main {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(150px, 190px);
@@ -11060,7 +11076,7 @@
           <div id="taskRowsContainer" class="task-rows-container"></div>
         </div>
 
-        <div class="photo-requirement-box" aria-labelledby="photoRequirementHeading">
+        <div id="photoRequirementBox" class="photo-requirement-box" aria-labelledby="photoRequirementHeading">
           <div class="photo-requirement-main">
             <label class="checkbox-line photo-requirement-toggle">
               <input id="photoRequiredCheckbox" type="checkbox" />
@@ -11078,6 +11094,26 @@
             <span aria-hidden="true">ⓘ</span>
             Nếu bật “Bắt buộc đăng hình”, nhân viên phải đăng đủ số lượng hình thành công trước khi bấm “Hoàn thành”.
             Nếu tắt, nhân viên có thể hoàn thành công việc mà không cần đăng hình.
+          </p>
+        </div>
+
+        <div id="hotelPhotoRequirementBox" class="photo-requirement-box hotel-photo-requirement-box hidden" aria-labelledby="hotelPhotoRequirementHeading">
+          <div class="photo-requirement-main">
+            <label class="checkbox-line photo-requirement-toggle">
+              <input id="hotelPhotoRequiredCheckbox" type="checkbox" checked disabled />
+              <span>
+                <strong id="hotelPhotoRequirementHeading">Bắt buộc đăng hình hotel</strong>
+                <small>Hạn mức ảnh dùng chung cho toàn bộ Phiếu Hotel trong cùng ngày.</small>
+              </span>
+            </label>
+            <label class="photo-count-field">
+              <span>Số lượng hình gửi bắt buộc</span>
+              <input id="hotelRequiredPhotoCount" type="number" min="0" max="510" step="1" value="0" disabled />
+            </label>
+          </div>
+          <p id="hotelPhotoRequirementNote" class="small-note photo-requirement-note">
+            <span aria-hidden="true">ⓘ</span>
+            Nhập Số lượng bé để hệ thống tự tính hạn mức ảnh Hotel.
           </p>
         </div>
 
@@ -11580,7 +11616,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260920-hotel-admin-time-v70"></script>
+  <script type="module" src="app.js?v=20260920-hotel-photo-budget-v71"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

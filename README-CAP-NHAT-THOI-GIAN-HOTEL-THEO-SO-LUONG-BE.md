@@ -10,4 +10,7 @@
 - Khi Admin mở ứng dụng, hệ thống cũng tự phát hiện và dọn các hạn mức Hotel mồ côi còn sót lại từ phiên bản cũ.
 - Cài đặt `Admin có quyền chỉnh/thêm giờ cho phiếu Hotel` cho phép Admin cộng thêm thời gian vào Phiếu Hotel đang làm; số phút thêm đồng thời được cộng vào tổng hạn mức Hotel của đúng ngày.
 - Khi cài đặt trên được bật, Admin có thể sửa thời gian thực tế của Phiếu Hotel đã hoàn thành theo giờ, phút và giây. Hệ thống tự tính lại thời gian đã dùng, thời gian còn lại và Phiếu nghỉ trưa bù do làm quá giờ.
+- Hotel dùng hạn mức ảnh riêng theo ngày với công thức `Số lượng bé + 10 ảnh không gian`; mục `Bắt buộc đăng hình` thông thường bị vô hiệu hóa khi form có Phiếu Hotel.
+- Ảnh hợp lệ của mọi Phiếu Hotel cùng ngày được cộng chung. Phiếu sau chỉ hiển thị số ảnh còn thiếu và không ai có thể chỉnh tay hạn mức ảnh Hotel.
+- Khi nhân viên báo hoàn thành một Phiếu Hotel có thời gian thực tế đạt/vượt thời gian quy định nhưng tổng ảnh trong ngày vẫn thiếu, hệ thống tự tạo và hoàn thành một Phiếu nghỉ trưa bằng tổng thời gian thực tế của các Phiếu Hotel đã kết thúc trong ngày.
 - Hạn mức ngày được lưu tại `hotelDailyBudgets/{YYYY-MM-DD}` và thời gian được tính theo giây để hỗ trợ chính xác mốc 30 giây.

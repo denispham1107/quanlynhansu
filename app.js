@@ -810,6 +810,7 @@ function isEndTaskButtonHidden() {
 function canEditTaskPhotoRequirement(task = {}, mode = "admin") {
   return mode === "admin"
     && hasPermission("managePhotoRequirements")
+    && !isHotelTask(task)
     && task.status !== "completed"
     && !isDispatchedPhotoRequirementEditingLocked(task);
 }
@@ -1109,6 +1110,11 @@ const els = {
   confirmReassignEmployeeBtn: $("#confirmReassignEmployeeBtn"),
   photoRequiredCheckbox: $("#photoRequiredCheckbox"),
   requiredPhotoCount: $("#requiredPhotoCount"),
+  photoRequirementBox: $("#photoRequirementBox"),
+  hotelPhotoRequirementBox: $("#hotelPhotoRequirementBox"),
+  hotelPhotoRequiredCheckbox: $("#hotelPhotoRequiredCheckbox"),
+  hotelRequiredPhotoCount: $("#hotelRequiredPhotoCount"),
+  hotelPhotoRequirementNote: $("#hotelPhotoRequirementNote"),
   photoReportView: $("#photoReportView"),
   backFromPhotoReportBtn: $("#backFromPhotoReportBtn"),
   photoReportModal: $("#photoReportModal"),
@@ -1845,7 +1851,7 @@ function getTaskValidPhotoCount(task) {
 }
 
 function taskRequiresPhotos(task) {
-  return Boolean(task?.photoRequired);
+  return !isHotelTask(task) && Boolean(task?.photoRequired);
 }
 
 function getTaskRequiredPhotoCount(task) {
@@ -7797,6 +7803,15 @@ function getHotelDailyBudget(dateKey) {
     budget.totalAllowedSeconds ?? (petCount * HOTEL_SECONDS_PER_PET)
   ) || 0));
   const consumedSeconds = Math.max(0, Math.round(Number(budget.consumedSeconds || 0)));
+  const totalRequiredPhotoCount = Math.max(0, Math.trunc(Number(
+    budget.totalRequiredPhotoCount ?? (petCount + 10)
+  ) || 0));
+  const fallbackUploadedPhotoCount = state.tasks
+    .filter((task) => isHotelTask(task) && getTaskDateValue(task) === cleanDateKey)
+    .reduce((sum, task) => sum + getTaskValidPhotoCount(task), 0);
+  const uploadedPhotoCount = Math.max(0, Math.trunc(Number(
+    budget.uploadedPhotoCount ?? fallbackUploadedPhotoCount
+  ) || 0));
 
   if (!petCount || !totalAllowedSeconds) return null;
 
@@ -7807,7 +7822,10 @@ function getHotelDailyBudget(dateKey) {
     petCount,
     totalAllowedSeconds,
     consumedSeconds,
-    remainingSeconds: Math.max(0, totalAllowedSeconds - consumedSeconds)
+    remainingSeconds: Math.max(0, totalAllowedSeconds - consumedSeconds),
+    totalRequiredPhotoCount,
+    uploadedPhotoCount,
+    remainingRequiredPhotoCount: Math.max(0, totalRequiredPhotoCount - uploadedPhotoCount)
   };
 }
 
@@ -7904,6 +7922,7 @@ function syncHotelRowControls(row) {
     }
     if (minutesInput) minutesInput.step = "1";
     setHotelDurationInputsLocked(row, false);
+    syncHotelPhotoRequirementControls();
     return;
   }
 
@@ -7948,6 +7967,7 @@ function syncHotelRowControls(row) {
       hotelTimePreview.innerHTML = `${petCount} bé × 4 phút 30 giây = <strong>${escapeHtml(formatHotelDuration(totalAllowedSeconds / 60))}</strong>. Thời gian này được khóa tự động.`;
     }
   }
+  syncHotelPhotoRequirementControls();
 }
 
 function syncAllHotelTaskRows() {
@@ -8140,6 +8160,7 @@ function activateTaskRow(row, { focusTitle = false, scrollIntoView = false } = {
   $$("#taskRowsContainer .task-row").forEach((taskRow) => {
     setTaskRowCollapsed(taskRow, taskRow !== row);
   });
+  syncHotelPhotoRequirementControls();
 
   if (scrollIntoView) {
     requestAnimationFrame(() => {
@@ -8338,9 +8359,70 @@ function hasSelectedHotelTaskRow() {
   return $$("#taskRowsContainer .row-hotel").some((checkbox) => checkbox.checked);
 }
 
+function getSelectedHotelPhotoRequirement() {
+  const hotelRows = $$("#taskRowsContainer .task-row").filter((row) => (
+    row.querySelector(".row-hotel")?.checked
+  ));
+  const row = hotelRows.find((item) => !item.classList.contains("is-collapsed")) || hotelRows[0] || null;
+  if (!row) return null;
+
+  const dateKey = String(row.querySelector(".row-date")?.value || "").trim();
+  const dailyBudget = getHotelDailyBudget(dateKey);
+  const petCount = dailyBudget?.petCount
+    || normalizeHotelPetCount(row.querySelector(".row-hotel-pet-count")?.value);
+  const totalRequiredPhotoCount = dailyBudget?.totalRequiredPhotoCount
+    || (petCount > 0 ? petCount + 10 : 0);
+  const uploadedPhotoCount = dailyBudget?.uploadedPhotoCount || 0;
+
+  return {
+    dateKey,
+    petCount,
+    totalRequiredPhotoCount,
+    uploadedPhotoCount,
+    remainingRequiredPhotoCount: Math.max(0, totalRequiredPhotoCount - uploadedPhotoCount)
+  };
+}
+
+function syncHotelPhotoRequirementControls() {
+  const hasHotel = hasSelectedHotelTaskRow();
+  const requirement = hasHotel ? getSelectedHotelPhotoRequirement() : null;
+
+  els.hotelPhotoRequirementBox?.classList.toggle("hidden", !hasHotel);
+  els.photoRequirementBox?.classList.toggle("is-disabled-by-hotel", hasHotel);
+  if (els.photoRequiredCheckbox) {
+    els.photoRequiredCheckbox.disabled = hasHotel;
+    if (hasHotel) els.photoRequiredCheckbox.checked = false;
+  }
+  if (els.requiredPhotoCount) {
+    els.requiredPhotoCount.disabled = hasHotel || !els.photoRequiredCheckbox?.checked;
+  }
+  if (els.hotelPhotoRequiredCheckbox) els.hotelPhotoRequiredCheckbox.checked = hasHotel;
+
+  if (!hasHotel) return;
+
+  const petCount = requirement?.petCount || 0;
+  const totalCount = requirement?.totalRequiredPhotoCount || 0;
+  const uploadedCount = requirement?.uploadedPhotoCount || 0;
+  const remainingCount = requirement?.remainingRequiredPhotoCount || 0;
+  if (els.hotelRequiredPhotoCount) els.hotelRequiredPhotoCount.value = String(remainingCount);
+  if (!els.hotelPhotoRequirementNote) return;
+
+  if (!petCount) {
+    els.hotelPhotoRequirementNote.innerHTML = '<span aria-hidden="true">ⓘ</span> Nhập <strong>Số lượng bé</strong> để hệ thống tự tính hạn mức ảnh Hotel.';
+    return;
+  }
+
+  const progressText = uploadedCount > 0
+    ? ` Đã đăng tổng ${uploadedCount}/${totalCount} hình hợp lệ; Phiếu tiếp theo còn bắt buộc ${remainingCount} hình.`
+    : ` Tổng số lượng hình gửi bắt buộc: ${totalCount} hình.`;
+  els.hotelPhotoRequirementNote.innerHTML = `<span aria-hidden="true">ⓘ</span> Chụp 10 hình ảnh không gian trong phòng, hành lang, ban công khu vực chó mèo Hotel; chụp ${petCount} chuồng các bé đang ở.${progressText}`;
+}
+
 function syncPhotoRequirementDefaultFromTaskTypes() {
-  if (photoRequirementTouched) return;
-  setPhotoRequirementChecked(hasSelectedHotelTaskRow());
+  if (!hasSelectedHotelTaskRow() && !photoRequirementTouched) {
+    setPhotoRequirementChecked(false);
+  }
+  syncHotelPhotoRequirementControls();
 }
 
 function resetPhotoRequirementControls() {
@@ -8349,8 +8431,8 @@ function resetPhotoRequirementControls() {
     els.requiredPhotoCount.value = 10;
   }
   // Mặc định không bắt buộc đăng hình cho công việc thường.
-  // Khi Admin chọn Hotel, hệ thống sẽ tự bật mặc định nhưng Admin vẫn có thể bỏ chọn lại.
   setPhotoRequirementChecked(false);
+  syncHotelPhotoRequirementControls();
 }
 
 function setPhotoRequirementControlsFromTask(task = null) {
@@ -8362,10 +8444,11 @@ function setPhotoRequirementControlsFromTask(task = null) {
   photoRequirementTouched = Boolean(task);
   els.requiredPhotoCount.value = required ? Math.max(1, count) : 10;
   setPhotoRequirementChecked(required);
+  syncHotelPhotoRequirementControls();
 }
 
 function readPhotoRequirementOptions() {
-  const required = Boolean(els.photoRequiredCheckbox?.checked);
+  const required = !hasSelectedHotelTaskRow() && Boolean(els.photoRequiredCheckbox?.checked);
   const count = required ? Number(els.requiredPhotoCount?.value || 0) : 0;
 
   return {
@@ -8682,6 +8765,15 @@ async function prepareHotelRowsForPersistence(rows) {
       data.totalAllowedSeconds ?? (petCount * HOTEL_SECONDS_PER_PET)
     ) || 0));
     const consumedSeconds = Math.max(0, Math.round(Number(data.consumedSeconds || 0)));
+    const totalRequiredPhotoCount = Math.max(0, Math.trunc(Number(
+      data.totalRequiredPhotoCount ?? (petCount + 10)
+    ) || 0));
+    const fallbackUploadedPhotoCount = state.tasks
+      .filter((task) => isHotelTask(task) && getTaskDateValue(task) === dateKey)
+      .reduce((sum, task) => sum + getTaskValidPhotoCount(task), 0);
+    const uploadedPhotoCount = Math.max(0, Math.trunc(Number(
+      data.uploadedPhotoCount ?? fallbackUploadedPhotoCount
+    ) || 0));
 
     if (!petCount || !totalAllowedSeconds) {
       throw new Error(`Hạn mức Hotel ngày ${dateKey} không hợp lệ. Vui lòng liên hệ Admin kiểm tra dữ liệu.`);
@@ -8691,7 +8783,10 @@ async function prepareHotelRowsForPersistence(rows) {
       petCount,
       totalAllowedSeconds,
       consumedSeconds,
-      remainingSeconds: Math.max(0, totalAllowedSeconds - consumedSeconds)
+      remainingSeconds: Math.max(0, totalAllowedSeconds - consumedSeconds),
+      totalRequiredPhotoCount,
+      uploadedPhotoCount,
+      remainingRequiredPhotoCount: Math.max(0, totalRequiredPhotoCount - uploadedPhotoCount)
     });
   });
 
@@ -8706,11 +8801,15 @@ async function prepareHotelRowsForPersistence(rows) {
       }
 
       const totalAllowedSeconds = petCount * HOTEL_SECONDS_PER_PET;
+      const totalRequiredPhotoCount = petCount + 10;
       budget = {
         petCount,
         totalAllowedSeconds,
         consumedSeconds: 0,
-        remainingSeconds: totalAllowedSeconds
+        remainingSeconds: totalAllowedSeconds,
+        totalRequiredPhotoCount,
+        uploadedPhotoCount: 0,
+        remainingRequiredPhotoCount: totalRequiredPhotoCount
       };
       budgetsByDate.set(dateKey, budget);
       newBudgets.push({ dateKey, ...budget });
@@ -8723,6 +8822,9 @@ async function prepareHotelRowsForPersistence(rows) {
     row.hotelPetCount = budget.petCount;
     row.hotelAllowedMinutes = budget.totalAllowedSeconds / 60;
     row.deadlineMinutes = budget.remainingSeconds / 60;
+    row.hotelTotalRequiredPhotoCount = budget.totalRequiredPhotoCount;
+    row.hotelRequiredPhotoCount = budget.remainingRequiredPhotoCount;
+    row.hotelPhotoInstruction = `Chụp 10 hình ảnh không gian trong phòng, hành lang, ban công khu vực chó mèo Hotel; chụp ${budget.petCount} chuồng các bé đang ở.`;
   });
 
   return newBudgets;
@@ -9115,6 +9217,8 @@ async function persistWorkOrder(dispatch, button) {
         secondsPerPet: HOTEL_SECONDS_PER_PET,
         totalAllowedSeconds: budget.totalAllowedSeconds,
         consumedSeconds: 0,
+        totalRequiredPhotoCount: budget.totalRequiredPhotoCount,
+        uploadedPhotoCount: 0,
         createdByUid: state.user.uid,
         createdByName: state.profile?.name || state.user.email || "Admin",
         createdAt: serverTimestamp(),
@@ -9200,6 +9304,10 @@ async function persistWorkOrder(dispatch, button) {
         isShip: Boolean(row.isShip),
         hotelPetCount: row.isHotel ? Number(row.hotelPetCount || 0) : 0,
         hotelAllowedMinutes: row.isHotel ? Number(row.hotelAllowedMinutes || 0) : 0,
+        hotelPhotoRequired: Boolean(row.isHotel),
+        hotelTotalRequiredPhotoCount: row.isHotel ? Number(row.hotelTotalRequiredPhotoCount || 0) : 0,
+        hotelRequiredPhotoCount: row.isHotel ? Number(row.hotelRequiredPhotoCount || 0) : 0,
+        hotelPhotoInstruction: row.isHotel ? String(row.hotelPhotoInstruction || "") : "",
         deadlineAt: null,
         dispatchedAt: null,
         queueStartAt: null,
@@ -9216,10 +9324,10 @@ async function persistWorkOrder(dispatch, button) {
         workPhotos: Array.isArray(row.workPhotos) ? row.workPhotos : [],
         workPhotoCount: Array.isArray(row.workPhotos) ? row.workPhotos.length : 0,
         lastWorkPhotoUploadedAt: getLatestUploadedAtFromPhotos(row.workPhotos || []),
-        // Phiếu Nghỉ trưa là thời gian nghỉ nên không bắt buộc đăng hình.
-        // Phiếu Hotel vẫn áp dụng đúng cài đặt bắt buộc đăng hình của Admin.
-        photoRequired: row.isLunchBreak ? false : photoOptions.photoRequired,
-        requiredPhotoCount: row.isLunchBreak ? 0 : photoOptions.requiredPhotoCount,
+        // Nghỉ trưa không cần ảnh. Hotel dùng hạn mức ảnh riêng theo ngày nên
+        // không dùng bộ chặn ảnh thông thường của từng công việc.
+        photoRequired: row.isLunchBreak || row.isHotel ? false : photoOptions.photoRequired,
+        requiredPhotoCount: row.isLunchBreak || row.isHotel ? 0 : photoOptions.requiredPhotoCount,
         photos: [],
         photoCount: 0,
         lastPhotoUploadedAt: null
@@ -9356,7 +9464,10 @@ async function dispatchWorkOrder(workOrderId, button) {
     isHotel: Boolean(task.isHotel),
     isShip: Boolean(task.isShip),
     hotelPetCount: Number(task.hotelPetCount || 0),
-    hotelAllowedMinutes: Number(task.hotelAllowedMinutes || 0)
+    hotelAllowedMinutes: Number(task.hotelAllowedMinutes || 0),
+    hotelTotalRequiredPhotoCount: Number(task.hotelTotalRequiredPhotoCount || 0),
+    hotelRequiredPhotoCount: Number(task.hotelRequiredPhotoCount || 0),
+    hotelPhotoInstruction: String(task.hotelPhotoInstruction || "")
   }));
 
   let newHotelBudgets = [];
@@ -9371,7 +9482,10 @@ async function dispatchWorkOrder(workOrderId, button) {
     Object.assign(tasksInGroup[index], {
       deadlineMinutes: row.deadlineMinutes,
       hotelPetCount: row.hotelPetCount,
-      hotelAllowedMinutes: row.hotelAllowedMinutes
+      hotelAllowedMinutes: row.hotelAllowedMinutes,
+      hotelTotalRequiredPhotoCount: row.hotelTotalRequiredPhotoCount,
+      hotelRequiredPhotoCount: row.hotelRequiredPhotoCount,
+      hotelPhotoInstruction: row.hotelPhotoInstruction
     });
   });
 
@@ -9414,6 +9528,8 @@ async function dispatchWorkOrder(workOrderId, button) {
         secondsPerPet: HOTEL_SECONDS_PER_PET,
         totalAllowedSeconds: budget.totalAllowedSeconds,
         consumedSeconds: 0,
+        totalRequiredPhotoCount: budget.totalRequiredPhotoCount,
+        uploadedPhotoCount: 0,
         createdByUid: state.user.uid,
         createdByName: state.profile?.name || state.user.email || "Admin",
         createdAt: serverTimestamp(),
@@ -9435,6 +9551,10 @@ async function dispatchWorkOrder(workOrderId, button) {
           deadlineMinutes: Number(task.deadlineMinutes || 0),
           hotelPetCount: isHotelTask(task) ? Number(task.hotelPetCount || 0) : 0,
           hotelAllowedMinutes: isHotelTask(task) ? Number(task.hotelAllowedMinutes || 0) : 0,
+          hotelPhotoRequired: isHotelTask(task),
+          hotelTotalRequiredPhotoCount: isHotelTask(task) ? Number(task.hotelTotalRequiredPhotoCount || 0) : 0,
+          hotelRequiredPhotoCount: isHotelTask(task) ? Number(task.hotelRequiredPhotoCount || 0) : 0,
+          hotelPhotoInstruction: isHotelTask(task) ? String(task.hotelPhotoInstruction || "") : "",
           dispatchedAt: null,
           queueStartAt: null,
           deadlineAt: null
@@ -9459,7 +9579,11 @@ async function dispatchWorkOrder(workOrderId, button) {
         accumulatedWorkedMs: Number(task.accumulatedWorkedMs || 0),
         deadlineMinutes: Number(task.deadlineMinutes || 0),
         hotelPetCount: isHotelTask(task) ? Number(task.hotelPetCount || 0) : 0,
-        hotelAllowedMinutes: isHotelTask(task) ? Number(task.hotelAllowedMinutes || 0) : 0
+        hotelAllowedMinutes: isHotelTask(task) ? Number(task.hotelAllowedMinutes || 0) : 0,
+        hotelPhotoRequired: isHotelTask(task),
+        hotelTotalRequiredPhotoCount: isHotelTask(task) ? Number(task.hotelTotalRequiredPhotoCount || 0) : 0,
+        hotelRequiredPhotoCount: isHotelTask(task) ? Number(task.hotelRequiredPhotoCount || 0) : 0,
+        hotelPhotoInstruction: isHotelTask(task) ? String(task.hotelPhotoInstruction || "") : ""
       });
 
       const isQueued = queueStartDate.getTime() > now.getTime();
@@ -13845,7 +13969,9 @@ function renderLunchBreakHistoryBox(task) {
           <strong>${escapeHtml(employeeName)} đã nghỉ trưa được ${escapeHtml(formatMinutes(actualMinutes))}</strong>
           <span>${task.autoCreatedByHotelOvertime === true
             ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Hotel quá quy định."
-            : "Thời gian tính từ lúc bắt đầu nghỉ trưa đến khi hoàn thành."}</span>
+            : task.autoCreatedByHotelMissingPhotos === true
+              ? "Phiếu được hệ thống tự tạo và hoàn thành bằng tổng thời gian thực tế của các Phiếu Hotel vì chưa đăng đủ ảnh bắt buộc trong ngày."
+              : "Thời gian tính từ lúc bắt đầu nghỉ trưa đến khi hoàn thành."}</span>
         </li>
       </ul>
     </div>
@@ -13855,6 +13981,38 @@ function renderLunchBreakHistoryBox(task) {
 function renderPhotoReportBox(task, mode) {
   const photoState = getTaskPhotoCompletionState(task);
   const photoCount = photoState.totalCount;
+  if (isHotelTask(task)) {
+    const dailyBudget = getHotelDailyBudget(getTaskDateValue(task));
+    const petCount = dailyBudget?.petCount || getHotelPetCount(task);
+    const totalRequiredPhotoCount = dailyBudget?.totalRequiredPhotoCount
+      || Math.max(0, Number(task.hotelTotalRequiredPhotoCount || (petCount + 10)));
+    const uploadedPhotoCount = dailyBudget?.uploadedPhotoCount ?? state.tasks
+      .filter((item) => isHotelTask(item) && getTaskDateValue(item) === getTaskDateValue(task))
+      .reduce((sum, item) => sum + getTaskValidPhotoCount(item), 0);
+    const remainingPhotoCount = Math.max(0, totalRequiredPhotoCount - uploadedPhotoCount);
+    const canView = photoCount > 0 && (mode === "admin" || mode === "employee");
+    const instruction = task.hotelPhotoInstruction
+      || `Chụp 10 hình ảnh không gian trong phòng, hành lang, ban công khu vực chó mèo Hotel; chụp ${petCount} chuồng các bé đang ở.`;
+
+    return `
+      <div class="photo-report-box hotel-photo-report-box ${remainingPhotoCount > 0 ? "is-missing" : ""} ${photoState.invalidCount > 0 ? "has-invalid-photos" : ""}">
+        <div>
+          <strong>Bắt buộc đăng hình Hotel</strong>
+          <span>Đã đăng tổng ${uploadedPhotoCount}/${totalRequiredPhotoCount} ảnh hợp lệ trong ngày • còn thiếu ${remainingPhotoCount} ảnh.</span>
+          <small class="photo-report-hint">${escapeHtml(instruction)} Tổng bắt buộc ${totalRequiredPhotoCount} hình; số lượng này bị khóa và không ai được chỉnh sửa.</small>
+          ${photoState.invalidCount > 0 ? `<small class="photo-report-invalid-note">⚠ ${photoState.invalidCount} ảnh trong Phiếu này không hợp lệ và không được tính vào tổng ảnh Hotel.</small>` : ""}
+        </div>
+        ${canView ? `
+          <div class="photo-report-actions">
+            <button class="btn ghost small" data-action="view-task-photos" data-task-id="${escapeHtml(task.id)}" type="button">
+              Xem hình (${photoCount})
+            </button>
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }
+
   const required = photoState.required;
   const requiredCount = photoState.requiredCount;
   const enough = photoState.ready;
@@ -16271,19 +16429,32 @@ function renderPhotoReportPageContent(task) {
   if (els.photoReportSummary) {
     const employeeName = task.assignedToName || getEmployeeDisplayNameByUid(task.assignedToUid, "Nhân viên");
     const photoState = getTaskPhotoCompletionState(task);
-    const requirementText = photoState.required
-      ? `${photoState.validCount}/${photoState.requiredCount} ảnh hợp lệ`
-      : "Không bắt buộc";
+    const hotelBudget = isHotelTask(task) ? getHotelDailyBudget(getTaskDateValue(task)) : null;
+    const hotelTotalRequired = hotelBudget?.totalRequiredPhotoCount
+      || Number(task.hotelTotalRequiredPhotoCount || 0);
+    const hotelUploaded = hotelBudget?.uploadedPhotoCount ?? state.tasks
+      .filter((item) => isHotelTask(item) && getTaskDateValue(item) === getTaskDateValue(task))
+      .reduce((sum, item) => sum + getTaskValidPhotoCount(item), 0);
+    const requirementText = isHotelTask(task)
+      ? `${hotelUploaded}/${hotelTotalRequired} ảnh Hotel hợp lệ trong ngày`
+      : photoState.required
+        ? `${photoState.validCount}/${photoState.requiredCount} ảnh hợp lệ`
+        : "Không bắt buộc";
+    const hotelPhotoReady = isHotelTask(task) && hotelTotalRequired > 0 && hotelUploaded >= hotelTotalRequired;
     const statusText = photoState.invalidCount > 0
       ? `${photoState.invalidCount} ảnh không hợp lệ`
-      : (photoState.required
-        ? (photoState.ready ? "Đã đủ ảnh" : "Còn thiếu ảnh")
-        : "Ảnh tự chọn");
+      : isHotelTask(task)
+        ? (hotelPhotoReady ? "Đã đủ ảnh Hotel" : `Còn thiếu ${Math.max(0, hotelTotalRequired - hotelUploaded)} ảnh Hotel`)
+        : (photoState.required
+          ? (photoState.ready ? "Đã đủ ảnh" : "Còn thiếu ảnh")
+          : "Ảnh tự chọn");
     const statusClass = photoState.invalidCount > 0
       ? "is-danger"
-      : (photoState.required
-        ? (photoState.ready ? "is-success" : "is-warning")
-        : "is-neutral");
+      : isHotelTask(task)
+        ? (hotelPhotoReady ? "is-success" : "is-warning")
+        : (photoState.required
+          ? (photoState.ready ? "is-success" : "is-warning")
+          : "is-neutral");
 
     els.photoReportSummary.innerHTML = `
       <span class="photo-report-meta-chip">👤 ${escapeHtml(employeeName)}</span>
