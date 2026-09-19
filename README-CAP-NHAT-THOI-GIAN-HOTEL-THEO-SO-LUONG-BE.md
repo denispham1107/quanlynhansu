@@ -8,4 +8,6 @@
 - Khi một Phiếu Hotel hoàn thành quá thời gian được cấp, Cloud Function tự tạo một Phiếu nghỉ trưa đã hoàn thành cho đúng nhân viên, với thời lượng chính xác bằng phần Hotel làm quá.
 - Khi Phiếu Hotel cuối cùng của một ngày bị xóa, hệ thống tự xóa số lượng bé, hạn mức thời gian, báo cáo Hotel và dữ liệu cộng dồn của đúng ngày đó để Admin có thể nhập lại từ đầu.
 - Khi Admin mở ứng dụng, hệ thống cũng tự phát hiện và dọn các hạn mức Hotel mồ côi còn sót lại từ phiên bản cũ.
+- Cài đặt `Admin có quyền chỉnh/thêm giờ cho phiếu Hotel` cho phép Admin cộng thêm thời gian vào Phiếu Hotel đang làm; số phút thêm đồng thời được cộng vào tổng hạn mức Hotel của đúng ngày.
+- Khi cài đặt trên được bật, Admin có thể sửa thời gian thực tế của Phiếu Hotel đã hoàn thành theo giờ, phút và giây. Hệ thống tự tính lại thời gian đã dùng, thời gian còn lại và Phiếu nghỉ trưa bù do làm quá giờ.
 - Hạn mức ngày được lưu tại `hotelDailyBudgets/{YYYY-MM-DD}` và thời gian được tính theo giây để hỗ trợ chính xác mốc 30 giây.

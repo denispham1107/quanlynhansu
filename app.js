@@ -127,6 +127,11 @@ const cleanupOrphanHotelDailyBudgetCallable = httpsCallable(
   functions,
   "cleanupOrphanHotelDailyBudget"
 );
+const extendHotelTaskTimeCallable = httpsCallable(functions, "extendHotelTaskTime");
+const editCompletedHotelActualTimeCallable = httpsCallable(
+  functions,
+  "editCompletedHotelActualTime"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -240,6 +245,7 @@ const state = {
     hideEndTaskButton: false,
     allowOverdueTimeExtension: false,
     allowEditCompletedTaskActualTime: false,
+    allowAdminHotelTimeEditing: false,
     workSupervisionEnabled: false,
     workSupervisionCountdownMinutes: 5,
     workSupervisionLunchCreditMinutes: 5,
@@ -708,6 +714,7 @@ function normalizeWorkOrderControlSettings(value = {}) {
     hideEndTaskButton: input.hideEndTaskButton === true,
     allowOverdueTimeExtension: input.allowOverdueTimeExtension === true,
     allowEditCompletedTaskActualTime: input.allowEditCompletedTaskActualTime === true,
+    allowAdminHotelTimeEditing: input.allowAdminHotelTimeEditing === true,
     workSupervisionEnabled: input.workSupervisionEnabled === true,
     workSupervisionCountdownMinutes: Number.isInteger(Number(input.workSupervisionCountdownMinutes))
       && Number(input.workSupervisionCountdownMinutes) >= 1
@@ -785,6 +792,10 @@ function isOverdueTimeExtensionAllowed() {
 
 function isCompletedTaskActualTimeEditAllowed() {
   return getWorkOrderControlSettings().allowEditCompletedTaskActualTime === true;
+}
+
+function isAdminHotelTimeEditingAllowed() {
+  return getWorkOrderControlSettings().allowAdminHotelTimeEditing === true;
 }
 
 function isDispatchedPhotoRequirementEditingLocked(task = {}) {
@@ -939,6 +950,7 @@ const els = {
   hideEndTaskButton: $("#hideEndTaskButton"),
   allowOverdueTimeExtension: $("#allowOverdueTimeExtension"),
   allowEditCompletedTaskActualTime: $("#allowEditCompletedTaskActualTime"),
+  allowAdminHotelTimeEditing: $("#allowAdminHotelTimeEditing"),
   enableWorkSupervision: $("#enableWorkSupervision"),
   workSupervisionSettingControls: $("#workSupervisionSettingControls"),
   workSupervisionCountdownMinutes: $("#workSupervisionCountdownMinutes"),
@@ -954,6 +966,8 @@ const els = {
   actualTimeEditDeadlineValue: $("#actualTimeEditDeadlineValue"),
   actualTimeEditHours: $("#actualTimeEditHours"),
   actualTimeEditMinutes: $("#actualTimeEditMinutes"),
+  actualTimeEditSecondsField: $("#actualTimeEditSecondsField"),
+  actualTimeEditSeconds: $("#actualTimeEditSeconds"),
   actualTimeEditPreview: $("#actualTimeEditPreview"),
   saveActualTimeEditBtn: $("#saveActualTimeEditBtn"),
   adminWorkSupervisionBanner: $("#adminWorkSupervisionBanner"),
@@ -10351,6 +10365,9 @@ function openWorkOrderSettingsModal() {
   if (els.allowEditCompletedTaskActualTime) {
     els.allowEditCompletedTaskActualTime.checked = settings.allowEditCompletedTaskActualTime;
   }
+  if (els.allowAdminHotelTimeEditing) {
+    els.allowAdminHotelTimeEditing.checked = settings.allowAdminHotelTimeEditing;
+  }
   if (els.enableWorkSupervision) {
     els.enableWorkSupervision.checked = settings.workSupervisionEnabled;
   }
@@ -10550,6 +10567,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       hideEndTaskButton: els.hideEndTaskButton?.checked === true,
       allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true,
       allowEditCompletedTaskActualTime: els.allowEditCompletedTaskActualTime?.checked === true,
+      allowAdminHotelTimeEditing: els.allowAdminHotelTimeEditing?.checked === true,
       workSupervisionEnabled: supervisionEnabled,
       workSupervisionCountdownMinutes: supervisionCountdownMinutes,
       workSupervisionLunchCreditMinutes: supervisionLunchCreditMinutes,
@@ -14110,13 +14128,9 @@ function renderRedoRequestHistoryBox(task) {
 }
 
 function canEditCompletedTaskActualTime(task) {
-  return Boolean(
-    isAdminProfile()
-    && isCompletedTaskActualTimeEditAllowed()
-    && task?.status === "completed"
-    && !isLunchBreakTask(task)
-    && !isHotelTask(task)
-  );
+  if (!isAdminProfile() || task?.status !== "completed" || isLunchBreakTask(task)) return false;
+  if (isHotelTask(task)) return isAdminHotelTimeEditingAllowed();
+  return isCompletedTaskActualTimeEditAllowed();
 }
 
 function renderResultBox(task) {
@@ -14128,9 +14142,20 @@ function renderResultBox(task) {
     const actualMinutes = Number(task.hotelActualSeconds || 0) > 0
       ? Number(task.hotelActualSeconds) / 60
       : Number(task.actualMinutes || 0);
+    const editAction = canEditCompletedTaskActualTime(task)
+      ? `
+        <button class="btn primary small completed-actual-time-edit-btn" type="button" data-action="edit-completed-actual-time" data-task-id="${escapeHtml(task.id)}">
+          Sửa thời gian thực tế
+        </button>
+      `
+      : "";
     return `
-      <div class="result-box hotel-result-box">
-        <strong>${escapeHtml(employeeName)} làm hotel được ${formatMinutes(actualMinutes)}</strong>
+      <div class="result-box hotel-result-box completed-result-box">
+        <div class="completed-result-copy">
+          <strong>${escapeHtml(employeeName)} làm hotel được ${escapeHtml(formatHotelDuration(actualMinutes))}</strong>
+          <span>Thời gian quy định: ${escapeHtml(formatHotelDuration(Number(task.deadlineMinutes || 0)))}</span>
+        </div>
+        ${editAction}
       </div>
     `;
   }
@@ -14216,7 +14241,7 @@ function isTaskOverdueForTimeExtension(task, nowMs = Date.now()) {
 
 function canAdminExtendTaskTime(task, mode) {
   if (mode !== "admin" || !hasPermission("extendTaskTime") || !task) return false;
-  if (isHotelTask(task)) return false;
+  if (isHotelTask(task) && (!isAdminProfile() || !isAdminHotelTimeEditingAllowed())) return false;
 
   const isOverdue = isTaskOverdueForTimeExtension(task);
   if (isOverdue && !isOverdueTimeExtensionAllowed()) return false;
@@ -17030,8 +17055,10 @@ function openExtendTimeModal(taskId) {
   }
 
   if (isHotelTask(task)) {
-    toast("Thời gian Phiếu Hotel do hệ thống tự tính và không cho phép chỉnh sửa hoặc thêm giờ.", "error");
-    return;
+    if (!isAdminProfile() || !isAdminHotelTimeEditingAllowed()) {
+      toast("Hãy bật “Admin có quyền chỉnh/thêm giờ cho phiếu Hotel” trong Cài đặt Phiếu công việc trước.", "error");
+      return;
+    }
   }
 
   if (isTaskOverdueForTimeExtension(task) && !isOverdueTimeExtensionAllowed()) {
@@ -17194,8 +17221,9 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
   }
 
   const currentTask = state.tasks.find((item) => item.id === taskId);
-  if (isHotelTask(currentTask)) {
-    toast("Thời gian Phiếu Hotel do hệ thống tự tính và không cho phép chỉnh sửa hoặc thêm giờ.", "error");
+  const isHotel = isHotelTask(currentTask);
+  if (isHotel && (!isAdminProfile() || !isAdminHotelTimeEditingAllowed())) {
+    toast("Quyền chỉnh/thêm giờ Phiếu Hotel đang tắt.", "error");
     return;
   }
   const remainingBeforeSubmit = currentTask ? getRemainingExtendMinutes(currentTask) : null;
@@ -17214,10 +17242,18 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
   try {
     // Nếu Admin nhập mục đích mới rồi bấm OK, tự lưu mục đích đó vào danh sách để lần sau chọn lại được.
     await ensureCustomTimeExtensionReason(reason);
-    const taskRef = doc(db, "tasks", taskId);
     let updatedTask = null;
-
-    await runTransaction(db, async (transaction) => {
+    if (isHotel) {
+      const response = await extendHotelTaskTimeCallable({ taskId, minutes, reason });
+      const updatedHotelTask = response.data?.task || {};
+      updatedTask = {
+        ...currentTask,
+        deadlineMinutes: Number(updatedHotelTask.newDeadlineMinutes || currentTask.deadlineMinutes || 0),
+        status: updatedHotelTask.status || currentTask.status
+      };
+    } else {
+      const taskRef = doc(db, "tasks", taskId);
+      await runTransaction(db, async (transaction) => {
       const taskSnap = await transaction.get(taskRef);
 
       if (!taskSnap.exists()) {
@@ -17276,7 +17312,8 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
         deadlineAt: Timestamp.fromDate(newDeadlineDate),
         status: newStatus
       };
-    });
+      });
+    }
 
     if (updatedTask?.assignedToUid) {
       await createNotifications([
@@ -17630,10 +17667,13 @@ function closeCompletedActualTimeEditModal() {
 function getCompletedActualTimeEditInputMinutes() {
   const hours = Number(els.actualTimeEditHours?.value || 0);
   const minutes = Number(els.actualTimeEditMinutes?.value || 0);
+  const task = state.tasks.find((item) => item.id === state.editingCompletedTaskActualTimeId);
+  const seconds = isHotelTask(task) ? Number(els.actualTimeEditSeconds?.value || 0) : 0;
   if (!Number.isInteger(hours) || hours < 0 || hours > 168) return null;
   if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) return null;
-  const total = (hours * 60) + minutes;
-  return total <= 10080 ? total : null;
+  if (!Number.isInteger(seconds) || seconds < 0 || seconds > 59) return null;
+  const totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
+  return totalSeconds <= 168 * 3600 ? totalSeconds / 60 : null;
 }
 
 function updateCompletedActualTimeEditPreview() {
@@ -17647,6 +17687,17 @@ function updateCompletedActualTimeEditPreview() {
   }
 
   try {
+    if (isHotelTask(task)) {
+      const actualSeconds = Math.round(totalMinutes * 60);
+      const deadlineSeconds = Math.max(0, Math.round(Number(task.deadlineMinutes || 0) * 60));
+      const overtimeSeconds = Math.max(0, actualSeconds - deadlineSeconds);
+      els.actualTimeEditPreview.textContent = overtimeSeconds > 0
+        ? `Thời gian Hotel mới: ${formatHotelDuration(actualSeconds / 60)}. Làm quá quy định ${formatHotelDuration(overtimeSeconds / 60)}; Phiếu nghỉ trưa bù sẽ được cập nhật tương ứng.`
+        : `Thời gian Hotel mới: ${formatHotelDuration(actualSeconds / 60)} / quy định ${formatHotelDuration(deadlineSeconds / 60)}. Thời gian Hotel còn lại trong ngày sẽ được tính lại.`;
+      els.actualTimeEditPreview.classList.remove("is-error");
+      return;
+    }
+
     const result = calculateResultFromActualMinutes(task, totalMinutes);
     const resultText = taskResultShortText(result);
     els.actualTimeEditPreview.textContent = `Kết quả mới dự kiến: ${resultText}. Thời gian thực tế ${formatMinutes(totalMinutes)} / quy định ${formatMinutes(task.deadlineMinutes)}.`;
@@ -17662,29 +17713,50 @@ function openCompletedActualTimeEditModal(taskId) {
     toast("Chỉ Admin được sửa thời gian thực tế của công việc đã hoàn thành.", "error");
     return;
   }
-  if (!isCompletedTaskActualTimeEditAllowed()) {
-    toast("Hãy bật “Sửa phiếu công việc đã hoàn thành” trong Cài đặt Phiếu công việc trước.", "error");
-    return;
-  }
-
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task || task.status !== "completed") {
     toast("Chỉ có thể sửa công việc đã hoàn thành.", "error");
     return;
   }
-  if (isLunchBreakTask(task) || isHotelTask(task)) {
-    toast("Nghỉ trưa và Hotel đang dùng logic kết quả riêng nên không sửa bằng chức năng này.", "error");
+  if (isLunchBreakTask(task)) {
+    toast("Phiếu Nghỉ trưa đang dùng logic kết quả riêng nên không sửa bằng chức năng này.", "error");
+    return;
+  }
+  if (isHotelTask(task) && !isAdminHotelTimeEditingAllowed()) {
+    toast("Hãy bật “Admin có quyền chỉnh/thêm giờ cho phiếu Hotel” trong Cài đặt Phiếu công việc trước.", "error");
+    return;
+  }
+  if (!isHotelTask(task) && !isCompletedTaskActualTimeEditAllowed()) {
+    toast("Hãy bật “Sửa phiếu công việc đã hoàn thành” trong Cài đặt Phiếu công việc trước.", "error");
     return;
   }
 
-  const currentActualMinutes = Math.max(0, Math.trunc(Number(task.actualMinutes || 0)));
+  const storedHotelSeconds = Number(task.hotelActualSeconds || 0);
+  const currentActualSeconds = isHotelTask(task)
+    ? Math.max(0, Math.round(
+      storedHotelSeconds > 0 || task.hotelActualSecondsManuallyEdited === true
+        ? storedHotelSeconds
+        : Number(task.actualMinutes || 0) * 60
+    ))
+    : Math.max(0, Math.trunc(Number(task.actualMinutes || 0))) * 60;
+  const currentActualMinutes = currentActualSeconds / 60;
   state.editingCompletedTaskActualTimeId = task.id;
   if (els.actualTimeEditTaskTitle) els.actualTimeEditTaskTitle.textContent = task.title || "Công việc";
   if (els.actualTimeEditWorkOrderName) els.actualTimeEditWorkOrderName.textContent = `Phiếu: ${task.workOrderName || "Phiếu công việc"}`;
-  if (els.actualTimeEditCurrentValue) els.actualTimeEditCurrentValue.textContent = formatMinutes(currentActualMinutes);
-  if (els.actualTimeEditDeadlineValue) els.actualTimeEditDeadlineValue.textContent = formatMinutes(task.deadlineMinutes);
-  if (els.actualTimeEditHours) els.actualTimeEditHours.value = String(Math.floor(currentActualMinutes / 60));
-  if (els.actualTimeEditMinutes) els.actualTimeEditMinutes.value = String(currentActualMinutes % 60);
+  if (els.actualTimeEditCurrentValue) {
+    els.actualTimeEditCurrentValue.textContent = isHotelTask(task)
+      ? formatHotelDuration(currentActualMinutes)
+      : formatMinutes(currentActualMinutes);
+  }
+  if (els.actualTimeEditDeadlineValue) {
+    els.actualTimeEditDeadlineValue.textContent = isHotelTask(task)
+      ? formatHotelDuration(task.deadlineMinutes)
+      : formatMinutes(task.deadlineMinutes);
+  }
+  if (els.actualTimeEditHours) els.actualTimeEditHours.value = String(Math.floor(currentActualSeconds / 3600));
+  if (els.actualTimeEditMinutes) els.actualTimeEditMinutes.value = String(Math.floor((currentActualSeconds % 3600) / 60));
+  if (els.actualTimeEditSeconds) els.actualTimeEditSeconds.value = String(currentActualSeconds % 60);
+  els.actualTimeEditSecondsField?.classList.toggle("hidden", !isHotelTask(task));
   updateCompletedActualTimeEditPreview();
 
   els.actualTimeEditModal?.classList.remove("hidden");
@@ -17699,12 +17771,6 @@ async function saveCompletedActualTimeEdit(event) {
     toast("Chỉ Admin được sửa thời gian thực tế.", "error");
     return;
   }
-  if (!isCompletedTaskActualTimeEditAllowed()) {
-    closeCompletedActualTimeEditModal();
-    toast("Chế độ sửa Phiếu công việc đã hoàn thành đang tắt.", "error");
-    return;
-  }
-
   const taskId = state.editingCompletedTaskActualTimeId;
   const totalMinutes = getCompletedActualTimeEditInputMinutes();
   if (!taskId || totalMinutes === null) {
@@ -17720,8 +17786,21 @@ async function saveCompletedActualTimeEdit(event) {
     const task = { id: taskSnap.id, ...taskSnap.data() };
 
     if (task.status !== "completed") throw new Error("Công việc này không còn ở trạng thái Đã hoàn thành.");
-    if (isLunchBreakTask(task) || isHotelTask(task)) {
-      throw new Error("Nghỉ trưa và Hotel đang dùng logic kết quả riêng nên không sửa bằng chức năng này.");
+    if (isLunchBreakTask(task)) {
+      throw new Error("Phiếu Nghỉ trưa đang dùng logic kết quả riêng nên không sửa bằng chức năng này.");
+    }
+    if (isHotelTask(task)) {
+      if (!isAdminHotelTimeEditingAllowed()) {
+        throw new Error("Quyền chỉnh thời gian Phiếu Hotel đang tắt.");
+      }
+      const actualSeconds = Math.round(totalMinutes * 60);
+      await editCompletedHotelActualTimeCallable({ taskId, actualSeconds });
+      closeCompletedActualTimeEditModal();
+      toast(`Đã sửa thời gian Hotel thực tế thành ${formatHotelDuration(actualSeconds / 60)} và cập nhật lại hạn mức trong ngày.`, "success");
+      return;
+    }
+    if (!isCompletedTaskActualTimeEditAllowed()) {
+      throw new Error("Chế độ sửa Phiếu công việc đã hoàn thành đang tắt.");
     }
 
     const oldActualMinutes = Math.max(0, Math.trunc(Number(task.actualMinutes || 0)));
@@ -17768,6 +17847,7 @@ async function saveCompletedActualTimeEdit(event) {
 
 els.actualTimeEditHours?.addEventListener("input", updateCompletedActualTimeEditPreview);
 els.actualTimeEditMinutes?.addEventListener("input", updateCompletedActualTimeEditPreview);
+els.actualTimeEditSeconds?.addEventListener("input", updateCompletedActualTimeEditPreview);
 els.actualTimeEditForm?.addEventListener("submit", saveCompletedActualTimeEdit);
 document.querySelectorAll("[data-close-actual-time-edit]").forEach((button) => {
   button.addEventListener("click", closeCompletedActualTimeEditModal);

@@ -240,8 +240,10 @@ exports.saveWorkOrderControlSettings = onCall({
   const preventWorkOrderDeletion = request.data?.preventWorkOrderDeletion;
   const rawPreventDispatchedPhotoRequirementEditing = request.data?.preventDispatchedPhotoRequirementEditing;
   const rawHideEndTaskButton = request.data?.hideEndTaskButton;
+  const rawAllowAdminHotelTimeEditing = request.data?.allowAdminHotelTimeEditing;
   const existingSettingsSnap = rawPreventDispatchedPhotoRequirementEditing === undefined
     || rawHideEndTaskButton === undefined
+    || rawAllowAdminHotelTimeEditing === undefined
     ? await db.doc("appSettings/workOrderControls").get()
     : null;
   const preventDispatchedPhotoRequirementEditing = rawPreventDispatchedPhotoRequirementEditing === undefined
@@ -250,6 +252,9 @@ exports.saveWorkOrderControlSettings = onCall({
   const hideEndTaskButton = rawHideEndTaskButton === undefined
     ? existingSettingsSnap?.data()?.hideEndTaskButton === true
     : rawHideEndTaskButton;
+  const allowAdminHotelTimeEditing = rawAllowAdminHotelTimeEditing === undefined
+    ? existingSettingsSnap?.data()?.allowAdminHotelTimeEditing === true
+    : rawAllowAdminHotelTimeEditing;
   const allowOverdueTimeExtension = request.data?.allowOverdueTimeExtension;
   const rawAllowEditCompletedTaskActualTime = request.data?.allowEditCompletedTaskActualTime;
   const allowEditCompletedTaskActualTime = rawAllowEditCompletedTaskActualTime === undefined
@@ -291,6 +296,9 @@ exports.saveWorkOrderControlSettings = onCall({
   }
   if (typeof allowEditCompletedTaskActualTime !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị cho phép sửa Phiếu công việc đã hoàn thành không hợp lệ.");
+  }
+  if (typeof allowAdminHotelTimeEditing !== "boolean") {
+    throw new HttpsError("invalid-argument", "Giá trị quyền chỉnh/thêm giờ Phiếu Hotel không hợp lệ.");
   }
   if (typeof workSupervisionEnabled !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị Giám sát công việc không hợp lệ.");
@@ -347,6 +355,7 @@ exports.saveWorkOrderControlSettings = onCall({
     hideEndTaskButton,
     allowOverdueTimeExtension,
     allowEditCompletedTaskActualTime,
+    allowAdminHotelTimeEditing,
     workSupervisionEnabled,
     workSupervisionCountdownMinutes,
     workSupervisionLunchCreditMinutes,
@@ -376,6 +385,7 @@ exports.saveWorkOrderControlSettings = onCall({
       hideEndTaskButton,
       allowOverdueTimeExtension,
       allowEditCompletedTaskActualTime,
+      allowAdminHotelTimeEditing,
       workSupervisionEnabled,
       workSupervisionCountdownMinutes,
       workSupervisionLunchCreditMinutes,
@@ -1158,7 +1168,12 @@ function hotelTaskActualSeconds(task = {}) {
   if (task.status !== "completed" || task.isHotel !== true) return 0;
 
   const storedSeconds = Number(task.hotelActualSeconds || 0);
-  if (Number.isFinite(storedSeconds) && storedSeconds > 0) return Math.round(storedSeconds);
+  if (
+    Number.isFinite(storedSeconds)
+    && (storedSeconds > 0 || task.hotelActualSecondsManuallyEdited === true)
+  ) {
+    return Math.max(0, Math.round(storedSeconds));
+  }
 
   const completedAt = firestoreTimestampOrNull(task.approvedAt)
     || firestoreTimestampOrNull(task.submittedAt);
@@ -1243,6 +1258,257 @@ exports.cleanupOrphanHotelDailyBudget = onCall({
   return cleanupHotelDailyDataIfNoTasks(dateKey);
 });
 
+exports.extendHotelTaskTime = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 10
+}, async (request) => {
+  const uid = assertAuthenticated(request);
+  const adminProfile = await assertAdmin(uid);
+  const taskId = String(request.data?.taskId || "").trim();
+  const minutes = Number(request.data?.minutes);
+  const reason = String(request.data?.reason || "").trim().slice(0, 300);
+
+  if (!taskId || taskId.length > 256) {
+    throw new HttpsError("invalid-argument", "Phiếu Hotel không hợp lệ.");
+  }
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+    throw new HttpsError("invalid-argument", "Số phút thêm phải là số nguyên từ 1 đến 1440.");
+  }
+  if (!reason) {
+    throw new HttpsError("invalid-argument", "Vui lòng nhập mục đích thêm giờ.");
+  }
+
+  const taskRef = db.doc(`tasks/${taskId}`);
+  const settingsRef = db.doc("appSettings/workOrderControls");
+  let result = null;
+
+  await db.runTransaction(async (transaction) => {
+    const [settingsSnapshot, taskSnapshot] = await Promise.all([
+      transaction.get(settingsRef),
+      transaction.get(taskRef)
+    ]);
+    const settings = settingsSnapshot.data() || {};
+    const task = taskSnapshot.data() || {};
+
+    if (settings.allowAdminHotelTimeEditing !== true) {
+      throw new HttpsError("failed-precondition", "Quyền chỉnh/thêm giờ Phiếu Hotel đang tắt.");
+    }
+    if (!taskSnapshot.exists || task.isHotel !== true) {
+      throw new HttpsError("not-found", "Không tìm thấy Phiếu Hotel.");
+    }
+    if (!["doing", "hotel", "redo", "overdue"].includes(String(task.status || ""))) {
+      throw new HttpsError("failed-precondition", "Chỉ có thể thêm giờ cho Phiếu Hotel đang làm.");
+    }
+
+    const deadlineAt = firestoreTimestampOrNull(task.deadlineAt);
+    const isOverdue = task.status === "overdue"
+      || Boolean(deadlineAt && deadlineAt.toMillis() <= Date.now());
+    if (isOverdue && settings.allowOverdueTimeExtension !== true) {
+      throw new HttpsError("failed-precondition", "Quá hạn thời gian không thể thêm giờ.");
+    }
+
+    const configuredMaxMinutes = Number(settings.maxExtendMinutes || 0);
+    const usedExtensionMinutes = Math.max(0, Number(task.timeExtensionTotalMinutes || 0));
+    if (configuredMaxMinutes > 0 && usedExtensionMinutes + minutes > configuredMaxMinutes) {
+      throw new HttpsError(
+        "failed-precondition",
+        `Cài đặt chỉ cho phép thêm tối đa ${configuredMaxMinutes} phút cho mỗi công việc.`
+      );
+    }
+
+    const dateKey = String(task.taskDate || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      throw new HttpsError("failed-precondition", "Ngày của Phiếu Hotel không hợp lệ.");
+    }
+    const budgetRef = db.doc(`hotelDailyBudgets/${dateKey}`);
+    const budgetSnapshot = await transaction.get(budgetRef);
+    if (!budgetSnapshot.exists) {
+      throw new HttpsError("failed-precondition", "Không tìm thấy hạn mức Hotel của ngày này.");
+    }
+
+    const now = Timestamp.now();
+    const oldDeadlineMinutes = Math.max(0, Number(task.deadlineMinutes || 0));
+    const newDeadlineMinutes = oldDeadlineMinutes + minutes;
+    const oldDeadlineMillis = deadlineAt?.toMillis() || now.toMillis();
+    const newDeadlineAt = Timestamp.fromMillis(oldDeadlineMillis + (minutes * 60 * 1000));
+    const oldExtensions = Array.isArray(task.timeExtensions) ? task.timeExtensions.slice(-199) : [];
+    const extensionRecord = {
+      minutes,
+      reason,
+      addedByUid: uid,
+      addedByName: String(adminProfile?.name || request.auth.token?.email || "Admin").slice(0, 120),
+      addedAt: now
+    };
+    const currentTotalAllowedSeconds = Math.max(0, Math.round(Number(
+      budgetSnapshot.data()?.totalAllowedSeconds || 0
+    )));
+    const addedSeconds = minutes * 60;
+    const newStatus = task.status === "overdue" && newDeadlineAt.toMillis() > now.toMillis()
+      ? "hotel"
+      : task.status;
+
+    transaction.update(taskRef, {
+      deadlineMinutes: newDeadlineMinutes,
+      hotelAllowedMinutes: Math.max(
+        Math.max(0, Number(task.hotelAllowedMinutes || 0)),
+        currentTotalAllowedSeconds / 60
+      ) + minutes,
+      deadlineAt: newDeadlineAt,
+      status: newStatus,
+      timeExtensionCount: Math.max(0, Math.trunc(Number(task.timeExtensionCount || oldExtensions.length))) + 1,
+      timeExtensionTotalMinutes: usedExtensionMinutes + minutes,
+      timeExtensions: [...oldExtensions, extensionRecord],
+      lastTimeExtendedAt: now,
+      lastTimeExtendedByUid: uid,
+      lastTimeExtendedByName: extensionRecord.addedByName
+    });
+    transaction.set(budgetRef, {
+      totalAllowedSeconds: currentTotalAllowedSeconds + addedSeconds,
+      adminAddedSeconds: Math.max(0, Math.round(Number(budgetSnapshot.data()?.adminAddedSeconds || 0))) + addedSeconds,
+      lastTimeExtendedAt: now,
+      lastTimeExtendedByUid: uid,
+      lastTimeExtendedByName: extensionRecord.addedByName,
+      updatedAt: now
+    }, { merge: true });
+
+    result = {
+      taskId,
+      title: String(task.title || "Làm hotel"),
+      assignedToUid: String(task.assignedToUid || ""),
+      newDeadlineMinutes,
+      newTotalAllowedSeconds: currentTotalAllowedSeconds + addedSeconds,
+      status: newStatus
+    };
+  });
+
+  return { updated: true, task: result };
+});
+
+exports.editCompletedHotelActualTime = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 10
+}, async (request) => {
+  const uid = assertAuthenticated(request);
+  const adminProfile = await assertAdmin(uid);
+  const taskId = String(request.data?.taskId || "").trim();
+  const actualSeconds = Number(request.data?.actualSeconds);
+
+  if (!taskId || taskId.length > 256) {
+    throw new HttpsError("invalid-argument", "Phiếu Hotel không hợp lệ.");
+  }
+  if (!Number.isInteger(actualSeconds) || actualSeconds < 0 || actualSeconds > 168 * 3600) {
+    throw new HttpsError("invalid-argument", "Thời gian thực tế phải từ 0 đến 168 giờ.");
+  }
+
+  const taskRef = db.doc(`tasks/${taskId}`);
+  const settingsRef = db.doc("appSettings/workOrderControls");
+  let result = null;
+
+  await db.runTransaction(async (transaction) => {
+    const [settingsSnapshot, taskSnapshot] = await Promise.all([
+      transaction.get(settingsRef),
+      transaction.get(taskRef)
+    ]);
+    const settings = settingsSnapshot.data() || {};
+    const task = taskSnapshot.data() || {};
+
+    if (settings.allowAdminHotelTimeEditing !== true) {
+      throw new HttpsError("failed-precondition", "Quyền chỉnh thời gian Phiếu Hotel đang tắt.");
+    }
+    if (!taskSnapshot.exists || task.isHotel !== true || task.status !== "completed") {
+      throw new HttpsError("failed-precondition", "Chỉ sửa được Phiếu Hotel đã hoàn thành.");
+    }
+
+    const dateKey = String(task.taskDate || "").trim();
+    const budgetRef = db.doc(`hotelDailyBudgets/${dateKey}`);
+    const contributionRef = db.doc(`hotelBudgetContributions/${taskId}`);
+    const [budgetSnapshot, contributionSnapshot] = await Promise.all([
+      transaction.get(budgetRef),
+      transaction.get(contributionRef)
+    ]);
+    if (!budgetSnapshot.exists) {
+      throw new HttpsError("failed-precondition", "Không tìm thấy hạn mức Hotel của ngày này.");
+    }
+
+    const oldActualSeconds = hotelTaskActualSeconds(task);
+    const recordedContributionSeconds = contributionSnapshot.exists
+      ? Math.max(0, Math.round(Number(contributionSnapshot.data()?.seconds || 0)))
+      : oldActualSeconds;
+    const currentConsumedSeconds = Math.max(0, Math.round(Number(
+      budgetSnapshot.data()?.consumedSeconds || 0
+    )));
+    const deadlineSeconds = Math.max(0, Math.round(Number(task.deadlineMinutes || 0) * 60));
+    const overtimeSeconds = Math.max(0, actualSeconds - deadlineSeconds);
+    const differenceSeconds = Math.abs(actualSeconds - deadlineSeconds);
+    const resultType = actualSeconds > deadlineSeconds ? "slower" : "on_time";
+    const now = Timestamp.now();
+    const editedByName = String(adminProfile?.name || request.auth.token?.email || "Admin").slice(0, 120);
+    const oldHistory = Array.isArray(task.actualMinutesEditHistory)
+      ? task.actualMinutesEditHistory.slice(-199)
+      : [];
+    const historyRecord = {
+      editedAt: now,
+      editedByUid: uid,
+      editedByName,
+      fromMinutes: oldActualSeconds / 60,
+      toMinutes: actualSeconds / 60,
+      fromSeconds: oldActualSeconds,
+      toSeconds: actualSeconds,
+      resultType,
+      differenceMinutes: differenceSeconds / 60,
+      differencePercent: deadlineSeconds > 0
+        ? Number(((differenceSeconds / deadlineSeconds) * 100).toFixed(2))
+        : 0
+    };
+    const taskUpdate = {
+      actualMinutes: actualSeconds / 60,
+      hotelActualSeconds: actualSeconds,
+      hotelActualSecondsManuallyEdited: true,
+      hotelOvertimeSeconds: overtimeSeconds,
+      resultType,
+      differenceMinutes: differenceSeconds / 60,
+      differencePercent: historyRecord.differencePercent,
+      actualMinutesManuallyEdited: true,
+      actualMinutesEditedAt: now,
+      actualMinutesEditedByUid: uid,
+      actualMinutesEditedByName: editedByName,
+      actualMinutesEditCount: Math.max(0, Math.trunc(Number(task.actualMinutesEditCount || 0))) + 1,
+      actualMinutesEditHistory: [...oldHistory, historyRecord]
+    };
+    if (!Number.isFinite(Number(task.actualMinutesOriginal))) {
+      taskUpdate.actualMinutesOriginal = oldActualSeconds / 60;
+    }
+    if (!Number.isFinite(Number(task.hotelActualSecondsOriginal))) {
+      taskUpdate.hotelActualSecondsOriginal = oldActualSeconds;
+    }
+
+    transaction.update(taskRef, taskUpdate);
+    transaction.set(budgetRef, {
+      consumedSeconds: Math.max(0, currentConsumedSeconds + actualSeconds - recordedContributionSeconds),
+      updatedAt: now
+    }, { merge: true });
+    transaction.set(contributionRef, {
+      taskId,
+      date: dateKey,
+      seconds: actualSeconds,
+      updatedAt: now
+    }, { merge: false });
+
+    result = {
+      taskId,
+      actualSeconds,
+      overtimeSeconds,
+      deadlineSeconds
+    };
+  });
+
+  return { updated: true, task: result };
+});
+
 async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
   const sourceTask = afterTask || beforeTask;
   if (!sourceTask || sourceTask.isHotel !== true) return;
@@ -1251,14 +1517,9 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
   if (!dateKey) return;
 
   const afterSeconds = hotelTaskActualSeconds(afterTask || {});
-  const newlyCompleted = Boolean(
-    beforeTask
-    && afterTask?.isHotel === true
-    && afterTask.status === "completed"
-    && beforeTask?.status !== "completed"
-  );
+  const isCompleted = afterTask?.isHotel === true && afterTask.status === "completed";
   const deadlineSeconds = Math.max(0, Math.round(Number(afterTask?.deadlineMinutes || 0) * 60));
-  const overtimeSeconds = newlyCompleted ? Math.max(0, afterSeconds - deadlineSeconds) : 0;
+  const overtimeSeconds = isCompleted ? Math.max(0, afterSeconds - deadlineSeconds) : 0;
   const budgetRef = db.doc(`hotelDailyBudgets/${dateKey}`);
   const contributionRef = db.doc(`hotelBudgetContributions/${taskId}`);
   const sourceTaskRef = db.doc(`tasks/${taskId}`);
@@ -1270,9 +1531,8 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
   await db.runTransaction(async (transaction) => {
     const budgetSnapshot = await transaction.get(budgetRef);
     const contributionSnapshot = await transaction.get(contributionRef);
-    const autoTaskSnapshot = overtimeSeconds > 0
-      ? await transaction.get(autoTaskRef)
-      : null;
+    const autoTaskSnapshot = await transaction.get(autoTaskRef);
+    const autoWorkOrderSnapshot = await transaction.get(autoWorkOrderRef);
     const recordedContributionSeconds = contributionSnapshot.exists
       && contributionSnapshot.data()?.date === dateKey
         ? Math.max(0, Math.round(Number(contributionSnapshot.data()?.seconds || 0)))
@@ -1319,7 +1579,7 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
       transaction.delete(contributionRef);
     }
 
-    if (newlyCompleted && afterTask && (
+    if (isCompleted && afterTask && (
       Number(afterTask.hotelActualSeconds || 0) !== afterSeconds
       || Number(afterTask.hotelOvertimeSeconds || 0) !== overtimeSeconds
     )) {
@@ -1330,12 +1590,25 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
       }, { merge: true });
     }
 
-    if (overtimeSeconds <= 0 || autoTaskSnapshot?.exists || !afterTask?.assignedToUid) return;
+    const employeeUid = String(sourceTask.assignedToUid || "");
+    const assignedByUid = String(sourceTask.assignedByUid || "system");
+    const employeeNotificationId = employeeUid
+      ? `hotelOvertimeLunch_${taskId}_${crypto.createHash("sha256").update(employeeUid).digest("hex").slice(0, 18)}`
+      : "";
+    const adminNotificationId = assignedByUid && assignedByUid !== "system"
+      ? `hotelOvertimeLunchAdmin_${taskId}_${crypto.createHash("sha256").update(assignedByUid).digest("hex").slice(0, 18)}`
+      : "";
+
+    if (overtimeSeconds <= 0 || !afterTask?.assignedToUid) {
+      if (autoTaskSnapshot.exists) transaction.delete(autoTaskRef);
+      if (autoWorkOrderSnapshot.exists) transaction.delete(autoWorkOrderRef);
+      if (employeeNotificationId) transaction.delete(db.doc(`notifications/${employeeNotificationId}`));
+      if (adminNotificationId) transaction.delete(db.doc(`notifications/${adminNotificationId}`));
+      return;
+    }
 
     const now = Timestamp.now();
-    const employeeUid = String(afterTask.assignedToUid);
     const employeeName = String(afterTask.assignedToName || "Nhân viên");
-    const assignedByUid = String(afterTask.assignedByUid || "system");
     const overtimeMinutes = overtimeSeconds / 60;
     const workOrderName = `Nghỉ trưa bù do làm Hotel quá giờ - ${employeeName}`.slice(0, 180);
     const description = `Tự động tạo và hoàn thành do Phiếu Hotel “${String(afterTask.title || "Làm hotel")}” làm quá ${formatHotelSeconds(overtimeSeconds)} so với thời gian quy định.`;
@@ -1345,7 +1618,7 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
       name: workOrderName,
       createdByUid: assignedByUid,
       createdByName: "Hệ thống Hotel",
-      createdAt: now,
+      createdAt: autoWorkOrderSnapshot.data()?.createdAt || now,
       updatedAt: now,
       taskCount: 1,
       status: "dispatched",
@@ -1366,7 +1639,7 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
       workOrderName,
       workOrderTaskCount: 1,
       rowIndex: 0,
-      createdAt: now,
+      createdAt: autoTaskSnapshot.data()?.createdAt || now,
       deadlineMinutes: overtimeMinutes,
       isLunchBreak: true,
       isHotel: false,
@@ -1399,7 +1672,6 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
       lastPhotoUploadedAt: null
     }, { merge: false });
 
-    const employeeNotificationId = `hotelOvertimeLunch_${taskId}_${crypto.createHash("sha256").update(employeeUid).digest("hex").slice(0, 18)}`;
     transaction.set(db.doc(`notifications/${employeeNotificationId}`), {
       id: employeeNotificationId,
       recipientUid: employeeUid,
@@ -1415,7 +1687,6 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
     }, { merge: false });
 
     if (assignedByUid && assignedByUid !== "system") {
-      const adminNotificationId = `hotelOvertimeLunchAdmin_${taskId}_${crypto.createHash("sha256").update(assignedByUid).digest("hex").slice(0, 18)}`;
       transaction.set(db.doc(`notifications/${adminNotificationId}`), {
         id: adminNotificationId,
         recipientUid: assignedByUid,

@@ -11361,7 +11361,18 @@
             </span>
             <input id="allowEditCompletedTaskActualTime" type="checkbox" />
           </label>
-          <p class="work-order-setting-help">Áp dụng cho công việc hoàn thành thông thường và Ship (CV khác). Nghỉ trưa và Hotel tiếp tục dùng logic kết quả riêng hiện có.</p>
+          <p class="work-order-setting-help">Áp dụng cho công việc hoàn thành thông thường và Ship (CV khác). Hotel được điều khiển bằng lựa chọn riêng ngay bên dưới; Nghỉ trưa tiếp tục dùng logic riêng.</p>
+        </section>
+
+        <section class="work-order-setting-section is-time-setting">
+          <label class="work-order-setting-toggle-row" for="allowAdminHotelTimeEditing">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Admin có quyền chỉnh/thêm giờ cho phiếu Hotel</strong>
+              <span>Khi bật, Admin được cộng thêm thời gian quy định cho Phiếu Hotel đang làm và sửa thời gian thực tế của Phiếu Hotel đã hoàn thành.</span>
+            </span>
+            <input id="allowAdminHotelTimeEditing" type="checkbox" />
+          </label>
+          <p class="work-order-setting-help">Thời gian được thêm sẽ cộng vào hạn mức Hotel của đúng ngày. Khi sửa thời gian thực tế, hệ thống tự cập nhật thời gian còn lại và Phiếu nghỉ trưa do làm Hotel quá giờ.</p>
         </section>
 
         <section class="work-order-setting-section is-photo-setting">
@@ -11484,10 +11495,17 @@
               <span>phút</span>
             </div>
           </label>
+          <label id="actualTimeEditSecondsField" class="hidden">
+            Số giây thực tế
+            <div class="actual-time-edit-input-shell">
+              <input id="actualTimeEditSeconds" type="number" min="0" max="59" step="1" inputmode="numeric" value="0" />
+              <span>giây</span>
+            </div>
+          </label>
         </div>
 
         <p id="actualTimeEditPreview" class="actual-time-edit-preview" aria-live="polite">Kết quả mới dự kiến</p>
-        <p class="small-note">Chỉ thay đổi thời gian thực tế và kết quả đánh giá. Thời điểm “Báo hoàn thành” và “Admin duyệt” vẫn được giữ nguyên để không làm sai lịch sử.</p>
+        <p class="small-note">Thời điểm “Báo hoàn thành” và “Admin duyệt” vẫn được giữ nguyên. Riêng Hotel, hệ thống đồng thời tính lại thời gian còn lại trong ngày và Phiếu nghỉ trưa bù nếu có.</p>
 
         <div class="modal-footer-actions">
           <button class="btn ghost" type="button" data-close-actual-time-edit>Hủy</button>
@@ -11562,7 +11580,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260920-hotel-delete-cleanup-v69"></script>
+  <script type="module" src="app.js?v=20260920-hotel-admin-time-v70"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
