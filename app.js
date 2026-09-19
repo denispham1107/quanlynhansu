@@ -1910,6 +1910,36 @@ function isHotelTask(task) {
   return Boolean(task?.isHotel);
 }
 
+const HOTEL_EXCLUSIVE_ACTIVE_STATUSES = new Set(["doing", "hotel", "redo", "overdue"]);
+
+function isActivelyAssignedHotelTask(task) {
+  return isHotelTask(task)
+    && Boolean(String(task?.assignedToUid || "").trim())
+    && HOTEL_EXCLUSIVE_ACTIVE_STATUSES.has(String(task?.status || ""));
+}
+
+function getHotelAssignmentBlockedMessage(task) {
+  const taskTitle = String(task?.title || "Phiếu Hotel").trim() || "Phiếu Hotel";
+  const employeeName = String(task?.assignedToName || "nhân viên đang thực hiện").trim();
+  return `Phiếu Hotel “${taskTitle}” đang được giao cho ${employeeName}. Hãy đợi nhân viên này bấm Hoàn thành rồi mới giao Phiếu Hotel tiếp theo.`;
+}
+
+async function assertNoOtherActiveHotelTask(ignoredTaskIds = []) {
+  const ignoredIds = new Set(
+    (Array.isArray(ignoredTaskIds) ? ignoredTaskIds : [ignoredTaskIds])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  const snapshot = await getDocs(query(collection(db, "tasks"), where("isHotel", "==", true)));
+  const blocker = snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .find((task) => !ignoredIds.has(task.id) && isActivelyAssignedHotelTask(task));
+
+  if (blocker) {
+    throw new Error(getHotelAssignmentBlockedMessage(blocker));
+  }
+}
+
 function isShipTask(task) {
   return Boolean(task?.isShip);
 }
@@ -9198,6 +9228,16 @@ async function persistWorkOrder(dispatch, button) {
       throw new Error(photoValidationError);
     }
 
+    if (dispatch) {
+      const assignedHotelRows = rows.filter((row) => row.isHotel && row.assignedToUid);
+      if (assignedHotelRows.length > 1) {
+        throw new Error("Chỉ được giao 1 Phiếu Hotel tại một thời điểm. Hãy để các Phiếu Hotel còn lại ở trạng thái Chờ chọn người.");
+      }
+      if (assignedHotelRows.length === 1) {
+        await assertNoOtherActiveHotelTask();
+      }
+    }
+
     const now = new Date();
 
     if (dispatch) {
@@ -9508,9 +9548,19 @@ async function dispatchWorkOrder(workOrderId, button) {
     return;
   }
 
+  const assignedHotelTasks = tasksInGroup.filter((task) => isHotelTask(task) && task.assignedToUid);
+  if (assignedHotelTasks.length > 1) {
+    toast("Chỉ được giao 1 Phiếu Hotel tại một thời điểm. Hãy để các Phiếu Hotel còn lại ở trạng thái Chờ chọn người.", "error");
+    return;
+  }
+
   setButtonLoading(button, true, "Đang giao việc...");
 
   try {
+    if (assignedHotelTasks.length === 1) {
+      await assertNoOtherActiveHotelTask(tasksInGroup.map((task) => task.id));
+    }
+
     const now = new Date();
     const employeesReceivingNewWork = tasksInGroup
       .filter((task) => task.assignedToUid && !isLunchBreakTask(task))
@@ -16923,6 +16973,10 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
 
       const lunchAssignmentError = validateLunchBreakAssignment(task, newEmployee.uid);
       if (lunchAssignmentError) throw new Error(lunchAssignmentError);
+
+      if (isHotelTask(task)) {
+        await assertNoOtherActiveHotelTask([task.id]);
+      }
     }
 
     setButtonLoading(els.confirmReassignEmployeeBtn, true, releaseToWaiting ? "Đang tạm dừng..." : "Đang đổi...");
@@ -17791,6 +17845,10 @@ async function requestRedo(taskId, button) {
       requestedByName,
       previousStatus: task?.status || "submitted"
     };
+
+    if (isHotelTask(task)) {
+      await assertNoOtherActiveHotelTask([taskId]);
+    }
 
     await updateDoc(doc(db, "tasks", taskId), {
       status: "redo",

@@ -35,6 +35,7 @@ const WORK_SUPERVISION_LUNCH_TOTAL_MINUTES = 30;
 const WORK_SUPERVISION_TIME_ZONE = "Asia/Ho_Chi_Minh";
 const WORK_SUPERVISION_ACTIVE_TASK_STATUSES = ["doing", "lunch_break", "hotel", "redo", "overdue"];
 const HOTEL_SECONDS_PER_PET = 4 * 60 + 30;
+const HOTEL_EXCLUSIVE_ACTIVE_STATUSES = new Set(["doing", "hotel", "redo", "overdue"]);
 
 function pushTokenDocumentId(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -1930,6 +1931,102 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
   }
 }
 
+function isActivelyAssignedHotelTask(task = {}) {
+  return task.isHotel === true
+    && Boolean(String(task.assignedToUid || "").trim())
+    && HOTEL_EXCLUSIVE_ACTIVE_STATUSES.has(String(task.status || ""));
+}
+
+function hotelAssignmentStartMillis(task = {}) {
+  return firestoreTimestampOrNull(task.dispatchedAt)?.toMillis()
+    || firestoreTimestampOrNull(task.queueStartAt)?.toMillis()
+    || firestoreTimestampOrNull(task.createdAt)?.toMillis()
+    || Number.MAX_SAFE_INTEGER;
+}
+
+async function enforceSingleActiveHotelTask(changedTaskId, afterTask) {
+  if (!isActivelyAssignedHotelTask(afterTask || {})) return;
+
+  const snapshot = await db.collection("tasks").where("isHotel", "==", true).get();
+  const activeHotelTasks = snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .filter(isActivelyAssignedHotelTask)
+    .sort((left, right) => (
+      hotelAssignmentStartMillis(left) - hotelAssignmentStartMillis(right)
+      || String(left.id).localeCompare(String(right.id))
+    ));
+
+  if (activeHotelTasks.length <= 1) return;
+
+  const winner = activeHotelTasks[0];
+  const losers = activeHotelTasks.slice(1);
+  const batch = db.batch();
+  const now = FieldValue.serverTimestamp();
+
+  losers.forEach((task) => {
+    const taskRef = db.doc(`tasks/${task.id}`);
+    const employeeUid = String(task.assignedToUid || "");
+    const employeeName = String(task.assignedToName || "nhân viên");
+    const assignedByUid = String(task.assignedByUid || "");
+    const remainingMs = Math.max(0, Math.round(Number(task.deadlineMinutes || 0) * 60 * 1000));
+    const winnerEmployeeName = String(winner.assignedToName || "nhân viên khác");
+
+    batch.update(taskRef, {
+      assignedToUid: "",
+      assignedToName: "",
+      status: "waiting_assignee",
+      dispatchedAt: null,
+      queueStartAt: null,
+      deadlineAt: null,
+      pauseStartedAt: now,
+      remainingMsAtPause: remainingMs,
+      hotelParallelAssignmentBlockedAt: now,
+      hotelParallelAssignmentBlockedByTaskId: winner.id
+    });
+
+    if (employeeUid) {
+      const employeeNotificationId = `hotelParallelBlockedEmployee_${task.id}`;
+      batch.set(db.doc(`notifications/${employeeNotificationId}`), {
+        id: employeeNotificationId,
+        recipientUid: employeeUid,
+        type: "hotel_parallel_assignment_blocked",
+        title: "Phiếu Hotel đang chờ đến lượt",
+        message: `Phiếu Hotel “${String(task.title || "Làm Hotel")}" đã được chuyển về Chờ chọn người vì ${winnerEmployeeName} đang thực hiện một Phiếu Hotel khác.`,
+        taskId: task.id,
+        taskTitle: String(task.title || "Làm Hotel"),
+        actorUid: "system",
+        actorName: "Hệ thống Hotel",
+        createdAt: now,
+        readAt: null
+      }, { merge: false });
+    }
+
+    if (assignedByUid) {
+      const adminNotificationId = `hotelParallelBlockedAdmin_${task.id}`;
+      batch.set(db.doc(`notifications/${adminNotificationId}`), {
+        id: adminNotificationId,
+        recipientUid: assignedByUid,
+        type: "hotel_parallel_assignment_blocked_admin",
+        title: "Đã chặn giao song song Phiếu Hotel",
+        message: `Không thể giao “${String(task.title || "Làm Hotel")}" cho ${employeeName} vì ${winnerEmployeeName} đang thực hiện Phiếu Hotel “${String(winner.title || "Làm Hotel")}". Phiếu mới đã trở về Chờ chọn người.`,
+        taskId: task.id,
+        taskTitle: String(task.title || "Làm Hotel"),
+        actorUid: "system",
+        actorName: "Hệ thống Hotel",
+        createdAt: now,
+        readAt: null
+      }, { merge: false });
+    }
+  });
+
+  await batch.commit();
+  console.warn("Blocked parallel Hotel assignments", {
+    changedTaskId,
+    winnerTaskId: winner.id,
+    blockedTaskIds: losers.map((task) => task.id)
+  });
+}
+
 exports.syncHotelBudgetAndOvertimeLunch = onDocumentWritten({
   document: "tasks/{taskId}",
   region: REGION,
@@ -1942,6 +2039,7 @@ exports.syncHotelBudgetAndOvertimeLunch = onDocumentWritten({
   const beforeTask = beforeSnapshot?.exists ? beforeSnapshot.data() : null;
   const afterTask = afterSnapshot?.exists ? afterSnapshot.data() : null;
 
+  await enforceSingleActiveHotelTask(event.params.taskId, afterTask);
   await syncHotelBudgetAndOvertimeLunch(
     event.params.taskId,
     beforeTask,
