@@ -123,6 +123,10 @@ const convertInvalidTaskHistoryToLunchBreakCallable = httpsCallable(
   functions,
   "convertInvalidTaskHistoryToLunchBreak"
 );
+const cleanupOrphanHotelDailyBudgetCallable = httpsCallable(
+  functions,
+  "cleanupOrphanHotelDailyBudget"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -162,6 +166,7 @@ const state = {
   workTemplates: [],
   hotelDailyReports: [],
   hotelDailyBudgets: [],
+  hotelBudgetCleanupPendingDates: new Set(),
   notifications: [],
   knownNotificationIds: new Set(),
   notificationsReady: false,
@@ -5289,6 +5294,7 @@ onAuthStateChanged(auth, async (user) => {
   state.workTemplates = [];
   state.hotelDailyReports = [];
   state.hotelDailyBudgets = [];
+  state.hotelBudgetCleanupPendingDates = new Set();
   state.notifications = [];
   state.knownNotificationIds = new Set();
   state.notificationsReady = false;
@@ -5717,6 +5723,8 @@ function setupAdminDashboard() {
         scheduleAdminAutoScrollToSubmittedTask(newlySubmittedTasks);
       }
 
+      cleanupKnownOrphanHotelDailyBudgets();
+
       // Chỉ tài khoản Admin tự đồng bộ trạng thái quá hạn vào database.
       // Giám sát vẫn nhìn thấy trạng thái tính toán realtime nhưng không tự ghi dữ liệu nếu không phải Admin.
       if (isAdminProfile()) await syncOverdueTasksByAdmin();
@@ -5824,6 +5832,7 @@ function setupAdminDashboard() {
       state.hotelDailyBudgets = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       syncAllHotelTaskRows();
       renderAdminTasks();
+      cleanupKnownOrphanHotelDailyBudgets();
     },
     (error) => {
       console.error(error);
@@ -7786,6 +7795,45 @@ function getHotelDailyBudget(dateKey) {
     consumedSeconds,
     remainingSeconds: Math.max(0, totalAllowedSeconds - consumedSeconds)
   };
+}
+
+async function requestOrphanHotelDailyBudgetCleanup(dateKeyInput) {
+  const dateKey = String(dateKeyInput || "").trim();
+  if (!isAdminProfile() || !state.adminTaskSnapshotReady || !getHotelDailyBudget(dateKey)) return;
+  if (state.hotelBudgetCleanupPendingDates.has(dateKey)) return;
+
+  const hasHotelTask = state.tasks.some((task) => (
+    isHotelTask(task) && getTaskDateValue(task) === dateKey
+  ));
+  if (hasHotelTask) return;
+
+  state.hotelBudgetCleanupPendingDates.add(dateKey);
+  try {
+    const response = await cleanupOrphanHotelDailyBudgetCallable({ dateKey });
+    if (response.data?.deleted) {
+      state.hotelDailyBudgets = state.hotelDailyBudgets.filter((budget) => (
+        budget.id !== dateKey && budget.date !== dateKey
+      ));
+      state.hotelDailyReports = state.hotelDailyReports.filter((report) => (
+        report.id !== dateKey && report.date !== dateKey
+      ));
+      syncAllHotelTaskRows();
+      renderAdminTasks();
+    }
+  } catch (error) {
+    console.warn(`Không tự dọn được dữ liệu Hotel ngày ${dateKey}:`, error);
+  } finally {
+    state.hotelBudgetCleanupPendingDates.delete(dateKey);
+  }
+}
+
+function cleanupKnownOrphanHotelDailyBudgets() {
+  if (!isAdminProfile() || !state.adminTaskSnapshotReady) return;
+
+  state.hotelDailyBudgets.forEach((budget) => {
+    const dateKey = String(budget.date || budget.id || "").trim();
+    if (dateKey) void requestOrphanHotelDailyBudgetCleanup(dateKey);
+  });
 }
 
 function formatHotelDuration(totalMinutes = 0) {

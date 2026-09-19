@@ -1187,6 +1187,62 @@ function formatHotelSeconds(totalSecondsInput) {
   return parts.join(" ") || "0 phút";
 }
 
+async function cleanupHotelDailyDataIfNoTasks(dateKeyInput) {
+  const dateKey = String(dateKeyInput || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    return { deleted: false, reason: "invalid_date" };
+  }
+
+  const sameDayTasksSnapshot = await db.collection("tasks")
+    .where("taskDate", "==", dateKey)
+    .get();
+  const hasHotelTask = sameDayTasksSnapshot.docs.some((snapshot) => (
+    snapshot.data()?.isHotel === true
+  ));
+
+  if (hasHotelTask) {
+    return { deleted: false, reason: "hotel_tasks_remain" };
+  }
+
+  const contributionSnapshot = await db.collection("hotelBudgetContributions")
+    .where("date", "==", dateKey)
+    .get();
+  const refsToDelete = [
+    db.doc(`hotelDailyBudgets/${dateKey}`),
+    db.doc(`hotelDailyReports/${dateKey}`),
+    ...contributionSnapshot.docs.map((snapshot) => snapshot.ref)
+  ];
+
+  for (let start = 0; start < refsToDelete.length; start += 400) {
+    const batch = db.batch();
+    refsToDelete.slice(start, start + 400).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+
+  return {
+    deleted: true,
+    dateKey,
+    deletedContributionCount: contributionSnapshot.size
+  };
+}
+
+exports.cleanupOrphanHotelDailyBudget = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 10
+}, async (request) => {
+  const uid = assertAuthenticated(request);
+  await assertAdmin(uid);
+
+  const dateKey = String(request.data?.dateKey || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new HttpsError("invalid-argument", "Ngày Hotel không hợp lệ.");
+  }
+
+  return cleanupHotelDailyDataIfNoTasks(dateKey);
+});
+
 async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
   const sourceTask = afterTask || beforeTask;
   if (!sourceTask || sourceTask.isHotel !== true) return;
@@ -1375,6 +1431,10 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
       }, { merge: false });
     }
   });
+
+  if (beforeTask?.isHotel === true && !afterTask) {
+    await cleanupHotelDailyDataIfNoTasks(dateKey);
+  }
 }
 
 exports.syncHotelBudgetAndOvertimeLunch = onDocumentWritten({

@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260920-hotel-daily-budget-v68";
+const CACHE_NAME = "culao-task-shell-v20260920-hotel-delete-cleanup-v69";
 const APP_SHELL = [
   "./",
   "./index.html",

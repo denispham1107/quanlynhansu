@@ -6,4 +6,6 @@
 - Số giờ, số phút và chức năng `Thêm giờ` của Phiếu Hotel đều bị khóa.
 - Mỗi thẻ Hotel hiển thị số lượng bé và thời gian Hotel còn lại trong ngày.
 - Khi một Phiếu Hotel hoàn thành quá thời gian được cấp, Cloud Function tự tạo một Phiếu nghỉ trưa đã hoàn thành cho đúng nhân viên, với thời lượng chính xác bằng phần Hotel làm quá.
+- Khi Phiếu Hotel cuối cùng của một ngày bị xóa, hệ thống tự xóa số lượng bé, hạn mức thời gian, báo cáo Hotel và dữ liệu cộng dồn của đúng ngày đó để Admin có thể nhập lại từ đầu.
+- Khi Admin mở ứng dụng, hệ thống cũng tự phát hiện và dọn các hạn mức Hotel mồ côi còn sót lại từ phiên bản cũ.
 - Hạn mức ngày được lưu tại `hotelDailyBudgets/{YYYY-MM-DD}` và thời gian được tính theo giây để hỗ trợ chính xác mốc 30 giây.
