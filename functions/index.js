@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const { initializeApp } = require("firebase-admin/app");
+const { getAuth: getAdminAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getStorage: getAdminStorage } = require("firebase-admin/storage");
@@ -63,6 +64,21 @@ async function assertAdmin(uid) {
     throw new HttpsError("permission-denied", "Chỉ Admin được truy cập Cài đặt.");
   }
   return userSnap.data();
+}
+
+async function assertCanManageEmployeeAccounts(uid) {
+  const userSnap = await db.doc(`users/${uid}`).get();
+  const profile = userSnap.exists ? userSnap.data() : null;
+  const allowed = profile?.role === "admin"
+    || (
+      profile?.role === "supervisor"
+      && profile?.permissions
+      && profile.permissions.manageEmployeeAccounts === true
+    );
+  if (!allowed) {
+    throw new HttpsError("permission-denied", "Tài khoản chưa được cấp quyền quản lý nhân viên.");
+  }
+  return profile;
 }
 
 function safeStringEqual(left, right) {
@@ -397,6 +413,63 @@ exports.saveWorkOrderControlSettings = onCall({
       workSupervisionExcludedEmployeeName
     }
   };
+});
+
+exports.updateEmployeeProfile = onCall({
+  region: REGION,
+  timeoutSeconds: 30,
+  memory: "256MiB"
+}, async (request) => {
+  const requesterUid = assertAuthenticated(request);
+  const managerProfile = await assertCanManageEmployeeAccounts(requesterUid);
+  const employeeUid = String(request.data?.employeeUid || "").trim();
+  const name = String(request.data?.name || "").trim();
+  const employeeGroupId = String(request.data?.employeeGroupId || "").trim();
+
+  if (!employeeUid || employeeUid.length > 160 || employeeUid.includes("/")) {
+    throw new HttpsError("invalid-argument", "Mã nhân viên không hợp lệ.");
+  }
+  if (!name || name.length > 80) {
+    throw new HttpsError("invalid-argument", "Tên nhân viên phải có từ 1 đến 80 ký tự.");
+  }
+  if (employeeGroupId && (employeeGroupId.length > 160 || employeeGroupId.includes("/"))) {
+    throw new HttpsError("invalid-argument", "Nhóm nhân viên không hợp lệ.");
+  }
+
+  const employeeRef = db.doc(`users/${employeeUid}`);
+  const [employeeSnapshot, groupSnapshot] = await Promise.all([
+    employeeRef.get(),
+    employeeGroupId ? db.doc(`employeeGroups/${employeeGroupId}`).get() : Promise.resolve(null)
+  ]);
+  const employee = employeeSnapshot.exists ? employeeSnapshot.data() : null;
+  if (!employee || employee.role !== "employee") {
+    throw new HttpsError("not-found", "Không tìm thấy tài khoản Nhân viên cần cập nhật.");
+  }
+  if (employeeGroupId && !groupSnapshot?.exists) {
+    throw new HttpsError("failed-precondition", "Nhóm nhân viên đã chọn không còn tồn tại.");
+  }
+
+  const employeeGroupName = employeeGroupId
+    ? String(groupSnapshot.data()?.name || "").trim().slice(0, 80)
+    : "";
+
+  try {
+    await getAdminAuth().updateUser(employeeUid, { displayName: name });
+  } catch (error) {
+    console.error("Could not update employee Authentication profile", error);
+    throw new HttpsError("internal", "Không cập nhật được tên đăng nhập của nhân viên.");
+  }
+
+  await employeeRef.update({
+    name,
+    employeeGroupId,
+    employeeGroupName,
+    profileUpdatedAt: FieldValue.serverTimestamp(),
+    profileUpdatedByUid: requesterUid,
+    profileUpdatedByName: String(managerProfile?.name || request.auth.token?.email || "Admin").slice(0, 120)
+  });
+
+  return { updated: true, employeeUid, name, employeeGroupId, employeeGroupName };
 });
 
 

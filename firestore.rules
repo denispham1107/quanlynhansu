@@ -10,6 +10,22 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(uid);
     }
 
+    function employeeGroupDoc(groupId) {
+      return /databases/$(database)/documents/employeeGroups/$(groupId);
+    }
+
+    function hasValidEmployeeGroup(data) {
+      return data.employeeGroupId is string
+        && data.employeeGroupName is string
+        && (
+          (data.employeeGroupId == "" && data.employeeGroupName == "")
+          || (
+            exists(employeeGroupDoc(data.employeeGroupId))
+            && get(employeeGroupDoc(data.employeeGroupId)).data.name == data.employeeGroupName
+          )
+        );
+    }
+
     function isAdmin() {
       return signedIn()
         && exists(userDoc(request.auth.uid))
@@ -172,12 +188,16 @@ service cloud.firestore {
       // Admin tạo hồ sơ user sau khi tạo tài khoản bằng Firebase Auth.
       // Admin đầu tiên nên tạo thủ công theo hướng dẫn, trước khi bật rules chặt này.
       allow create: if isAdmin()
-        && request.resource.data.keys().hasOnly(["uid", "name", "email", "role", "createdByUid", "createdAt"])
+        && request.resource.data.keys().hasOnly(["uid", "name", "email", "role", "employeeGroupId", "employeeGroupName", "createdByUid", "createdAt"])
         && request.resource.data.uid == userId
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.email is string
         && isValidRole(request.resource.data.role)
+        && (
+          request.resource.data.role != "employee"
+          || hasValidEmployeeGroup(request.resource.data)
+        )
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.createdAt == request.time;
 
@@ -191,12 +211,13 @@ service cloud.firestore {
       // Không được tạo Admin/Giám sát và không được tự thêm field phân quyền.
       allow create: if hasPermission("manageEmployeeAccounts")
         && !isAdmin()
-        && request.resource.data.keys().hasOnly(["uid", "name", "email", "role", "createdByUid", "createdAt"])
+        && request.resource.data.keys().hasOnly(["uid", "name", "email", "role", "employeeGroupId", "employeeGroupName", "createdByUid", "createdAt"])
         && request.resource.data.uid == userId
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.email is string
         && request.resource.data.role == "employee"
+        && hasValidEmployeeGroup(request.resource.data)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.createdAt == request.time;
 
@@ -207,6 +228,27 @@ service cloud.firestore {
           isAdmin()
           || (hasPermission("manageEmployeeAccounts") && resource.data.role == "employee")
         );
+    }
+
+    match /employeeGroups/{groupId} {
+      allow read: if isManagement();
+
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          "id", "name", "searchText", "createdByUid", "createdByName", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.id == groupId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.searchText is string
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdByName is string
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow create, update: if hasPermission("importData");
+      allow delete: if isAdmin();
     }
 
     match /appSettings/{settingId} {

@@ -10770,6 +10770,16 @@
               </select>
             </label>
 
+            <div id="employeeGroupField" class="employee-group-create-field">
+              <label for="employeeGroupSelect">Nhóm nhân viên</label>
+              <div class="employee-group-select-row">
+                <select id="employeeGroupSelect" aria-label="Chọn nhóm nhân viên">
+                  <option value="">Chưa phân nhóm</option>
+                </select>
+                <button id="openEmployeeGroupManagerBtn" class="btn ghost small" type="button">+ Tạo nhóm</button>
+              </div>
+            </div>
+
             <section id="createSupervisorPermissions" class="supervisor-permission-editor hidden" aria-label="Phân quyền cho giám sát">
               <div class="supervisor-permission-editor-head">
                 <div>
@@ -10812,6 +10822,52 @@
         </section>
       </div>
     </main>
+
+    <!-- ADMIN: QUẢN LÝ NHÓM NHÂN VIÊN -->
+    <div id="employeeGroupManagerModal" class="staff-editor-modal hidden" aria-hidden="true">
+      <div class="staff-editor-backdrop" data-action="close-employee-group-manager"></div>
+      <section class="staff-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeGroupManagerTitle">
+        <button class="staff-editor-close" type="button" data-action="close-employee-group-manager" aria-label="Đóng">×</button>
+        <p class="eyebrow">NHÓM NHÂN VIÊN</p>
+        <h3 id="employeeGroupManagerTitle">Quản lý nhóm nhân viên</h3>
+        <p class="muted">Tạo các nhóm để sắp xếp tài khoản Nhân viên theo công việc hoặc khu vực.</p>
+        <form id="employeeGroupForm" class="employee-group-form">
+          <label for="newEmployeeGroupName">Tên nhóm mới</label>
+          <div class="employee-group-form-row">
+            <input id="newEmployeeGroupName" type="text" maxlength="80" placeholder="Ví dụ: Nhóm Hotel" required />
+            <button id="createEmployeeGroupBtn" class="btn primary" type="submit">Tạo nhóm</button>
+          </div>
+        </form>
+        <div id="employeeGroupList" class="employee-group-list" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <!-- ADMIN: SỬA TÊN / NHÓM NHÂN VIÊN -->
+    <div id="employeeProfileEditorModal" class="staff-editor-modal hidden" aria-hidden="true">
+      <div class="staff-editor-backdrop" data-action="close-employee-profile-editor"></div>
+      <section class="staff-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeProfileEditorTitle">
+        <button class="staff-editor-close" type="button" data-action="close-employee-profile-editor" aria-label="Đóng">×</button>
+        <p class="eyebrow">CHỈNH SỬA NHÂN VIÊN</p>
+        <h3 id="employeeProfileEditorTitle">Cập nhật tài khoản</h3>
+        <p id="employeeProfileEditorEmail" class="muted"></p>
+        <form id="employeeProfileEditorForm" class="staff-editor-form">
+          <label>
+            Tên nhân viên
+            <input id="employeeProfileName" type="text" maxlength="80" required />
+          </label>
+          <label>
+            Nhóm nhân viên
+            <select id="employeeProfileGroupSelect">
+              <option value="">Chưa phân nhóm</option>
+            </select>
+          </label>
+          <div class="staff-editor-actions">
+            <button class="btn ghost" type="button" data-action="close-employee-profile-editor">Hủy</button>
+            <button id="saveEmployeeProfileBtn" class="btn primary" type="submit">Lưu cập nhật</button>
+          </div>
+        </form>
+      </section>
+    </div>
 
     <!-- ADMIN: LỊCH SỬ THAY ĐỔI TRẠNG THÁI NHÂN VIÊN -->
     <div id="employeeStatusHistoryModal" class="employee-status-history-modal hidden" aria-hidden="true">
@@ -11616,7 +11672,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260920-hotel-exclusive-v72"></script>
+  <script type="module" src="app.js?v=20260920-employee-groups-v73"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -11868,6 +11924,9 @@
     #createEmployeeForm .supervisor-permission-editor,
     #createEmployeeForm #createEmployeeBtn { grid-column: 1 / -1; }
     #createEmployeeForm #createEmployeeBtn { min-height: 44px; }
+    .employee-group-create-field { display:grid; gap:5px; min-width:0; font-size:.86rem; font-weight:800; color:#17233b; }
+    .employee-group-select-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; min-width:0; }
+    .employee-group-select-row .btn { min-height:44px; padding:9px 11px; white-space:nowrap; }
 
     .employee-list-panel-header { align-items: flex-start; gap: 12px; }
     .employee-account-stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
@@ -11909,10 +11968,14 @@
     #employeeManagerView .employee-item-info > span { font-size: 0.82rem; color: #52627a; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #employeeManagerView .staff-account-meta { margin: 0; flex-wrap: nowrap; min-width: 0; }
     #employeeManagerView .staff-role-badge { min-height: 22px; padding: 2px 8px; font-size: 0.69rem; }
+    #employeeManagerView .employee-group-badge { display:inline-flex; align-items:center; min-height:22px; max-width:130px; padding:2px 8px; border:1px solid #bfdbfe; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-size:.69rem; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     #employeeManagerView .staff-permission-count { display: none; }
-    #employeeManagerView .staff-account-actions { margin-left: 0; gap: 6px; flex-direction: row; }
+    #employeeManagerView .staff-account-actions { margin-left: 0; gap: 6px; flex-direction: row; flex-wrap:nowrap; min-width:max-content; }
     #employeeManagerView .staff-permission-btn { min-height: 34px; padding: 7px 10px; font-size: 0.78rem; }
     #employeeManagerView .employee-delete-btn { width: 34px; height: 34px; border-width: 2px; border-radius: 10px; font-size: 22px; }
+    .employee-edit-btn { display:grid; place-items:center; width:34px; height:34px; flex:0 0 34px; padding:0; border:2px solid #60a5fa; border-radius:10px; background:#eff6ff; color:#1d4ed8; font-size:17px; line-height:1; cursor:pointer; transition:transform .16s ease,background .16s ease,color .16s ease; }
+    .employee-edit-btn:hover { transform:translateY(-1px); background:#2563eb; color:#fff; }
+    .employee-edit-btn:focus-visible { outline:3px solid rgba(37,99,235,.22); outline-offset:2px; }
     .employee-list-no-results { padding: 24px 12px; text-align: center; color: #64748b; }
 
     @media (max-width: 1100px) {
@@ -11937,7 +12000,7 @@
       #employeeManagerView .employee-item-info { display: contents; }
       #employeeManagerView .employee-item-info strong { grid-area: name; font-size: 0.91rem; }
       #employeeManagerView .employee-item-info > span { grid-area: email; font-size: 0.76rem; }
-      #employeeManagerView .staff-account-meta { grid-area: meta; }
+      #employeeManagerView .staff-account-meta { grid-area: meta; overflow:hidden; }
       #employeeManagerView .staff-account-actions { grid-area: actions; align-self: center; flex-direction: row; }
       #employeeManagerView .staff-permission-btn { width: 34px; min-width: 34px; padding: 0; font-size: 0; }
       #employeeManagerView .staff-permission-btn::before { content: '⚙'; font-size: 16px; }
@@ -11946,6 +12009,34 @@
     @media (max-width: 420px) {
       .employee-list-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
       #employeeManagerView .employee-item { grid-template-columns: 34px minmax(0,1fr) auto; }
+      #employeeManagerView .employee-group-badge { max-width:86px; }
+      #employeeManagerView .staff-account-actions { gap:4px; }
+      #employeeManagerView .employee-edit-btn,
+      #employeeManagerView .employee-delete-btn { width:32px; height:32px; flex-basis:32px; }
+    }
+
+    .staff-editor-modal { position:fixed; inset:0; z-index:12030; display:grid; place-items:center; padding:18px; }
+    .staff-editor-modal.hidden { display:none; }
+    .staff-editor-backdrop { position:absolute; inset:0; background:rgba(15,23,42,.62); backdrop-filter:blur(5px); }
+    .staff-editor-dialog { position:relative; width:min(560px,100%); max-height:calc(100dvh - 36px); overflow:auto; padding:24px; border-radius:24px; background:#fff; box-shadow:0 28px 80px rgba(15,23,42,.28); }
+    .staff-editor-dialog h3 { margin:6px 48px 4px 0; font-size:1.55rem; }
+    .staff-editor-close { position:absolute; top:16px; right:16px; width:44px; height:44px; border:0; border-radius:14px; background:#f1f5f9; font-size:28px; cursor:pointer; }
+    .staff-editor-form,.employee-group-form { display:grid; gap:14px; margin-top:20px; }
+    .staff-editor-form label,.employee-group-form label { display:grid; gap:7px; font-weight:800; color:#17233b; }
+    .staff-editor-form input,.staff-editor-form select,.employee-group-form input { width:100%; min-height:46px; padding:10px 13px; border:1px solid #cfe0f7; border-radius:14px; background:#fff; font:inherit; outline:none; }
+    .staff-editor-form input:focus,.staff-editor-form select:focus,.employee-group-form input:focus { border-color:#60a5fa; box-shadow:0 0 0 3px rgba(96,165,250,.15); }
+    .staff-editor-actions { display:flex; justify-content:flex-end; gap:9px; flex-wrap:wrap; margin-top:4px; }
+    .employee-group-form-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+    .employee-group-list { display:grid; gap:8px; margin-top:18px; }
+    .employee-group-list-item { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 13px; border:1px solid #dbe7f7; border-radius:14px; background:#f8fbff; }
+    .employee-group-list-item strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .employee-group-list-item span { color:#64748b; font-size:.82rem; white-space:nowrap; }
+    .employee-group-list-empty { padding:18px; border:1px dashed #bfdbfe; border-radius:14px; color:#64748b; text-align:center; }
+
+    @media (max-width:560px) {
+      .employee-group-select-row,.employee-group-form-row { grid-template-columns:1fr; }
+      .staff-editor-dialog { padding:20px; border-radius:20px; }
+      .staff-editor-actions .btn { flex:1; }
     }
 
 

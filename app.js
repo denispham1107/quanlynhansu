@@ -132,6 +132,7 @@ const editCompletedHotelActualTimeCallable = httpsCallable(
   functions,
   "editCompletedHotelActualTime"
 );
+const updateEmployeeProfileCallable = httpsCallable(functions, "updateEmployeeProfile");
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -159,6 +160,7 @@ const state = {
   employees: [],
   supervisors: [],
   staffAccounts: [],
+  employeeGroups: [],
   tasks: [],
   workOrders: [],
   workAssignmentHistory: [],
@@ -235,6 +237,7 @@ const state = {
   workPhotoManagerSelectedKeys: new Set(),
   deletingEmployeeUid: null,
   editingSupervisorUid: null,
+  editingEmployeeUid: null,
   mobileTaskDetailOverrides: new Map(),
   desktopTaskDetailOverrides: new Map(),
   desktopTaskViewMode: "compact",
@@ -322,7 +325,7 @@ const SUPERVISOR_PERMISSION_DEFINITIONS = [
   { key: "exportData", label: "Xuất dữ liệu", description: "Tải bản sao lưu JSON của dữ liệu hệ thống." },
   { key: "importData", label: "Nhập dữ liệu", description: "Khôi phục hoặc ghi đè dữ liệu từ file JSON. Đây là quyền có mức ảnh hưởng cao." },
   { key: "deleteAllWorkOrders", label: "Xóa toàn bộ Phiếu", description: "Xóa toàn bộ Phiếu, công việc, ảnh báo cáo và thông báo liên quan. Đây là quyền nguy hiểm." },
-  { key: "manageEmployeeAccounts", label: "Quản lý tài khoản nhân viên", description: "Tạo và xóa tài khoản Nhân viên. Không được tạo Giám sát hoặc tự thay đổi quyền Giám sát." }
+  { key: "manageEmployeeAccounts", label: "Quản lý tài khoản nhân viên", description: "Tạo, sửa tên/nhóm và xóa tài khoản Nhân viên. Không được tạo Giám sát hoặc tự thay đổi quyền Giám sát." }
 ];
 
 const SUPERVISOR_PERMISSION_KEYS = SUPERVISOR_PERMISSION_DEFINITIONS.map((item) => item.key);
@@ -869,6 +872,20 @@ const els = {
   employeeStatusHistoryFilterSummary: $("#employeeStatusHistoryFilterSummary"),
   createStaffAccountPanel: $("#createStaffAccountPanel"),
   staffAccountRole: $("#staffAccountRole"),
+  employeeGroupField: $("#employeeGroupField"),
+  employeeGroupSelect: $("#employeeGroupSelect"),
+  openEmployeeGroupManagerBtn: $("#openEmployeeGroupManagerBtn"),
+  employeeGroupManagerModal: $("#employeeGroupManagerModal"),
+  employeeGroupForm: $("#employeeGroupForm"),
+  newEmployeeGroupName: $("#newEmployeeGroupName"),
+  createEmployeeGroupBtn: $("#createEmployeeGroupBtn"),
+  employeeGroupList: $("#employeeGroupList"),
+  employeeProfileEditorModal: $("#employeeProfileEditorModal"),
+  employeeProfileEditorEmail: $("#employeeProfileEditorEmail"),
+  employeeProfileEditorForm: $("#employeeProfileEditorForm"),
+  employeeProfileName: $("#employeeProfileName"),
+  employeeProfileGroupSelect: $("#employeeProfileGroupSelect"),
+  saveEmployeeProfileBtn: $("#saveEmployeeProfileBtn"),
   createSupervisorPermissions: $("#createSupervisorPermissions"),
   createSupervisorPermissionList: $("#createSupervisorPermissionList"),
   selectAllCreateSupervisorPermissions: $("#selectAllCreateSupervisorPermissions"),
@@ -5324,6 +5341,8 @@ onAuthStateChanged(auth, async (user) => {
   state.employees = [];
   state.supervisors = [];
   state.staffAccounts = [];
+  state.employeeGroups = [];
+  state.editingEmployeeUid = null;
   state.tasks = [];
   state.workOrders = [];
   state.workAssignmentHistory = [];
@@ -5504,6 +5523,8 @@ function updateCreateAccountRoleUI() {
 
   const isSupervisorAccount = canCreateSupervisor && els.staffAccountRole.value === "supervisor";
   els.createSupervisorPermissions?.classList.toggle("hidden", !isSupervisorAccount);
+  els.employeeGroupField?.classList.toggle("hidden", isSupervisorAccount);
+  els.openEmployeeGroupManagerBtn?.classList.toggle("hidden", !isAdminProfile());
 
   const createButton = $("#createEmployeeBtn");
   if (createButton && !createButton.disabled) {
@@ -5726,9 +5747,20 @@ function setupAdminDashboard() {
 
       applyManagementPermissionUI();
       renderEmployeeSelects();
+      renderEmployeeGroupList();
       if (els.employeeStatusHistoryModal && !els.employeeStatusHistoryModal.classList.contains("hidden")) {
         renderEmployeeStatusHistory();
       }
+    },
+    handleSnapshotError
+  );
+
+  const unsubEmployeeGroups = onSnapshot(
+    query(collection(db, "employeeGroups"), orderBy("name", "asc")),
+    (snapshot) => {
+      state.employeeGroups = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      refreshEmployeeGroupControls();
+      renderEmployees();
     },
     handleSnapshotError
   );
@@ -5913,6 +5945,7 @@ function setupAdminDashboard() {
 
   state.unsubs.push(
     unsubUsers,
+    unsubEmployeeGroups,
     unsubTasks,
     unsubWorkOrders,
     unsubWorkAssignmentHistory,
@@ -6358,6 +6391,165 @@ function closeEmployeeStatusHistoryModal() {
   }
 }
 
+function employeeGroupOptionsHtml(selectedGroupId = "") {
+  const selectedId = String(selectedGroupId || "");
+  return [
+    `<option value=""${selectedId ? "" : " selected"}>Chưa phân nhóm</option>`,
+    ...state.employeeGroups.map((group) => (
+      `<option value="${escapeHtml(group.id)}"${group.id === selectedId ? " selected" : ""}>${escapeHtml(group.name || "Nhóm chưa đặt tên")}</option>`
+    ))
+  ].join("");
+}
+
+function refreshEmployeeGroupControls() {
+  const createValue = els.employeeGroupSelect?.value || "";
+  if (els.employeeGroupSelect) {
+    els.employeeGroupSelect.innerHTML = employeeGroupOptionsHtml(createValue);
+    els.employeeGroupSelect.value = state.employeeGroups.some((group) => group.id === createValue) ? createValue : "";
+  }
+
+  const editValue = els.employeeProfileGroupSelect?.value || "";
+  if (els.employeeProfileGroupSelect) {
+    els.employeeProfileGroupSelect.innerHTML = employeeGroupOptionsHtml(editValue);
+    els.employeeProfileGroupSelect.value = state.employeeGroups.some((group) => group.id === editValue) ? editValue : "";
+  }
+
+  renderEmployeeGroupList();
+}
+
+function renderEmployeeGroupList() {
+  if (!els.employeeGroupList) return;
+  if (!state.employeeGroups.length) {
+    els.employeeGroupList.innerHTML = '<div class="employee-group-list-empty">Chưa có nhóm nhân viên. Hãy tạo nhóm đầu tiên ở bên trên.</div>';
+    return;
+  }
+
+  els.employeeGroupList.innerHTML = state.employeeGroups.map((group) => {
+    const memberCount = state.employees.filter((employee) => employee.employeeGroupId === group.id).length;
+    return `
+      <div class="employee-group-list-item">
+        <strong title="${escapeHtml(group.name || "")}">${escapeHtml(group.name || "Nhóm chưa đặt tên")}</strong>
+        <span>${memberCount} nhân viên</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function openEmployeeGroupManagerModal() {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được tạo Nhóm nhân viên.", "error");
+    return;
+  }
+  renderEmployeeGroupList();
+  els.employeeGroupManagerModal?.classList.remove("hidden");
+  els.employeeGroupManagerModal?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  window.setTimeout(() => els.newEmployeeGroupName?.focus(), 0);
+}
+
+function closeEmployeeGroupManagerModal() {
+  els.employeeGroupManagerModal?.classList.add("hidden");
+  els.employeeGroupManagerModal?.setAttribute("aria-hidden", "true");
+  els.employeeGroupForm?.reset();
+  document.body.classList.remove("modal-open");
+}
+
+function openEmployeeProfileEditor(employeeUid) {
+  const canManage = isAdminProfile() || hasPermission("manageEmployeeAccounts");
+  if (!canManage) {
+    toast("Tài khoản của bạn chưa được cấp quyền chỉnh sửa nhân viên.", "error");
+    return;
+  }
+
+  const employee = state.employees.find((item) => item.uid === employeeUid);
+  if (!employee) {
+    toast("Không tìm thấy tài khoản nhân viên.", "error");
+    return;
+  }
+
+  state.editingEmployeeUid = employee.uid;
+  els.employeeProfileName.value = employee.name || "";
+  els.employeeProfileEditorEmail.textContent = employee.email || "";
+  els.employeeProfileGroupSelect.innerHTML = employeeGroupOptionsHtml(employee.employeeGroupId || "");
+  els.employeeProfileGroupSelect.value = employee.employeeGroupId || "";
+  els.employeeProfileEditorModal?.classList.remove("hidden");
+  els.employeeProfileEditorModal?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  window.setTimeout(() => els.employeeProfileName?.focus(), 0);
+}
+
+function closeEmployeeProfileEditor() {
+  state.editingEmployeeUid = null;
+  els.employeeProfileEditorModal?.classList.add("hidden");
+  els.employeeProfileEditorModal?.setAttribute("aria-hidden", "true");
+  els.employeeProfileEditorForm?.reset();
+  document.body.classList.remove("modal-open");
+}
+
+els.openEmployeeGroupManagerBtn?.addEventListener("click", openEmployeeGroupManagerModal);
+els.employeeGroupManagerModal?.addEventListener("click", (event) => {
+  if (event.target.closest('[data-action="close-employee-group-manager"]')) closeEmployeeGroupManagerModal();
+});
+els.employeeProfileEditorModal?.addEventListener("click", (event) => {
+  if (event.target.closest('[data-action="close-employee-profile-editor"]')) closeEmployeeProfileEditor();
+});
+
+els.employeeGroupForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được tạo Nhóm nhân viên.", "error");
+    return;
+  }
+
+  const name = String(els.newEmployeeGroupName?.value || "").trim();
+  if (!name) return;
+  if (state.employeeGroups.some((group) => normalizeSearchText(group.name) === normalizeSearchText(name))) {
+    toast("Tên Nhóm nhân viên này đã tồn tại.", "error");
+    return;
+  }
+
+  try {
+    setButtonLoading(els.createEmployeeGroupBtn, true, "Đang tạo...");
+    const groupRef = doc(collection(db, "employeeGroups"));
+    await setDoc(groupRef, {
+      id: groupRef.id,
+      name,
+      searchText: normalizeSearchText(name),
+      createdByUid: state.user.uid,
+      createdByName: state.profile?.name || state.user?.email || "Admin",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    els.employeeGroupForm.reset();
+    toast(`Đã tạo Nhóm nhân viên “${name}”.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không tạo được Nhóm nhân viên.", "error");
+  } finally {
+    setButtonLoading(els.createEmployeeGroupBtn, false);
+  }
+});
+
+els.employeeProfileEditorForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const employeeUid = state.editingEmployeeUid;
+  const name = String(els.employeeProfileName?.value || "").trim();
+  const employeeGroupId = String(els.employeeProfileGroupSelect?.value || "");
+  if (!employeeUid || !name) return;
+
+  try {
+    setButtonLoading(els.saveEmployeeProfileBtn, true, "Đang lưu...");
+    await updateEmployeeProfileCallable({ employeeUid, name, employeeGroupId });
+    closeEmployeeProfileEditor();
+    toast("Đã cập nhật tên và Nhóm nhân viên.", "success");
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không cập nhật được nhân viên.", "error");
+  } finally {
+    setButtonLoading(els.saveEmployeeProfileBtn, false);
+  }
+});
+
 function renderEmployees() {
   if (!els.employeeList) return;
 
@@ -6383,7 +6575,7 @@ function renderEmployees() {
   const roleFilter = els.employeeRoleFilter?.value || "all";
   const visibleAccounts = allAccounts.filter((account) => {
     const roleMatches = roleFilter === "all" || account.role === roleFilter;
-    const searchHaystack = normalizeSearchText(`${account.name || ""} ${account.email || ""}`);
+    const searchHaystack = normalizeSearchText(`${account.name || ""} ${account.email || ""} ${account.employeeGroupName || ""}`);
     return roleMatches && (!keyword || searchHaystack.includes(keyword));
   });
 
@@ -6402,6 +6594,7 @@ function renderEmployees() {
       const canEditPermissions = isAdminProfile() && isSupervisor;
       const canDeleteAccount = isAdminProfile()
         || (hasPermission("manageEmployeeAccounts") && account.role === "employee");
+      const canEditEmployee = !isSupervisor && (isAdminProfile() || hasPermission("manageEmployeeAccounts"));
       const grantedCount = isSupervisor ? getGrantedSupervisorPermissionCount(account) : 0;
 
       return `
@@ -6413,6 +6606,7 @@ function renderEmployees() {
             <div class="staff-account-meta">
               <span class="staff-role-badge ${isSupervisor ? "is-supervisor" : ""}">${isSupervisor ? "Giám sát" : "Nhân viên"}</span>
               ${!isSupervisor ? `<span class="employment-status-badge ${normalizeEmploymentStatus(account) === EMPLOYMENT_STATUS_OFF ? "is-off" : "is-working"}">${getEmploymentStatusLabel(account)}</span>` : ""}
+              ${!isSupervisor && account.employeeGroupName ? `<span class="employee-group-badge" title="Nhóm: ${escapeHtml(account.employeeGroupName)}">${escapeHtml(account.employeeGroupName)}</span>` : ""}
               ${isSupervisor ? `<span class="staff-permission-count">${grantedCount}/${SUPERVISOR_PERMISSION_KEYS.length} quyền</span>` : ""}
             </div>
           </div>
@@ -6426,6 +6620,16 @@ function renderEmployees() {
                 aria-label="Phân quyền cho ${escapeHtml(accountLabel)}"
                 title="Phân quyền"
               >Phân quyền</button>
+            ` : ""}
+            ${canEditEmployee ? `
+              <button
+                type="button"
+                class="employee-edit-btn"
+                data-action="edit-employee-profile"
+                data-employee-uid="${escapeHtml(account.uid)}"
+                aria-label="Chỉnh sửa tên và nhóm của ${escapeHtml(accountLabel)}"
+                title="Chỉnh sửa tên và Nhóm nhân viên"
+              >✎</button>
             ` : ""}
             ${canDeleteAccount ? `
               <button
@@ -6671,6 +6875,12 @@ els.employeeList?.addEventListener("click", (event) => {
   const permissionButton = event.target.closest('[data-action="edit-supervisor-permissions"]');
   if (permissionButton) {
     openSupervisorPermissionModal(permissionButton.dataset.supervisorUid);
+    return;
+  }
+
+  const editEmployeeButton = event.target.closest('[data-action="edit-employee-profile"]');
+  if (editEmployeeButton) {
+    openEmployeeProfileEditor(editEmployeeButton.dataset.employeeUid);
     return;
   }
 
@@ -7356,6 +7566,7 @@ els.workTemplateSearch?.addEventListener("input", renderWorkTemplateList);
 // =========================
 const BACKUP_COLLECTIONS = [
   "users",
+  "employeeGroups",
   "workOrders",
   "workAssignmentHistory",
   "invalidTaskHistory",
@@ -7741,9 +7952,19 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
   const password = $("#employeePassword").value;
   const requestedRole = els.staffAccountRole?.value || "employee";
   const role = isAdminProfile() && requestedRole === "supervisor" ? "supervisor" : "employee";
+  const selectedEmployeeGroupId = role === "employee" ? String(els.employeeGroupSelect?.value || "") : "";
+  const selectedEmployeeGroup = selectedEmployeeGroupId
+    ? state.employeeGroups.find((group) => group.id === selectedEmployeeGroupId)
+    : null;
   const permissions = role === "supervisor"
     ? readSupervisorPermissionChecklist(els.createSupervisorPermissionList)
     : null;
+
+  if (selectedEmployeeGroupId && !selectedEmployeeGroup) {
+    setButtonLoading(button, false);
+    toast("Nhóm nhân viên đã chọn không còn tồn tại. Vui lòng chọn lại.", "error");
+    return;
+  }
 
   try {
     const sAuth = getSecondaryAuth();
@@ -7761,6 +7982,11 @@ els.createEmployeeForm.addEventListener("submit", async (event) => {
       createdByUid: state.user.uid,
       createdAt: serverTimestamp()
     };
+
+    if (role === "employee") {
+      userData.employeeGroupId = selectedEmployeeGroup?.id || "";
+      userData.employeeGroupName = selectedEmployeeGroup?.name || "";
+    }
 
     if (role === "supervisor") {
       userData.permissions = normalizeSupervisorPermissions(permissions);
