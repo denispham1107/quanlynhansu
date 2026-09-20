@@ -11195,17 +11195,23 @@
           <div class="scheduled-work-order-config-grid">
             <label>
               <span>Ngày tháng năm</span>
-              <input id="scheduledWorkOrderDate" type="date" />
+              <span class="scheduled-control-shell">
+                <input id="scheduledWorkOrderDate" type="date" />
+              </span>
             </label>
             <label>
               <span>Giờ phút giây</span>
-              <input id="scheduledWorkOrderTime" type="time" step="1" />
+              <span class="scheduled-control-shell">
+                <input id="scheduledWorkOrderTime" type="time" step="1" />
+              </span>
             </label>
             <label>
               <span>Nhóm nhân viên</span>
-              <select id="scheduledWorkOrderGroup">
-                <option value="">Chọn nhóm nhân viên</option>
-              </select>
+              <span class="scheduled-control-shell">
+                <select id="scheduledWorkOrderGroup">
+                  <option value="">Chọn nhóm nhân viên</option>
+                </select>
+              </span>
             </label>
           </div>
           <p class="small-note scheduled-work-order-note">Sau khi Phiếu xuất hiện, chuông báo sẽ phát và hệ thống đếm ngược 10 phút. Phiếu chỉ có thể giao cho đúng một nhân viên đang làm trong nhóm đã chọn.</p>
@@ -11791,7 +11797,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260920-ios-schedule-layout-v78"></script>
+  <script type="module" src="app.js?v=20260920-ios-schedule-layout-v79"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12320,9 +12326,6 @@
 
 </style>
 
-</body>
-</html>
-
 <!-- Fix 6 employee status cards responsive layout -->
 <style>
   /* Desktop lớn: luôn hiển thị đủ 6 ô trên cùng một hàng. */
@@ -12433,10 +12436,36 @@
     display:grid; gap:7px; min-width:0; max-width:100%;
     font-weight:800; color:#172033;
   }
-  .scheduled-work-order-config-grid input,
-  .scheduled-work-order-config-grid select {
-    display:block; width:100%; min-width:0; max-width:100%; inline-size:100%; max-inline-size:100%;
-    box-sizing:border-box;
+  #taskModal .scheduled-control-shell {
+    display:block; width:100%; min-width:0; max-width:100%;
+    inline-size:100%; min-inline-size:0; max-inline-size:100%;
+    overflow:hidden; box-sizing:border-box !important;
+    border:1px solid var(--task-ui-line); border-radius:14px; background:#fff;
+  }
+  #taskModal .scheduled-control-shell:focus-within {
+    border-color:#60a5fa;
+    box-shadow:0 0 0 4px rgba(37,99,235,.12);
+  }
+  #taskModal .scheduled-control-shell > input,
+  #taskModal .scheduled-control-shell > select {
+    display:block !important;
+    width:100% !important; min-width:0 !important; max-width:100% !important;
+    inline-size:100% !important; min-inline-size:0 !important; max-inline-size:100% !important;
+    margin:0 !important; box-sizing:border-box !important;
+    border:0 !important; border-radius:0 !important; background:transparent !important;
+    box-shadow:none !important;
+  }
+  #taskModal .scheduled-control-shell > input:focus,
+  #taskModal .scheduled-control-shell > select:focus {
+    border:0 !important; outline:0 !important; box-shadow:none !important;
+  }
+  #taskModal .scheduled-control-shell > input[type="date"]::-webkit-date-and-time-value,
+  #taskModal .scheduled-control-shell > input[type="time"]::-webkit-date-and-time-value,
+  #taskModal .scheduled-control-shell > input[type="date"]::-webkit-datetime-edit,
+  #taskModal .scheduled-control-shell > input[type="time"]::-webkit-datetime-edit {
+    width:100% !important; min-width:0 !important; max-width:100% !important;
+    inline-size:100% !important; min-inline-size:0 !important; max-inline-size:100% !important;
+    overflow:hidden !important; box-sizing:border-box !important;
   }
   .scheduled-work-order-note { margin:12px 0 0; color:#5b21b6; }
   #taskModal.is-schedule-mode .task-row-schedule-grid { grid-template-columns:1fr; }
@@ -12455,20 +12484,21 @@
   }
   .scheduled-group-countdown.is-expired { color:#b91c1c; background:#fee2e2; }
 
+  @media (max-width: 1024px) {
+    .scheduled-work-order-config-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .scheduled-work-order-config-grid label,
+    #taskModal .scheduled-control-shell { contain:inline-size; }
+    .scheduled-work-order-config-grid label:last-child { grid-column:1 / -1; }
+    #taskModal .scheduled-control-shell > input[type="date"],
+    #taskModal .scheduled-control-shell > input[type="time"] {
+      font-size:16px !important; overflow:hidden !important; text-overflow:ellipsis;
+    }
+  }
+
   @media (max-width: 768px) {
     .schedule-work-order-desktop-btn { display:none!important; }
     .mobile-task-panel-menu .schedule-work-order-mobile-btn.hidden { display:none!important; }
     .mobile-task-panel-menu .schedule-work-order-mobile-btn:not(.hidden) { display:flex!important; }
-    .scheduled-work-order-config-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    .scheduled-work-order-config-grid label { contain:inline-size; }
-    .scheduled-work-order-config-grid label:last-child { grid-column:1 / -1; }
-    .scheduled-work-order-config-grid input[type="date"],
-    .scheduled-work-order-config-grid input[type="time"] {
-      width:calc(100% - 1px); min-width:0; max-width:100%;
-      inline-size:calc(100% - 1px); min-inline-size:0; max-inline-size:100%;
-      margin:0; font-size:16px; overflow:hidden; text-overflow:ellipsis;
-      box-sizing:border-box;
-    }
     .scheduled-work-order-config { padding:13px; }
     #scheduleWorkOrderBtn { width:100%; }
   }
@@ -12479,9 +12509,9 @@
     .scheduled-work-order-config-grid { grid-template-columns:minmax(0,1fr); gap:11px; }
     .scheduled-work-order-config-grid label,
     .scheduled-work-order-config-grid label:last-child { grid-column:1 / -1; }
-    .scheduled-work-order-config-grid input,
-    .scheduled-work-order-config-grid select {
-      width:100%; min-width:0; max-width:100%; inline-size:100%; max-inline-size:100%;
-    }
+    #taskModal .scheduled-control-shell { width:100% !important; max-width:100% !important; }
   }
 </style>
+
+</body>
+</html>
