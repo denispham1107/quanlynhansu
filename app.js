@@ -14213,6 +14213,9 @@ function renderEmployeeTasks() {
 function canAdminReassignTask(task, mode, displayStatus = null) {
   if (mode !== "admin" || !hasPermission("reassignTasks")) return false;
   if (!task?.id) return false;
+  // Phiếu sinh từ Lên lịch được giao cố định cho đúng nhân viên mà Admin đã
+  // chọn trong nhóm. Sau khi giao, chỉ hiển thị tên và không cho đổi/cho nghỉ.
+  if (task.scheduledWorkOrder === true) return false;
   if (isScheduledGroupLockedLunchTask(task)) return false;
 
   const visibleStatus = displayStatus || getDisplayStatus(task);
@@ -17945,6 +17948,11 @@ function openReassignEmployeeModal(taskId) {
     return;
   }
 
+  if (task.scheduledWorkOrder === true) {
+    toast("Phiếu được tạo tự động từ Lên lịch nên nhân viên phụ trách đã bị khóa.", "error");
+    return;
+  }
+
   const displayStatus = getDisplayStatus(task);
 
   if (!canAdminReassignTask(task, "admin", displayStatus)) {
@@ -17988,6 +17996,9 @@ els.reassignEmployeeForm?.addEventListener("submit", async (event) => {
 
   try {
     if (!task) throw new Error("Không tìm thấy công việc cần cập nhật nhân viên.");
+    if (task.scheduledWorkOrder === true) {
+      throw new Error("Phiếu được tạo tự động từ Lên lịch nên không thể đổi hoặc cho nhân viên nghỉ.");
+    }
     if (!selectedValue) throw new Error("Vui lòng chọn nhân viên thay thế hoặc chọn Chờ chọn người.");
 
     const displayStatus = getDisplayStatus(task);

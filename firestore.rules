@@ -128,6 +128,18 @@ service cloud.firestore {
         && taskData.scheduledWorkOrder == true;
     }
 
+    // Sau khi Phiếu từ Lên lịch đã được hệ thống giao, mọi cập nhật từ client
+    // phải giữ nguyên nhân viên phụ trách và dấu nhận diện Phiếu Lên lịch.
+    // Lần giao đầu tiên được thực hiện trong Cloud Function bằng Admin SDK.
+    function respectsScheduledAssigneeLock(beforeData, afterData) {
+      return !isScheduledPhotoRequirementEditingLocked(beforeData)
+        || (
+          isScheduledPhotoRequirementEditingLocked(afterData)
+          && afterData.assignedToUid == beforeData.assignedToUid
+          && afterData.assignedToName == beforeData.assignedToName
+        );
+    }
+
     function respectsDispatchedPhotoRequirementEditingLock(beforeData, afterData) {
       return (
           !isScheduledPhotoRequirementEditingLocked(beforeData)
@@ -429,6 +441,7 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update: if isAdmin()
         && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
+        && respectsScheduledAssigneeLock(resource.data, request.resource.data)
         && (
           !dataIsHotel(resource.data)
           || request.resource.data.deadlineMinutes == resource.data.deadlineMinutes
@@ -703,6 +716,7 @@ service cloud.firestore {
       // - Nếu task đang chạy: chỉ đổi assignedToUid/assignedToName, giữ nguyên toàn bộ mốc thời gian.
       // - Nếu task đang chờ đến lượt (queueStartAt > request.time): đổi người và cho task bắt đầu ngay như mới giao.
       allow update: if isAdmin()
+        && !isScheduledPhotoRequirementEditingLocked(resource.data)
         && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
         && request.resource.data.id == resource.data.id
         && request.resource.data.assignedByUid == resource.data.assignedByUid
@@ -754,6 +768,7 @@ service cloud.firestore {
       // và chỉ cho assignedToUid rỗng hoặc trỏ tới user nhân viên hợp lệ.
       allow update: if isAdmin()
         && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
+        && respectsScheduledAssigneeLock(resource.data, request.resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.assignedByUid == resource.data.assignedByUid
@@ -805,6 +820,7 @@ service cloud.firestore {
 
       // Đổi nhân viên, chuyển về Chờ chọn người hoặc bắt đầu lại task đang chờ.
       allow update: if hasPermission("reassignTasks")
+        && !isScheduledPhotoRequirementEditingLocked(resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.assignedByUid == resource.data.assignedByUid
@@ -934,7 +950,8 @@ service cloud.firestore {
 
       // Nhập dữ liệu có thể khôi phục toàn bộ field task, nhưng không cho phép qua collection users.
       allow update: if hasPermission("importData")
-        && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data);
+        && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
+        && respectsScheduledAssigneeLock(resource.data, request.resource.data);
 
       allow delete: if isAdmin()
         || hasPermission("deleteWorkOrder")
