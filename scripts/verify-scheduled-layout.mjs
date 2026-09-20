@@ -23,7 +23,9 @@ const profiles = [
   { name: "iPhone 932 ngang", width: 932, height: 430 },
 ];
 
-const debugPort = 9333;
+// Dùng cổng riêng cho mỗi lượt kiểm tra để không kết nối nhầm vào một Chrome
+// headless còn sót lại từ lần chạy trước.
+const debugPort = 20000 + Math.floor(Math.random() * 20000);
 const profileDir = mkdtempSync(join(tmpdir(), "quanlynhansu-responsive-"));
 const browser = spawn(browserPath, [
   "--headless=new",
@@ -103,11 +105,16 @@ const prepareExpression = `(() => {
   const card = modal?.querySelector(".task-create-modal-card");
   const form = document.getElementById("createTaskForm");
   const config = document.getElementById("scheduledWorkOrderConfig");
-  if (!modal || !card || !form || !config) throw new Error("Thiếu DOM của form lên lịch.");
+  const actions = form?.querySelector(".task-create-actions");
+  if (!modal || !card || !form || !config || !actions) throw new Error("Thiếu DOM của form lên lịch.");
   modal.classList.remove("hidden");
   modal.classList.add("is-schedule-mode");
   config.classList.remove("hidden");
-  form.replaceChildren(config);
+  form.replaceChildren(config, actions);
+  document.getElementById("saveDraftBtn")?.classList.add("hidden");
+  document.getElementById("createTaskBtn")?.classList.add("hidden");
+  document.getElementById("viewScheduledWorkOrdersBtn")?.classList.remove("hidden");
+  document.getElementById("scheduleWorkOrderBtn")?.classList.remove("hidden");
   card.replaceChildren(form);
   modal.style.cssText = "display:block!important;position:relative!important;inset:auto!important;width:100%!important;padding:8px!important;";
   card.style.cssText = "display:block!important;width:100%!important;max-width:100%!important;margin:0!important;";
@@ -118,6 +125,8 @@ const prepareExpression = `(() => {
   document.body.style.margin = "0";
   document.getElementById("scheduledWorkOrderDate").value = "2026-09-20";
   document.getElementById("scheduledWorkOrderTime").value = "22:57:30";
+  document.getElementById("scheduledWorkOrderCountdownMinutes").value = "15";
+  document.getElementById("scheduledWorkOrderRepeatMode").value = "daily";
   return true;
 })()`;
 await send("Runtime.evaluate", { expression: prepareExpression, returnByValue: true });
@@ -142,10 +151,13 @@ for (const profile of profiles) {
         return { left: round(rect.left), right: round(rect.right), top: round(rect.top), bottom: round(rect.bottom), width: round(rect.width) };
       };
       const config = box(document.getElementById("scheduledWorkOrderConfig"));
+      const actions = box(document.querySelector(".task-create-actions"));
       const shells = [...document.querySelectorAll(".scheduled-control-shell")].map(box);
       const controls = [...document.querySelectorAll(".scheduled-control-shell > input, .scheduled-control-shell > select")].map(box);
+      const actionButtons = [...document.querySelectorAll(".task-create-actions > .btn:not(.hidden)")].map(box);
       const inside = [...shells, ...controls].every((rect) => rect.left >= config.left - 0.5 && rect.right <= config.right + 0.5);
       const shellControlMatch = shells.every((shell, index) => controls[index].left >= shell.left - 0.5 && controls[index].right <= shell.right + 0.5);
+      const actionsInside = actionButtons.every((rect) => rect.left >= actions.left - 0.5 && rect.right <= actions.right + 0.5);
       const overlap = shells.some((left, leftIndex) => shells.some((right, rightIndex) => {
         if (rightIndex <= leftIndex) return false;
         const vertical = Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top);
@@ -158,23 +170,28 @@ for (const profile of profiles) {
         scrollWidth: document.documentElement.scrollWidth,
         columns: getComputedStyle(document.querySelector(".scheduled-work-order-config-grid")).gridTemplateColumns,
         config,
+        actions,
         shells,
         controls,
+        actionButtons,
         inside,
         shellControlMatch,
+        actionsInside,
         overlap,
       };
     })()`,
   });
   const result = measurement.result.value;
   const passed = result.display === "grid"
-    && result.shells.length === 3
-    && result.controls.length === 3
+    && result.shells.length === 5
+    && result.controls.length === 5
+    && result.actionButtons.length === 2
     && result.config.width > 0
     && result.shells.every((rect) => rect.width > 0)
     && result.controls.every((rect) => rect.width > 0)
     && result.inside
     && result.shellControlMatch
+    && result.actionsInside
     && !result.overlap
     && result.scrollWidth <= profile.width;
   console.log(`${passed ? "PASS" : "FAIL"} | ${profile.name} | cột ${result.columns} | scroll ${result.scrollWidth}/${profile.width}`);

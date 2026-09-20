@@ -123,8 +123,18 @@ service cloud.firestore {
         && get(workOrderControlSettingsDoc()).data.preventDispatchedPhotoRequirementEditing == true;
     }
 
+    function isScheduledPhotoRequirementEditingLocked(taskData) {
+      return taskData.keys().hasAny(["scheduledWorkOrder"])
+        && taskData.scheduledWorkOrder == true;
+    }
+
     function respectsDispatchedPhotoRequirementEditingLock(beforeData, afterData) {
-      return !afterData.diff(beforeData).affectedKeys().hasAny([
+      return (
+          !isScheduledPhotoRequirementEditingLocked(beforeData)
+          || isScheduledPhotoRequirementEditingLocked(afterData)
+        )
+        && (
+        !afterData.diff(beforeData).affectedKeys().hasAny([
           "photoRequired",
           "requiredPhotoCount",
           "photoRequirementHistory",
@@ -133,7 +143,11 @@ service cloud.firestore {
           "lastPhotoRequirementChangedByUid",
           "lastPhotoRequirementChangedByName"
         ])
-        || !isDispatchedPhotoRequirementEditingLocked(beforeData);
+        || (
+          !isScheduledPhotoRequirementEditingLocked(beforeData)
+          && !isDispatchedPhotoRequirementEditingLocked(beforeData)
+        )
+      );
     }
 
     // Cho phép các task cũ tạo trước khi có tính năng bắt buộc đăng hình
@@ -879,6 +893,7 @@ service cloud.firestore {
 
       // Chỉnh số lượng ảnh báo cáo bắt buộc.
       allow update: if hasPermission("managePhotoRequirements")
+        && !isScheduledPhotoRequirementEditingLocked(resource.data)
         && !isDispatchedPhotoRequirementEditingLocked(resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "photoRequired",

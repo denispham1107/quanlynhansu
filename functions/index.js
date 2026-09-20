@@ -39,9 +39,12 @@ const WORK_SUPERVISION_TIME_ZONE = "Asia/Ho_Chi_Minh";
 const WORK_SUPERVISION_ACTIVE_TASK_STATUSES = ["doing", "lunch_break", "hotel", "redo", "overdue"];
 const HOTEL_SECONDS_PER_PET = 4 * 60 + 30;
 const HOTEL_EXCLUSIVE_ACTIVE_STATUSES = new Set(["doing", "hotel", "redo", "overdue"]);
-const SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MINUTES = 10;
+const SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_DEFAULT_MINUTES = 10;
+const SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MIN_MINUTES = 1;
+const SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MAX_MINUTES = 1440;
 const SCHEDULED_GROUP_LUNCH_DEFAULT_MINUTES = 30;
 const SCHEDULED_QUEUE_LOOKAHEAD_MS = 28 * 24 * 60 * 60 * 1000;
+const SCHEDULED_DAILY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function pushTokenDocumentId(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -757,6 +760,96 @@ function normalizeScheduledWorkOrderRows(rawRows) {
   return rows;
 }
 
+function normalizeScheduledAssignmentCountdownMinutes(value) {
+  const parsed = Math.trunc(Number(value));
+  if (
+    Number.isInteger(parsed)
+    && parsed >= SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MIN_MINUTES
+    && parsed <= SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MAX_MINUTES
+  ) return parsed;
+  return SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_DEFAULT_MINUTES;
+}
+
+function normalizeScheduledRepeatMode(value) {
+  return String(value || "none").trim().toLowerCase() === "daily" ? "daily" : "none";
+}
+
+function shiftScheduledIsoDate(dateValue, dayCount = 1) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateValue || ""));
+  if (!match) return String(dateValue || "");
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  date.setUTCDate(date.getUTCDate() + dayCount);
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+function nextDailyScheduledRows(rows = []) {
+  return rows.map((row) => ({
+    ...row,
+    taskDate: shiftScheduledIsoDate(row?.taskDate, 1)
+  }));
+}
+
+async function ensureNextDailyScheduledOccurrence(scheduleId, schedule = {}) {
+  if (normalizeScheduledRepeatMode(schedule.repeatMode) !== "daily") return null;
+  const currentScheduledAt = firestoreTimestampOrNull(schedule.scheduledAt);
+  if (!currentScheduledAt) return null;
+
+  const nextScheduledAt = Timestamp.fromMillis(currentScheduledAt.toMillis() + SCHEDULED_DAILY_INTERVAL_MS);
+  const seriesId = String(schedule.seriesId || scheduleId).slice(0, 180);
+  const nextScheduleId = `daily_${crypto.createHash("sha256")
+    .update(`${seriesId}:${nextScheduledAt.toMillis()}`)
+    .digest("hex")
+    .slice(0, 36)}`;
+  const nextScheduleRef = db.doc(`scheduledWorkOrders/${nextScheduleId}`);
+  const currentScheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+  let created = false;
+
+  await db.runTransaction(async (transaction) => {
+    const nextSnapshot = await transaction.get(nextScheduleRef);
+    if (!nextSnapshot.exists) {
+      const now = Timestamp.now();
+      transaction.set(nextScheduleRef, {
+        id: nextScheduleId,
+        name: String(schedule.name || "Phiếu công việc lên lịch").slice(0, 180),
+        employeeGroupId: String(schedule.employeeGroupId || "").slice(0, 180),
+        employeeGroupName: String(schedule.employeeGroupName || "Nhóm nhân viên").slice(0, 80),
+        scheduledAt: nextScheduledAt,
+        rows: nextDailyScheduledRows(Array.isArray(schedule.rows) ? schedule.rows : []),
+        photoRequired: schedule.photoRequired === true,
+        requiredPhotoCount: Math.max(0, Math.min(100, Math.trunc(Number(schedule.requiredPhotoCount || 0)))),
+        assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(schedule.assignmentCountdownMinutes),
+        repeatMode: "daily",
+        seriesId,
+        occurrenceIndex: Math.max(0, Math.trunc(Number(schedule.occurrenceIndex || 0))) + 1,
+        previousScheduleId: scheduleId,
+        status: "pending",
+        createdByUid: String(schedule.createdByUid || "system").slice(0, 180),
+        createdByName: String(schedule.createdByName || "Admin").slice(0, 120),
+        createdAt: now,
+        updatedAt: now,
+        materializationEnqueuedAt: null,
+        generatedAt: null,
+        generatedWorkOrderId: "",
+        assignmentDeadlineAt: null,
+        timeoutProcessedAt: null,
+        assignedAt: null,
+        assignedToUid: "",
+        assignedToName: ""
+      }, { merge: false });
+      created = true;
+    }
+    transaction.set(currentScheduleRef, {
+      nextScheduleId,
+      nextScheduledAt,
+      updatedAt: Timestamp.now()
+    }, { merge: true });
+  });
+
+  if (created) await tryEnqueueScheduledMaterialization(nextScheduleId, nextScheduledAt);
+  return { nextScheduleId, nextScheduledAt, created };
+}
+
 async function enqueueScheduledStage(functionName, scheduleId, scheduleTime, stage) {
   await scheduledQueue(functionName).enqueue(
     { scheduleId },
@@ -807,6 +900,11 @@ exports.createScheduledWorkOrder = onCall({
   const name = String(request.data?.name || "").trim().slice(0, 180);
   const employeeGroupId = String(request.data?.employeeGroupId || "").trim();
   const scheduledForMs = Number(request.data?.scheduledForMs || 0);
+  const requestedAssignmentCountdownMinutes = Number(request.data?.assignmentCountdownMinutes);
+  const assignmentCountdownMinutes = normalizeScheduledAssignmentCountdownMinutes(
+    requestedAssignmentCountdownMinutes
+  );
+  const repeatMode = normalizeScheduledRepeatMode(request.data?.repeatMode);
   const photoRequired = request.data?.photoRequired === true;
   const requiredPhotoCount = photoRequired
     ? Math.max(1, Math.min(100, Math.trunc(Number(request.data?.requiredPhotoCount || 1))))
@@ -814,6 +912,13 @@ exports.createScheduledWorkOrder = onCall({
   const rows = normalizeScheduledWorkOrderRows(request.data?.rows);
 
   if (!name) throw new HttpsError("invalid-argument", "Vui lòng nhập tên Phiếu công việc.");
+  if (
+    !Number.isInteger(requestedAssignmentCountdownMinutes)
+    || requestedAssignmentCountdownMinutes < SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MIN_MINUTES
+    || requestedAssignmentCountdownMinutes > SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MAX_MINUTES
+  ) {
+    throw new HttpsError("invalid-argument", "Thời gian đếm ngược phải từ 1 đến 1440 phút.");
+  }
   if (!employeeGroupId || employeeGroupId.includes("/") || employeeGroupId.length > 180) {
     throw new HttpsError("invalid-argument", "Vui lòng chọn Nhóm nhân viên hợp lệ.");
   }
@@ -841,6 +946,10 @@ exports.createScheduledWorkOrder = onCall({
     rows,
     photoRequired,
     requiredPhotoCount,
+    assignmentCountdownMinutes,
+    repeatMode,
+    seriesId: scheduleRef.id,
+    occurrenceIndex: 0,
     status: "pending",
     createdByUid: adminUid,
     createdByName: adminName,
@@ -863,8 +972,47 @@ exports.createScheduledWorkOrder = onCall({
     scheduledForMs: scheduledAt.toMillis(),
     employeeGroupId,
     employeeGroupName,
+    assignmentCountdownMinutes,
+    repeatMode,
     enqueued
   };
+});
+
+exports.listScheduledWorkOrders = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  await assertAdmin(adminUid);
+  const snapshot = await db.collection("scheduledWorkOrders").get();
+  const schedules = snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .filter((item) => String(item.createdByUid || "") === adminUid)
+    .sort((left, right) => (
+      (firestoreTimestampOrNull(right.scheduledAt)?.toMillis() || 0)
+      - (firestoreTimestampOrNull(left.scheduledAt)?.toMillis() || 0)
+    ))
+    .map((item) => ({
+      id: item.id,
+      name: String(item.name || "Phiếu công việc"),
+      scheduledForMs: firestoreTimestampOrNull(item.scheduledAt)?.toMillis() || 0,
+      employeeGroupId: String(item.employeeGroupId || ""),
+      employeeGroupName: String(item.employeeGroupName || "Nhóm nhân viên"),
+      taskNames: (Array.isArray(item.rows) ? item.rows : [])
+        .map((row) => String(row?.title || "").trim())
+        .filter(Boolean),
+      assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(item.assignmentCountdownMinutes),
+      repeatMode: normalizeScheduledRepeatMode(item.repeatMode),
+      seriesId: String(item.seriesId || item.id),
+      occurrenceIndex: Math.max(0, Math.trunc(Number(item.occurrenceIndex || 0))),
+      status: String(item.status || "pending"),
+      generatedWorkOrderId: String(item.generatedWorkOrderId || ""),
+      createdAtMs: firestoreTimestampOrNull(item.createdAt)?.toMillis() || 0
+    }));
+
+  return { schedules };
 });
 
 async function materializeScheduledWorkOrderById(scheduleIdInput) {
@@ -915,8 +1063,11 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
     }
 
     const now = Timestamp.now();
+    const assignmentCountdownMinutes = normalizeScheduledAssignmentCountdownMinutes(
+      freshSchedule.assignmentCountdownMinutes
+    );
     assignmentDeadlineAt = Timestamp.fromMillis(
-      now.toMillis() + SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MINUTES * 60 * 1000
+      now.toMillis() + assignmentCountdownMinutes * 60 * 1000
     );
     const budgetByDate = new Map();
     hotelDateKeys.forEach((dateKey, index) => {
@@ -941,6 +1092,8 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       scheduledEmployeeGroupName: String(freshSchedule.employeeGroupName || groupSnapshot.data()?.name || "Nhóm nhân viên"),
       scheduledGroupAssignmentPending: true,
       scheduledAssignmentDeadlineAt: assignmentDeadlineAt,
+      scheduledAssignmentCountdownMinutes: assignmentCountdownMinutes,
+      scheduledRepeatMode: normalizeScheduledRepeatMode(freshSchedule.repeatMode),
       scheduledGroupTimeoutProcessed: false
     }, { merge: false });
 
@@ -1027,6 +1180,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
         photoCount: 0,
         lastPhotoUploadedAt: null,
         scheduledWorkOrder: true,
+        scheduledPhotoRequirementLocked: true,
         scheduleId,
         scheduledEmployeeGroupId: String(freshSchedule.employeeGroupId || ""),
         scheduledEmployeeGroupName: String(freshSchedule.employeeGroupName || groupSnapshot.data()?.name || "Nhóm nhân viên")
@@ -1039,7 +1193,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       recipientUid: String(freshSchedule.createdByUid || ""),
       type: "scheduled_work_order_created",
       title: "Phiếu lên lịch đã được tạo",
-      message: `Phiếu “${String(freshSchedule.name || "Phiếu công việc")}” đã được tạo cho nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")}. Hãy giao trong 10 phút.`,
+      message: `Phiếu “${String(freshSchedule.name || "Phiếu công việc")}” đã được tạo cho nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")}. Hãy giao trong ${assignmentCountdownMinutes} phút.`,
       taskId: firstTaskId,
       taskTitle: String(freshSchedule.name || "Phiếu công việc"),
       actorUid: "system",
@@ -1060,6 +1214,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
   });
 
   if (!assignmentDeadlineAt) return null;
+  await ensureNextDailyScheduledOccurrence(scheduleId, schedule);
   try {
     await enqueueScheduledStage(
       "processScheduledGroupAssignmentTimeout",
@@ -1099,6 +1254,9 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
   const scheduleSnapshot = await scheduleRef.get();
   if (!scheduleSnapshot.exists) return null;
   const schedule = scheduleSnapshot.data() || {};
+  const assignmentCountdownMinutes = normalizeScheduledAssignmentCountdownMinutes(
+    schedule.assignmentCountdownMinutes
+  );
   if (schedule.status !== "generated" || schedule.timeoutProcessedAt) return null;
   const deadline = firestoreTimestampOrNull(schedule.assignmentDeadlineAt);
   if (deadline && deadline.toMillis() > Date.now() + 1000) return null;
@@ -1174,7 +1332,7 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
       transaction.set(entry.taskRef, {
         id: entry.taskRef.id,
         title: "Phiếu nghỉ trưa",
-        description: `Tự động tạo vì Phiếu lên lịch “${String(freshSchedule.name || "Phiếu công việc")}” của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau 10 phút. Phiếu chỉ kết thúc khi công việc được giao cho một thành viên trong nhóm.`,
+        description: `Tự động tạo vì Phiếu lên lịch “${String(freshSchedule.name || "Phiếu công việc")}” của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau ${assignmentCountdownMinutes} phút. Phiếu chỉ kết thúc khi công việc được giao cho một thành viên trong nhóm.`,
         taskDate: supervisionDateKey(new Date(now.toMillis())),
         assignedToUid: entry.employee.uid,
         assignedToName: employeeName,
@@ -1224,7 +1382,7 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
         recipientUid: entry.employee.uid,
         type: "scheduled_group_lunch_created",
         title: "Phiếu nghỉ trưa tự động",
-        message: `Phiếu lên lịch của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau 10 phút. Phiếu nghỉ trưa này sẽ tự kết thúc khi một thành viên trong nhóm nhận việc.`,
+        message: `Phiếu lên lịch của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau ${assignmentCountdownMinutes} phút. Phiếu nghỉ trưa này sẽ tự kết thúc khi một thành viên trong nhóm nhận việc.`,
         taskId: entry.taskRef.id,
         taskTitle: "Phiếu nghỉ trưa",
         actorUid: "system",
@@ -1250,7 +1408,7 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
       id: adminNotificationRef.id,
       recipientUid: String(freshSchedule.createdByUid || ""),
       type: "scheduled_group_timeout_admin",
-      title: "Phiếu lên lịch chưa được giao sau 10 phút",
+      title: `Phiếu lên lịch chưa được giao sau ${assignmentCountdownMinutes} phút`,
       message: `Đã tạo ${lunchEntries.length} Phiếu nghỉ trưa cho các nhân viên đang làm thuộc nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")}.`,
       taskId: String(freshSchedule.firstTaskId || ""),
       taskTitle: String(freshSchedule.name || "Phiếu công việc"),
@@ -1719,7 +1877,7 @@ async function loadWorkSupervisionContext(nowMs = Date.now()) {
   const allFreeEmployees = workingEmployees.filter((employee) => !busyUids.has(employee.uid));
   const freeEmployees = allFreeEmployees.filter((employee) => !excludedEmployeeUidSet.has(employee.uid));
 
-  // Phiếu tạo bởi “Lên lịch” có bộ đếm 10 phút và cơ chế tạo Nghỉ trưa riêng,
+  // Phiếu tạo bởi “Lên lịch” có bộ đếm tùy chỉnh và cơ chế tạo Nghỉ trưa riêng,
   // giới hạn theo scheduledEmployeeGroupId. Không đưa các task này vào Giám sát
   // công việc chung, nếu không mọi nhân viên đang rảnh ở nhóm khác cũng bị đếm.
   const draftWorkOrderCount = draftTasksSnap.docs.some(

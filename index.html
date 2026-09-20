@@ -11193,19 +11193,19 @@
             </div>
           </div>
           <div class="scheduled-work-order-config-grid">
-            <label>
+            <label class="scheduled-work-order-date-field">
               <span>Ngày tháng năm</span>
               <span class="scheduled-control-shell">
                 <input id="scheduledWorkOrderDate" type="date" />
               </span>
             </label>
-            <label>
+            <label class="scheduled-work-order-time-field">
               <span>Giờ phút giây</span>
               <span class="scheduled-control-shell">
                 <input id="scheduledWorkOrderTime" type="time" step="1" />
               </span>
             </label>
-            <label>
+            <label class="scheduled-work-order-group-field">
               <span>Nhóm nhân viên</span>
               <span class="scheduled-control-shell">
                 <select id="scheduledWorkOrderGroup">
@@ -11213,8 +11213,23 @@
                 </select>
               </span>
             </label>
+            <label class="scheduled-work-order-countdown-field">
+              <span>Thời gian đếm ngược (phút)</span>
+              <span class="scheduled-control-shell">
+                <input id="scheduledWorkOrderCountdownMinutes" type="number" min="1" max="1440" step="1" value="10" inputmode="numeric" />
+              </span>
+            </label>
+            <label class="scheduled-work-order-repeat-field">
+              <span>Chế độ lặp lại</span>
+              <span class="scheduled-control-shell">
+                <select id="scheduledWorkOrderRepeatMode">
+                  <option value="none">Không lặp lại</option>
+                  <option value="daily">Lặp lại hằng ngày</option>
+                </select>
+              </span>
+            </label>
           </div>
-          <p class="small-note scheduled-work-order-note">Sau khi Phiếu xuất hiện, chuông báo sẽ phát và hệ thống đếm ngược 10 phút. Phiếu chỉ có thể giao cho đúng một nhân viên đang làm trong nhóm đã chọn.</p>
+          <p class="small-note scheduled-work-order-note">Sau khi Phiếu xuất hiện, chuông báo sẽ phát và hệ thống đếm ngược <strong id="scheduledWorkOrderCountdownPreview">10 phút</strong>. Phiếu chỉ có thể giao cho đúng một nhân viên đang làm trong nhóm đã chọn.</p>
         </section>
 
         <div class="task-rows-block">
@@ -11272,6 +11287,7 @@
         <div class="modal-footer-actions task-create-actions">
           <button id="saveDraftBtn" class="btn ghost" type="button">💾 Lưu (chưa giao việc)</button>
           <button id="createTaskBtn" class="btn primary" type="submit">Tạo Phiếu &amp; giao việc</button>
+          <button id="viewScheduledWorkOrdersBtn" class="btn ghost hidden" type="button">📋 Xem lịch</button>
           <button id="scheduleWorkOrderBtn" class="btn schedule-work-order-btn hidden" type="button">🗓 Xác nhận lên lịch</button>
         </div>
       </form>
@@ -11303,6 +11319,27 @@
           <button id="confirmScheduledGroupAssignmentBtn" class="btn primary" type="submit">Giao Phiếu ngay</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- LIST OF WORK ORDER SCHEDULES CREATED BY ADMIN -->
+  <div id="scheduledWorkOrderListModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="scheduledWorkOrderListTitle">
+    <div class="modal-backdrop" data-close-scheduled-work-order-list></div>
+    <div class="modal-card scheduled-work-order-list-card">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">LỊCH ĐÃ TẠO</p>
+          <h3 id="scheduledWorkOrderListTitle">Danh sách lịch Phiếu công việc</h3>
+          <p class="muted">Hiển thị thời điểm, nhóm nhân viên, Phiếu và các công việc của từng lịch.</p>
+        </div>
+        <button class="icon-btn" type="button" data-close-scheduled-work-order-list aria-label="Đóng">×</button>
+      </div>
+      <div id="scheduledWorkOrderList" class="scheduled-work-order-list" aria-live="polite">
+        <div class="empty-state">Đang tải danh sách lịch...</div>
+      </div>
+      <div class="modal-footer-actions">
+        <button class="btn ghost" type="button" data-close-scheduled-work-order-list>Đóng</button>
+      </div>
     </div>
   </div>
 
@@ -11797,7 +11834,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260920-ios-schedule-layout-v79"></script>
+  <script type="module" src="app.js?v=20260921-scheduled-recurrence-v80"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12432,6 +12469,7 @@
     display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr); gap:12px;
     width:100%; min-width:0; max-width:100%;
   }
+  .scheduled-work-order-repeat-field { grid-column:2 / -1; }
   .scheduled-work-order-config-grid label {
     display:grid; gap:7px; min-width:0; max-width:100%;
     font-weight:800; color:#172033;
@@ -12483,12 +12521,26 @@
     padding:5px 9px; border-radius:999px; background:#ede9fe;
   }
   .scheduled-group-countdown.is-expired { color:#b91c1c; background:#fee2e2; }
+  .scheduled-work-order-list-card { width:min(920px,calc(100vw - 28px)); max-height:min(90vh,900px); }
+  .scheduled-work-order-list { display:grid; gap:10px; padding:2px; overflow:auto; }
+  .scheduled-work-order-list-item {
+    display:grid; gap:8px; min-width:0; padding:13px 14px;
+    border:1px solid #ddd6fe; border-radius:16px; background:linear-gradient(135deg,#faf5ff,#f8fafc);
+  }
+  .scheduled-work-order-list-main { color:#172033; font-weight:850; line-height:1.45; overflow-wrap:anywhere; }
+  .scheduled-work-order-list-meta { display:flex; flex-wrap:wrap; gap:6px; }
+  .scheduled-work-order-list-meta span {
+    padding:5px 8px; border-radius:999px; background:#ede9fe; color:#5b21b6;
+    font-size:.76rem; font-weight:800;
+  }
+  .scheduled-work-order-list .empty-state { margin:0; }
 
   @media (max-width: 1024px) {
     .scheduled-work-order-config-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .scheduled-work-order-config-grid label,
     #taskModal .scheduled-control-shell { contain:inline-size; }
-    .scheduled-work-order-config-grid label:last-child { grid-column:1 / -1; }
+    .scheduled-work-order-group-field { grid-column:1 / -1; }
+    .scheduled-work-order-repeat-field { grid-column:auto; }
     #taskModal .scheduled-control-shell > input[type="date"],
     #taskModal .scheduled-control-shell > input[type="time"] {
       font-size:16px !important; overflow:hidden !important; text-overflow:ellipsis;
@@ -12508,8 +12560,11 @@
   @media (max-width: 640px) {
     .scheduled-work-order-config-grid { grid-template-columns:minmax(0,1fr); gap:11px; }
     .scheduled-work-order-config-grid label,
-    .scheduled-work-order-config-grid label:last-child { grid-column:1 / -1; }
+    .scheduled-work-order-group-field,
+    .scheduled-work-order-repeat-field { grid-column:1 / -1; }
     #taskModal .scheduled-control-shell { width:100% !important; max-width:100% !important; }
+    .scheduled-work-order-list-card { width:100%; max-width:100%; border-radius:22px 22px 0 0; }
+    .scheduled-work-order-list-main { font-size:.9rem; }
   }
 </style>
 

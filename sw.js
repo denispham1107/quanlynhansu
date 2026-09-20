@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260920-ios-schedule-layout-v79";
+const CACHE_NAME = "culao-task-shell-v20260921-scheduled-recurrence-v80";
 const APP_SHELL = [
   "./",
   "./index.html",
