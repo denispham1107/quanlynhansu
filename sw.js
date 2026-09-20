@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260920-scheduled-group-countdown-scope-v77";
+const CACHE_NAME = "culao-task-shell-v20260920-ios-schedule-layout-v78";
 const APP_SHELL = [
   "./",
   "./index.html",

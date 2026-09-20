@@ -11791,7 +11791,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260920-scheduled-group-countdown-scope-v77"></script>
+  <script type="module" src="app.js?v=20260920-ios-schedule-layout-v78"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12415,17 +12415,29 @@
   .schedule-work-order-btn:hover { color:#fff!important; filter:brightness(.96); }
   .schedule-work-order-mobile-btn { display:none!important; }
   .scheduled-work-order-config {
+    width:100%; min-width:0; max-width:100%; box-sizing:border-box; overflow:hidden;
     padding:16px; border:1px dashed #a78bfa; border-radius:18px;
     background:linear-gradient(135deg,#faf5ff,#eef2ff);
   }
   .scheduled-work-order-config-heading { display:flex; align-items:flex-start; gap:10px; margin-bottom:14px; }
   .scheduled-work-order-config-heading > span { font-size:1.5rem; line-height:1; }
-  .scheduled-work-order-config-heading div { display:grid; gap:3px; }
+  .scheduled-work-order-config-heading div { display:grid; gap:3px; min-width:0; }
+  .scheduled-work-order-config-heading strong,
+  .scheduled-work-order-config-heading small { overflow-wrap:anywhere; }
   .scheduled-work-order-config-heading small { color:#64748b; line-height:1.45; }
-  .scheduled-work-order-config-grid { display:grid; grid-template-columns:1fr 1fr 1.4fr; gap:12px; }
-  .scheduled-work-order-config-grid label { display:grid; gap:7px; font-weight:800; color:#172033; }
+  .scheduled-work-order-config-grid {
+    display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr); gap:12px;
+    width:100%; min-width:0; max-width:100%;
+  }
+  .scheduled-work-order-config-grid label {
+    display:grid; gap:7px; min-width:0; max-width:100%;
+    font-weight:800; color:#172033;
+  }
   .scheduled-work-order-config-grid input,
-  .scheduled-work-order-config-grid select { width:100%; box-sizing:border-box; }
+  .scheduled-work-order-config-grid select {
+    display:block; width:100%; min-width:0; max-width:100%; inline-size:100%; max-inline-size:100%;
+    box-sizing:border-box;
+  }
   .scheduled-work-order-note { margin:12px 0 0; color:#5b21b6; }
   #taskModal.is-schedule-mode .task-row-schedule-grid { grid-template-columns:1fr; }
   #taskModal.is-schedule-mode .task-row-schedule-grid > .task-row-field:nth-child(2) { display:none; }
@@ -12447,9 +12459,29 @@
     .schedule-work-order-desktop-btn { display:none!important; }
     .mobile-task-panel-menu .schedule-work-order-mobile-btn.hidden { display:none!important; }
     .mobile-task-panel-menu .schedule-work-order-mobile-btn:not(.hidden) { display:flex!important; }
-    .scheduled-work-order-config-grid { grid-template-columns:1fr 1fr; }
+    .scheduled-work-order-config-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .scheduled-work-order-config-grid label { contain:inline-size; }
     .scheduled-work-order-config-grid label:last-child { grid-column:1 / -1; }
+    .scheduled-work-order-config-grid input[type="date"],
+    .scheduled-work-order-config-grid input[type="time"] {
+      width:calc(100% - 1px); min-width:0; max-width:100%;
+      inline-size:calc(100% - 1px); min-inline-size:0; max-inline-size:100%;
+      margin:0; font-size:16px; overflow:hidden; text-overflow:ellipsis;
+      box-sizing:border-box;
+    }
     .scheduled-work-order-config { padding:13px; }
     #scheduleWorkOrderBtn { width:100%; }
+  }
+
+  /* iPhone portrait: native date/time controls have a large intrinsic width.
+     One field per row prevents them from overlapping at every iOS text size. */
+  @media (max-width: 640px) {
+    .scheduled-work-order-config-grid { grid-template-columns:minmax(0,1fr); gap:11px; }
+    .scheduled-work-order-config-grid label,
+    .scheduled-work-order-config-grid label:last-child { grid-column:1 / -1; }
+    .scheduled-work-order-config-grid input,
+    .scheduled-work-order-config-grid select {
+      width:100%; min-width:0; max-width:100%; inline-size:100%; max-inline-size:100%;
+    }
   }
 </style>
