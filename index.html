@@ -10544,6 +10544,7 @@
         </div>
         <div class="hero-actions management-dashboard-actions">
           <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
+          <button id="openScheduledWorkOrderBtn" class="btn schedule-work-order-btn schedule-work-order-desktop-btn large hidden" type="button">🗓 Lên lịch</button>
           <button id="openWorkTemplatePageBtn" class="btn ghost large" type="button">Danh sách công việc</button>
           <button id="openEmployeeManagerPageBtn" class="btn ghost large" type="button">Danh sách nhân viên</button>
           <div id="mobileDataActionsGroup" class="backup-actions dashboard-data-actions">
@@ -10622,6 +10623,7 @@
             >⋮</button>
             <div id="mobileTaskPanelMenu" class="mobile-task-panel-menu" aria-hidden="true">
               <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
+              <button id="openScheduledWorkOrderMobileBtn" class="btn schedule-work-order-btn schedule-work-order-mobile-btn small hidden" type="button">🗓 Lên lịch</button>
               <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn calendar-import-header-btn small calendar-import-desktop-only hidden" type="button">📅 Nạp lịch</button>
               <button id="openWorkOrderSettingsBtn" class="btn settings-action-btn small hidden" type="button" aria-haspopup="dialog" aria-controls="workOrderSettingsModal">
                 <span aria-hidden="true">⚙</span> Cài đặt
@@ -11182,6 +11184,33 @@
           <input id="workOrderName" type="text" placeholder="Ví dụ: Dọn dẹp cửa hàng cuối tuần" required />
         </label>
 
+        <section id="scheduledWorkOrderConfig" class="scheduled-work-order-config hidden" aria-labelledby="scheduledWorkOrderConfigTitle">
+          <div class="scheduled-work-order-config-heading">
+            <span aria-hidden="true">⏰</span>
+            <div>
+              <strong id="scheduledWorkOrderConfigTitle">Thời điểm tự động tạo Phiếu</strong>
+              <small>Đến đúng thời điểm này, hệ thống tự tạo Phiếu ở trạng thái “Chưa giao việc” cho nhóm đã chọn.</small>
+            </div>
+          </div>
+          <div class="scheduled-work-order-config-grid">
+            <label>
+              <span>Ngày tháng năm</span>
+              <input id="scheduledWorkOrderDate" type="date" />
+            </label>
+            <label>
+              <span>Giờ phút giây</span>
+              <input id="scheduledWorkOrderTime" type="time" step="1" />
+            </label>
+            <label>
+              <span>Nhóm nhân viên</span>
+              <select id="scheduledWorkOrderGroup">
+                <option value="">Chọn nhóm nhân viên</option>
+              </select>
+            </label>
+          </div>
+          <p class="small-note scheduled-work-order-note">Sau khi Phiếu xuất hiện, chuông báo sẽ phát và hệ thống đếm ngược 10 phút. Phiếu chỉ có thể giao cho đúng một nhân viên đang làm trong nhóm đã chọn.</p>
+        </section>
+
         <div class="task-rows-block">
           <div class="task-rows-header">
             <div>
@@ -11237,6 +11266,35 @@
         <div class="modal-footer-actions task-create-actions">
           <button id="saveDraftBtn" class="btn ghost" type="button">💾 Lưu (chưa giao việc)</button>
           <button id="createTaskBtn" class="btn primary" type="submit">Tạo Phiếu &amp; giao việc</button>
+          <button id="scheduleWorkOrderBtn" class="btn schedule-work-order-btn hidden" type="button">🗓 Xác nhận lên lịch</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ASSIGN A SCHEDULED WORK ORDER TO ONE EMPLOYEE IN ITS GROUP -->
+  <div id="scheduledGroupAssignmentModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="scheduledGroupAssignmentTitle">
+    <div class="modal-backdrop" data-close-scheduled-group-assignment></div>
+    <div class="modal-card small-modal scheduled-group-assignment-card">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">PHIẾU LÊN LỊCH</p>
+          <h3 id="scheduledGroupAssignmentTitle">Giao Phiếu cho nhân viên</h3>
+          <p id="scheduledGroupAssignmentSummary" class="muted">Chọn đúng một nhân viên trong nhóm.</p>
+        </div>
+        <button class="icon-btn" type="button" data-close-scheduled-group-assignment aria-label="Đóng">×</button>
+      </div>
+      <form id="scheduledGroupAssignmentForm" class="form-stack">
+        <label>
+          Nhân viên nhận toàn bộ Phiếu
+          <select id="scheduledGroupEmployeeSelect" required>
+            <option value="">Chọn nhân viên</option>
+          </select>
+        </label>
+        <p id="scheduledGroupAssignmentHelp" class="small-note">Chỉ hiển thị nhân viên đang làm, đúng nhóm và có thể nhận việc.</p>
+        <div class="modal-footer-actions">
+          <button class="btn ghost" type="button" data-close-scheduled-group-assignment>Hủy</button>
+          <button id="confirmScheduledGroupAssignmentBtn" class="btn primary" type="submit">Giao Phiếu ngay</button>
         </div>
       </form>
     </div>
@@ -11733,7 +11791,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260920-ship-overtime-lunch-v75"></script>
+  <script type="module" src="app.js?v=20260920-scheduled-group-workorders-v76"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12345,5 +12403,53 @@
       padding: 8px !important;
       border-radius: 13px !important;
     }
+  }
+
+  /* Lên lịch Phiếu công việc theo Nhóm nhân viên. */
+  .schedule-work-order-btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:7px;
+    color:#fff!important; border-color:#7c3aed!important;
+    background:linear-gradient(135deg,#7c3aed,#4f46e5)!important;
+    box-shadow:0 12px 26px rgba(124,58,237,.24)!important;
+  }
+  .schedule-work-order-btn:hover { color:#fff!important; filter:brightness(.96); }
+  .schedule-work-order-mobile-btn { display:none!important; }
+  .scheduled-work-order-config {
+    padding:16px; border:1px dashed #a78bfa; border-radius:18px;
+    background:linear-gradient(135deg,#faf5ff,#eef2ff);
+  }
+  .scheduled-work-order-config-heading { display:flex; align-items:flex-start; gap:10px; margin-bottom:14px; }
+  .scheduled-work-order-config-heading > span { font-size:1.5rem; line-height:1; }
+  .scheduled-work-order-config-heading div { display:grid; gap:3px; }
+  .scheduled-work-order-config-heading small { color:#64748b; line-height:1.45; }
+  .scheduled-work-order-config-grid { display:grid; grid-template-columns:1fr 1fr 1.4fr; gap:12px; }
+  .scheduled-work-order-config-grid label { display:grid; gap:7px; font-weight:800; color:#172033; }
+  .scheduled-work-order-config-grid input,
+  .scheduled-work-order-config-grid select { width:100%; box-sizing:border-box; }
+  .scheduled-work-order-note { margin:12px 0 0; color:#5b21b6; }
+  #taskModal.is-schedule-mode .task-row-schedule-grid { grid-template-columns:1fr; }
+  #taskModal.is-schedule-mode .task-row-schedule-grid > .task-row-field:nth-child(2) { display:none; }
+  #taskModal.is-schedule-mode .task-create-subtitle::after {
+    content:" Hệ thống sẽ tự tạo Phiếu chưa giao việc đúng thời điểm đã chọn.";
+  }
+  .scheduled-group-assignment-card { border:1px solid #c4b5fd; }
+  .ticket-group.is-scheduled-group-ticket { border-color:#8b5cf6; box-shadow:0 12px 30px rgba(124,58,237,.12); }
+  .scheduled-group-ticket-status {
+    display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-top:7px;
+    color:#5b21b6; font-size:.8rem; font-weight:800;
+  }
+  .scheduled-group-ticket-status span {
+    padding:5px 9px; border-radius:999px; background:#ede9fe;
+  }
+  .scheduled-group-countdown.is-expired { color:#b91c1c; background:#fee2e2; }
+
+  @media (max-width: 768px) {
+    .schedule-work-order-desktop-btn { display:none!important; }
+    .mobile-task-panel-menu .schedule-work-order-mobile-btn.hidden { display:none!important; }
+    .mobile-task-panel-menu .schedule-work-order-mobile-btn:not(.hidden) { display:flex!important; }
+    .scheduled-work-order-config-grid { grid-template-columns:1fr 1fr; }
+    .scheduled-work-order-config-grid label:last-child { grid-column:1 / -1; }
+    .scheduled-work-order-config { padding:13px; }
+    #scheduleWorkOrderBtn { width:100%; }
   }
 </style>

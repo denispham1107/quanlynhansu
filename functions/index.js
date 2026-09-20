@@ -4,11 +4,13 @@ const crypto = require("node:crypto");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth: getAdminAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { getFunctions: getAdminFunctions } = require("firebase-admin/functions");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getStorage: getAdminStorage } = require("firebase-admin/storage");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onTaskDispatched } = require("firebase-functions/v2/tasks");
 const { defineSecret } = require("firebase-functions/params");
 
 initializeApp();
@@ -37,6 +39,9 @@ const WORK_SUPERVISION_TIME_ZONE = "Asia/Ho_Chi_Minh";
 const WORK_SUPERVISION_ACTIVE_TASK_STATUSES = ["doing", "lunch_break", "hotel", "redo", "overdue"];
 const HOTEL_SECONDS_PER_PET = 4 * 60 + 30;
 const HOTEL_EXCLUSIVE_ACTIVE_STATUSES = new Set(["doing", "hotel", "redo", "overdue"]);
+const SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MINUTES = 10;
+const SCHEDULED_GROUP_LUNCH_DEFAULT_MINUTES = 30;
+const SCHEDULED_QUEUE_LOOKAHEAD_MS = 28 * 24 * 60 * 60 * 1000;
 
 function pushTokenDocumentId(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -669,6 +674,846 @@ exports.assignDraftTaskFromSupervisionLunch = onCall({
   });
 
   return { assigned: true, ...result };
+});
+
+
+// =========================
+// Lên lịch Phiếu công việc theo Nhóm nhân viên
+// =========================
+function scheduledQueueTaskId(scheduleId, stage) {
+  return crypto.createHash("sha256").update(`${stage}:${scheduleId}`).digest("hex").slice(0, 36);
+}
+
+function scheduledQueue(functionName) {
+  return getAdminFunctions().taskQueue(`locations/${REGION}/functions/${functionName}`);
+}
+
+function normalizeScheduledWorkPhoto(photo = {}, index = 0) {
+  const url = String(photo?.url || "").trim().slice(0, 4000);
+  if (!url) return null;
+  return {
+    id: String(photo?.id || `scheduled-photo-${index + 1}`).trim().slice(0, 180),
+    url,
+    storagePath: String(photo?.storagePath || photo?.fullPath || photo?.path || "").trim().slice(0, 1000),
+    name: String(photo?.name || `Ảnh công việc ${index + 1}`).trim().slice(0, 220),
+    contentType: String(photo?.contentType || "image/jpeg").trim().slice(0, 120),
+    uploadedAt: firestoreTimestampOrNull(photo?.uploadedAt) || Timestamp.now()
+  };
+}
+
+function normalizeScheduledWorkOrderRows(rawRows) {
+  if (!Array.isArray(rawRows) || !rawRows.length || rawRows.length > 50) {
+    throw new HttpsError("invalid-argument", "Phiếu lên lịch cần từ 1 đến 50 công việc.");
+  }
+
+  const rows = rawRows.map((rawRow, index) => {
+    const title = String(rawRow?.title || "").trim().slice(0, 180);
+    const description = String(rawRow?.description || "").trim().slice(0, 3000);
+    const taskDate = String(rawRow?.taskDate || "").trim();
+    const isLunchBreak = rawRow?.isLunchBreak === true;
+    const isHotel = rawRow?.isHotel === true;
+    const isShip = rawRow?.isShip === true;
+    const hotelPetCount = isHotel ? Math.max(0, Math.trunc(Number(rawRow?.hotelPetCount || 0))) : 0;
+    const deadlineMinutes = Math.max(0, Number(rawRow?.deadlineMinutes || 0));
+    const workPhotos = (Array.isArray(rawRow?.workPhotos) ? rawRow.workPhotos : [])
+      .slice(0, 100)
+      .map(normalizeScheduledWorkPhoto)
+      .filter(Boolean);
+
+    if (!title) throw new HttpsError("invalid-argument", `Công việc #${index + 1}: thiếu tên công việc.`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(taskDate)) {
+      throw new HttpsError("invalid-argument", `Công việc #${index + 1}: ngày giao việc không hợp lệ.`);
+    }
+    if (isLunchBreak && isHotel) {
+      throw new HttpsError("invalid-argument", `Công việc #${index + 1}: không thể đồng thời là Nghỉ trưa và Hotel.`);
+    }
+    if (isHotel && (!hotelPetCount || hotelPetCount > 500)) {
+      throw new HttpsError("invalid-argument", `Công việc #${index + 1}: Số lượng bé Hotel phải từ 1 đến 500.`);
+    }
+    if (!isHotel && (!deadlineMinutes || deadlineMinutes > 10080)) {
+      throw new HttpsError("invalid-argument", `Công việc #${index + 1}: thời gian quy định không hợp lệ.`);
+    }
+    if (isLunchBreak && deadlineMinutes > 30) {
+      throw new HttpsError("invalid-argument", `Công việc #${index + 1}: Phiếu Nghỉ trưa tối đa 30 phút.`);
+    }
+
+    return {
+      index,
+      title,
+      description,
+      taskDate,
+      deadlineMinutes,
+      isLunchBreak,
+      isHotel,
+      isShip,
+      hotelPetCount,
+      workPhotos
+    };
+  });
+
+  if (rows.filter((row) => row.isHotel).length > 1) {
+    throw new HttpsError("invalid-argument", "Mỗi Phiếu lên lịch chỉ được có tối đa 1 công việc Hotel.");
+  }
+  return rows;
+}
+
+async function enqueueScheduledStage(functionName, scheduleId, scheduleTime, stage) {
+  await scheduledQueue(functionName).enqueue(
+    { scheduleId },
+    {
+      scheduleTime,
+      id: scheduledQueueTaskId(scheduleId, stage),
+      dispatchDeadlineSeconds: 300
+    }
+  );
+}
+
+async function tryEnqueueScheduledMaterialization(scheduleId, scheduledAt) {
+  const scheduleTime = firestoreTimestampOrNull(scheduledAt)?.toDate();
+  if (!scheduleTime) return false;
+  if (scheduleTime.getTime() - Date.now() > SCHEDULED_QUEUE_LOOKAHEAD_MS) return false;
+
+  try {
+    await enqueueScheduledStage(
+      "materializeScheduledWorkOrder",
+      scheduleId,
+      scheduleTime,
+      "materialize"
+    );
+    await db.doc(`scheduledWorkOrders/${scheduleId}`).set({
+      materializationEnqueuedAt: Timestamp.now(),
+      queueEnqueueError: FieldValue.delete()
+    }, { merge: true });
+    return true;
+  } catch (error) {
+    if (String(error?.code || "").includes("task-already-exists")) return true;
+    console.error("Could not enqueue scheduled work order", scheduleId, error);
+    await db.doc(`scheduledWorkOrders/${scheduleId}`).set({
+      queueEnqueueError: String(error?.message || error).slice(0, 500),
+      queueEnqueueFailedAt: Timestamp.now()
+    }, { merge: true });
+    return false;
+  }
+}
+
+exports.createScheduledWorkOrder = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  const adminProfile = await assertAdmin(adminUid);
+  const name = String(request.data?.name || "").trim().slice(0, 180);
+  const employeeGroupId = String(request.data?.employeeGroupId || "").trim();
+  const scheduledForMs = Number(request.data?.scheduledForMs || 0);
+  const photoRequired = request.data?.photoRequired === true;
+  const requiredPhotoCount = photoRequired
+    ? Math.max(1, Math.min(100, Math.trunc(Number(request.data?.requiredPhotoCount || 1))))
+    : 0;
+  const rows = normalizeScheduledWorkOrderRows(request.data?.rows);
+
+  if (!name) throw new HttpsError("invalid-argument", "Vui lòng nhập tên Phiếu công việc.");
+  if (!employeeGroupId || employeeGroupId.includes("/") || employeeGroupId.length > 180) {
+    throw new HttpsError("invalid-argument", "Vui lòng chọn Nhóm nhân viên hợp lệ.");
+  }
+  if (!Number.isFinite(scheduledForMs) || scheduledForMs < Date.now() + 5000) {
+    throw new HttpsError("invalid-argument", "Thời điểm lên lịch phải sau thời điểm hiện tại ít nhất 5 giây.");
+  }
+
+  const groupSnapshot = await db.doc(`employeeGroups/${employeeGroupId}`).get();
+  if (!groupSnapshot.exists) {
+    throw new HttpsError("failed-precondition", "Nhóm nhân viên đã chọn không còn tồn tại.");
+  }
+
+  const scheduleRef = db.collection("scheduledWorkOrders").doc();
+  const now = Timestamp.now();
+  const scheduledAt = Timestamp.fromMillis(Math.trunc(scheduledForMs));
+  const employeeGroupName = String(groupSnapshot.data()?.name || "Nhóm nhân viên").trim().slice(0, 80);
+  const adminName = String(adminProfile?.name || request.auth.token?.email || "Admin").slice(0, 120);
+
+  await scheduleRef.set({
+    id: scheduleRef.id,
+    name,
+    employeeGroupId,
+    employeeGroupName,
+    scheduledAt,
+    rows,
+    photoRequired,
+    requiredPhotoCount,
+    status: "pending",
+    createdByUid: adminUid,
+    createdByName: adminName,
+    createdAt: now,
+    updatedAt: now,
+    materializationEnqueuedAt: null,
+    generatedAt: null,
+    generatedWorkOrderId: "",
+    assignmentDeadlineAt: null,
+    timeoutProcessedAt: null,
+    assignedAt: null,
+    assignedToUid: "",
+    assignedToName: ""
+  });
+
+  const enqueued = await tryEnqueueScheduledMaterialization(scheduleRef.id, scheduledAt);
+  return {
+    created: true,
+    scheduleId: scheduleRef.id,
+    scheduledForMs: scheduledAt.toMillis(),
+    employeeGroupId,
+    employeeGroupName,
+    enqueued
+  };
+});
+
+async function materializeScheduledWorkOrderById(scheduleIdInput) {
+  const scheduleId = String(scheduleIdInput || "").trim();
+  if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) return null;
+
+  const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+  const scheduleSnapshot = await scheduleRef.get();
+  if (!scheduleSnapshot.exists) return null;
+  const schedule = scheduleSnapshot.data() || {};
+  if (schedule.status === "assigned" || schedule.status === "cancelled") return null;
+
+  const workOrderId = `scheduled_${scheduleId}`.slice(0, 180);
+  const workOrderRef = db.doc(`workOrders/${workOrderId}`);
+  const rows = Array.isArray(schedule.rows) ? schedule.rows : [];
+  if (!rows.length) return null;
+  const taskRefs = rows.map((_, index) => db.doc(`tasks/${`${workOrderId}_${index + 1}`.slice(0, 180)}`));
+  const hotelDateKeys = [...new Set(rows.filter((row) => row.isHotel === true).map((row) => String(row.taskDate || "")))];
+  const hotelBudgetRefs = hotelDateKeys.map((dateKey) => db.doc(`hotelDailyBudgets/${dateKey}`));
+  const groupRef = db.doc(`employeeGroups/${String(schedule.employeeGroupId || "")}`);
+  let assignmentDeadlineAt = null;
+  let firstTaskId = taskRefs[0]?.id || "";
+  let alreadyGenerated = false;
+
+  await db.runTransaction(async (transaction) => {
+    const snapshots = await transaction.getAll(scheduleRef, workOrderRef, groupRef, ...hotelBudgetRefs);
+    const freshScheduleSnapshot = snapshots[0];
+    const workOrderSnapshot = snapshots[1];
+    const groupSnapshot = snapshots[2];
+    const freshSchedule = freshScheduleSnapshot.data() || {};
+
+    if (["assigned", "cancelled"].includes(String(freshSchedule.status || ""))) return;
+    if (workOrderSnapshot.exists || freshSchedule.status === "generated") {
+      alreadyGenerated = true;
+      assignmentDeadlineAt = firestoreTimestampOrNull(
+        freshSchedule.assignmentDeadlineAt || workOrderSnapshot.data()?.scheduledAssignmentDeadlineAt
+      );
+      firstTaskId = String(freshSchedule.firstTaskId || firstTaskId);
+      return;
+    }
+    if (!groupSnapshot.exists) {
+      transaction.update(scheduleRef, {
+        status: "failed",
+        failureReason: "Nhóm nhân viên không còn tồn tại.",
+        updatedAt: Timestamp.now()
+      });
+      return;
+    }
+
+    const now = Timestamp.now();
+    assignmentDeadlineAt = Timestamp.fromMillis(
+      now.toMillis() + SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MINUTES * 60 * 1000
+    );
+    const budgetByDate = new Map();
+    hotelDateKeys.forEach((dateKey, index) => {
+      const snapshot = snapshots[3 + index];
+      budgetByDate.set(dateKey, snapshot?.exists ? snapshot.data() : null);
+    });
+
+    transaction.set(workOrderRef, {
+      id: workOrderId,
+      name: String(freshSchedule.name || "Phiếu công việc lên lịch"),
+      createdByUid: String(freshSchedule.createdByUid || "system"),
+      createdByName: String(freshSchedule.createdByName || "Admin"),
+      createdAt: now,
+      updatedAt: now,
+      taskCount: rows.length,
+      status: "draft",
+      scheduledWorkOrder: true,
+      scheduleId,
+      scheduledAt: freshSchedule.scheduledAt || now,
+      scheduledGeneratedAt: now,
+      scheduledEmployeeGroupId: String(freshSchedule.employeeGroupId || ""),
+      scheduledEmployeeGroupName: String(freshSchedule.employeeGroupName || groupSnapshot.data()?.name || "Nhóm nhân viên"),
+      scheduledGroupAssignmentPending: true,
+      scheduledAssignmentDeadlineAt: assignmentDeadlineAt,
+      scheduledGroupTimeoutProcessed: false
+    }, { merge: false });
+
+    rows.forEach((row, index) => {
+      const taskRef = taskRefs[index];
+      const isHotel = row.isHotel === true;
+      const petCount = isHotel ? Math.max(0, Math.trunc(Number(row.hotelPetCount || 0))) : 0;
+      const dateKey = String(row.taskDate || "");
+      const existingBudget = isHotel ? budgetByDate.get(dateKey) : null;
+      const totalAllowedSeconds = petCount * HOTEL_SECONDS_PER_PET;
+      const consumedSeconds = Math.max(0, Math.round(Number(existingBudget?.consumedSeconds || 0)));
+      const hotelRemainingSeconds = isHotel ? Math.max(0, totalAllowedSeconds - consumedSeconds) : 0;
+      const deadlineMinutes = isHotel ? hotelRemainingSeconds / 60 : Math.max(0, Number(row.deadlineMinutes || 0));
+      const totalRequiredPhotoCount = isHotel ? petCount + 10 : 0;
+      const uploadedPhotoCount = isHotel ? Math.max(0, Math.trunc(Number(existingBudget?.uploadedPhotoCount || 0))) : 0;
+      const hotelRequiredPhotoCount = isHotel ? Math.max(0, totalRequiredPhotoCount - uploadedPhotoCount) : 0;
+      const workPhotos = Array.isArray(row.workPhotos) ? row.workPhotos.slice(0, 100) : [];
+
+      if (isHotel && !existingBudget) {
+        transaction.set(db.doc(`hotelDailyBudgets/${dateKey}`), {
+          id: dateKey,
+          date: dateKey,
+          petCount,
+          secondsPerPet: HOTEL_SECONDS_PER_PET,
+          totalAllowedSeconds,
+          consumedSeconds: 0,
+          totalRequiredPhotoCount,
+          uploadedPhotoCount: 0,
+          createdByUid: String(freshSchedule.createdByUid || "system"),
+          createdByName: String(freshSchedule.createdByName || "Admin"),
+          createdAt: now,
+          updatedAt: now,
+          createdFromScheduleId: scheduleId
+        }, { merge: false });
+      }
+
+      transaction.set(taskRef, {
+        id: taskRef.id,
+        title: String(row.title || "Công việc"),
+        description: String(row.description || ""),
+        taskDate: dateKey,
+        assignedToUid: "",
+        assignedToName: "",
+        assignedByUid: String(freshSchedule.createdByUid || "system"),
+        assignedByName: String(freshSchedule.createdByName || "Admin"),
+        workOrderId,
+        workOrderName: String(freshSchedule.name || "Phiếu công việc lên lịch"),
+        workOrderTaskCount: rows.length,
+        rowIndex: index,
+        createdAt: now,
+        deadlineMinutes,
+        isLunchBreak: row.isLunchBreak === true,
+        isHotel,
+        isShip: row.isShip === true,
+        hotelPetCount: petCount,
+        hotelAllowedMinutes: isHotel ? totalAllowedSeconds / 60 : 0,
+        hotelPhotoRequired: isHotel,
+        hotelTotalRequiredPhotoCount: totalRequiredPhotoCount,
+        hotelRequiredPhotoCount,
+        hotelPhotoInstruction: isHotel
+          ? `Chụp 10 hình ảnh không gian trong phòng, hành lang, ban công khu vực chó mèo hotel; chụp ${petCount} chuồng các bé đang ở.`
+          : "",
+        deadlineAt: null,
+        dispatchedAt: null,
+        queueStartAt: null,
+        pauseStartedAt: null,
+        remainingMsAtPause: null,
+        accumulatedWorkedMs: 0,
+        submittedAt: null,
+        approvedAt: null,
+        status: "draft",
+        actualMinutes: null,
+        resultType: null,
+        differenceMinutes: null,
+        differencePercent: null,
+        workPhotos,
+        workPhotoCount: workPhotos.length,
+        lastWorkPhotoUploadedAt: workPhotos.length ? now : null,
+        photoRequired: row.isLunchBreak === true || isHotel ? false : freshSchedule.photoRequired === true,
+        requiredPhotoCount: row.isLunchBreak === true || isHotel
+          ? 0
+          : Math.max(0, Math.trunc(Number(freshSchedule.requiredPhotoCount || 0))),
+        photos: [],
+        photoCount: 0,
+        lastPhotoUploadedAt: null,
+        scheduledWorkOrder: true,
+        scheduleId,
+        scheduledEmployeeGroupId: String(freshSchedule.employeeGroupId || ""),
+        scheduledEmployeeGroupName: String(freshSchedule.employeeGroupName || groupSnapshot.data()?.name || "Nhóm nhân viên")
+      }, { merge: false });
+    });
+
+    const adminNotificationRef = db.collection("notifications").doc(`scheduledCreated_${scheduleId}`.slice(0, 180));
+    transaction.set(adminNotificationRef, {
+      id: adminNotificationRef.id,
+      recipientUid: String(freshSchedule.createdByUid || ""),
+      type: "scheduled_work_order_created",
+      title: "Phiếu lên lịch đã được tạo",
+      message: `Phiếu “${String(freshSchedule.name || "Phiếu công việc")}” đã được tạo cho nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")}. Hãy giao trong 10 phút.`,
+      taskId: firstTaskId,
+      taskTitle: String(freshSchedule.name || "Phiếu công việc"),
+      actorUid: "system",
+      actorName: "Hệ thống Lên lịch",
+      createdAt: now,
+      readAt: null
+    }, { merge: false });
+
+    transaction.update(scheduleRef, {
+      status: "generated",
+      generatedAt: now,
+      generatedWorkOrderId: workOrderId,
+      firstTaskId,
+      assignmentDeadlineAt,
+      updatedAt: now,
+      failureReason: FieldValue.delete()
+    });
+  });
+
+  if (!assignmentDeadlineAt) return null;
+  try {
+    await enqueueScheduledStage(
+      "processScheduledGroupAssignmentTimeout",
+      scheduleId,
+      assignmentDeadlineAt.toDate(),
+      "assignment-timeout"
+    );
+    await scheduleRef.set({ timeoutEnqueuedAt: Timestamp.now() }, { merge: true });
+  } catch (error) {
+    if (!String(error?.code || "").includes("task-already-exists")) {
+      console.error("Could not enqueue scheduled assignment timeout", scheduleId, error);
+      await scheduleRef.set({
+        timeoutQueueError: String(error?.message || error).slice(0, 500),
+        timeoutQueueFailedAt: Timestamp.now()
+      }, { merge: true });
+    }
+  }
+
+  return { scheduleId, workOrderId, firstTaskId, alreadyGenerated };
+}
+
+exports.materializeScheduledWorkOrder = onTaskDispatched({
+  region: REGION,
+  timeoutSeconds: 300,
+  memory: "256MiB",
+  retryConfig: { maxAttempts: 5, minBackoffSeconds: 5 },
+  rateLimits: { maxConcurrentDispatches: 10 }
+}, async (request) => {
+  await materializeScheduledWorkOrderById(request.data?.scheduleId);
+});
+
+async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
+  const scheduleId = String(scheduleIdInput || "").trim();
+  if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) return null;
+
+  const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+  const scheduleSnapshot = await scheduleRef.get();
+  if (!scheduleSnapshot.exists) return null;
+  const schedule = scheduleSnapshot.data() || {};
+  if (schedule.status !== "generated" || schedule.timeoutProcessedAt) return null;
+  const deadline = firestoreTimestampOrNull(schedule.assignmentDeadlineAt);
+  if (deadline && deadline.toMillis() > Date.now() + 1000) return null;
+
+  const workOrderId = String(schedule.generatedWorkOrderId || `scheduled_${scheduleId}`);
+  const workOrderRef = db.doc(`workOrders/${workOrderId}`);
+  const usersSnapshot = await db.collection("users").get();
+  const employees = usersSnapshot.docs
+    .map((item) => ({ uid: item.id, ...item.data() }))
+    .filter((employee) => (
+      employee.role === "employee"
+      && String(employee.employeeGroupId || "") === String(schedule.employeeGroupId || "")
+      && employee.employmentStatus !== "off"
+    ));
+  const lunchEntries = employees.map((employee) => {
+    const suffix = crypto.createHash("sha256").update(employee.uid).digest("hex").slice(0, 18);
+    const lunchWorkOrderId = `scheduledGroupLunch_${scheduleId}_${suffix}`.slice(0, 180);
+    return {
+      employee,
+      workOrderRef: db.doc(`workOrders/${lunchWorkOrderId}`),
+      taskRef: db.doc(`tasks/${lunchWorkOrderId}`)
+    };
+  });
+
+  const now = Timestamp.now();
+  const result = await db.runTransaction(async (transaction) => {
+    const snapshots = await transaction.getAll(
+      scheduleRef,
+      workOrderRef,
+      ...lunchEntries.flatMap((entry) => [entry.workOrderRef, entry.taskRef])
+    );
+    const freshSchedule = snapshots[0]?.data() || {};
+    const workOrderSnapshot = snapshots[1];
+    const workOrder = workOrderSnapshot?.data() || {};
+    if (freshSchedule.status !== "generated" || freshSchedule.timeoutProcessedAt) {
+      return { created: 0 };
+    }
+    if (!workOrderSnapshot?.exists) {
+      transaction.update(scheduleRef, {
+        status: "cancelled",
+        cancelledAt: now,
+        cancellationReason: "Phiếu công việc đã bị xóa trước khi hết thời gian chờ giao.",
+        updatedAt: now
+      });
+      return { created: 0, cancelled: true };
+    }
+    if (
+      workOrder.scheduledGroupAssignmentPending !== true
+      || workOrder.status !== "draft"
+    ) return { created: 0 };
+
+    lunchEntries.forEach((entry, index) => {
+      const workOrderSnapshotAtIndex = snapshots[2 + index * 2];
+      const taskSnapshotAtIndex = snapshots[3 + index * 2];
+      const employeeName = String(entry.employee.name || entry.employee.email || "Nhân viên");
+      const lunchWorkOrderName = `Nghỉ trưa chờ giao việc - ${employeeName}`.slice(0, 180);
+      const deadlineAt = Timestamp.fromMillis(now.toMillis() + SCHEDULED_GROUP_LUNCH_DEFAULT_MINUTES * 60 * 1000);
+
+      transaction.set(entry.workOrderRef, {
+        id: entry.workOrderRef.id,
+        name: lunchWorkOrderName,
+        createdByUid: String(freshSchedule.createdByUid || "system"),
+        createdByName: "Hệ thống Lên lịch",
+        createdAt: workOrderSnapshotAtIndex?.data()?.createdAt || now,
+        updatedAt: now,
+        taskCount: 1,
+        status: "dispatched",
+        autoCreatedByScheduledGroupTimeout: true,
+        scheduleId,
+        sourceScheduledWorkOrderId: workOrderId
+      }, { merge: false });
+
+      transaction.set(entry.taskRef, {
+        id: entry.taskRef.id,
+        title: "Phiếu nghỉ trưa",
+        description: `Tự động tạo vì Phiếu lên lịch “${String(freshSchedule.name || "Phiếu công việc")}” của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau 10 phút. Phiếu chỉ kết thúc khi công việc được giao cho một thành viên trong nhóm.`,
+        taskDate: supervisionDateKey(new Date(now.toMillis())),
+        assignedToUid: entry.employee.uid,
+        assignedToName: employeeName,
+        assignedByUid: String(freshSchedule.createdByUid || "system"),
+        assignedByName: "Hệ thống Lên lịch",
+        workOrderId: entry.workOrderRef.id,
+        workOrderName: lunchWorkOrderName,
+        workOrderTaskCount: 1,
+        rowIndex: 0,
+        createdAt: taskSnapshotAtIndex?.data()?.createdAt || now,
+        deadlineMinutes: SCHEDULED_GROUP_LUNCH_DEFAULT_MINUTES,
+        isLunchBreak: true,
+        isHotel: false,
+        isShip: false,
+        hotelPetCount: 0,
+        hotelAllowedMinutes: 0,
+        deadlineAt,
+        dispatchedAt: now,
+        queueStartAt: now,
+        pauseStartedAt: null,
+        remainingMsAtPause: null,
+        accumulatedWorkedMs: 0,
+        submittedAt: null,
+        approvedAt: null,
+        status: "lunch_break",
+        actualMinutes: null,
+        resultType: null,
+        differenceMinutes: null,
+        differencePercent: null,
+        autoCreatedByScheduledGroupTimeout: true,
+        preventEmployeeCompletion: true,
+        scheduleId,
+        sourceScheduledWorkOrderId: workOrderId,
+        workPhotos: [],
+        workPhotoCount: 0,
+        lastWorkPhotoUploadedAt: null,
+        photoRequired: false,
+        requiredPhotoCount: 0,
+        photos: [],
+        photoCount: 0,
+        lastPhotoUploadedAt: null
+      }, { merge: false });
+
+      const notificationRef = db.doc(`notifications/${`scheduledLunch_${scheduleId}_${crypto.createHash("sha256").update(entry.employee.uid).digest("hex").slice(0, 18)}`.slice(0, 180)}`);
+      transaction.set(notificationRef, {
+        id: notificationRef.id,
+        recipientUid: entry.employee.uid,
+        type: "scheduled_group_lunch_created",
+        title: "Phiếu nghỉ trưa tự động",
+        message: `Phiếu lên lịch của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau 10 phút. Phiếu nghỉ trưa này sẽ tự kết thúc khi một thành viên trong nhóm nhận việc.`,
+        taskId: entry.taskRef.id,
+        taskTitle: "Phiếu nghỉ trưa",
+        actorUid: "system",
+        actorName: "Hệ thống Lên lịch",
+        createdAt: now,
+        readAt: null
+      }, { merge: false });
+    });
+
+    transaction.update(workOrderRef, {
+      scheduledGroupTimeoutProcessed: true,
+      scheduledGroupTimeoutProcessedAt: now,
+      updatedAt: now
+    });
+    transaction.update(scheduleRef, {
+      timeoutProcessedAt: now,
+      timeoutEmployeeCount: lunchEntries.length,
+      updatedAt: now
+    });
+
+    const adminNotificationRef = db.doc(`notifications/${`scheduledTimeoutAdmin_${scheduleId}`.slice(0, 180)}`);
+    transaction.set(adminNotificationRef, {
+      id: adminNotificationRef.id,
+      recipientUid: String(freshSchedule.createdByUid || ""),
+      type: "scheduled_group_timeout_admin",
+      title: "Phiếu lên lịch chưa được giao sau 10 phút",
+      message: `Đã tạo ${lunchEntries.length} Phiếu nghỉ trưa cho các nhân viên đang làm thuộc nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")}.`,
+      taskId: String(freshSchedule.firstTaskId || ""),
+      taskTitle: String(freshSchedule.name || "Phiếu công việc"),
+      actorUid: "system",
+      actorName: "Hệ thống Lên lịch",
+      createdAt: now,
+      readAt: null
+    }, { merge: false });
+
+    return { created: lunchEntries.length };
+  });
+  return { scheduleId, ...result };
+}
+
+exports.processScheduledGroupAssignmentTimeout = onTaskDispatched({
+  region: REGION,
+  timeoutSeconds: 300,
+  memory: "256MiB",
+  retryConfig: { maxAttempts: 5, minBackoffSeconds: 5 },
+  rateLimits: { maxConcurrentDispatches: 10 }
+}, async (request) => {
+  await processScheduledGroupAssignmentTimeoutById(request.data?.scheduleId);
+});
+
+exports.processScheduledWorkOrdersFallback = onSchedule({
+  schedule: "every 1 minutes",
+  region: REGION,
+  timeZone: WORK_SUPERVISION_TIME_ZONE,
+  timeoutSeconds: 300,
+  memory: "256MiB"
+}, async () => {
+  const nowMs = Date.now();
+  const snapshot = await db.collection("scheduledWorkOrders").where("status", "in", ["pending", "generated"]).get();
+  for (const item of snapshot.docs) {
+    const schedule = item.data() || {};
+    const scheduledAtMs = firestoreTimestampOrNull(schedule.scheduledAt)?.toMillis() || 0;
+    if (schedule.status === "pending") {
+      if (scheduledAtMs <= nowMs) {
+        await materializeScheduledWorkOrderById(item.id);
+      } else if (!schedule.materializationEnqueuedAt && scheduledAtMs - nowMs <= SCHEDULED_QUEUE_LOOKAHEAD_MS) {
+        await tryEnqueueScheduledMaterialization(item.id, schedule.scheduledAt);
+      }
+      continue;
+    }
+
+    const deadlineMs = firestoreTimestampOrNull(schedule.assignmentDeadlineAt)?.toMillis() || 0;
+    if (schedule.status === "generated" && !schedule.timeoutProcessedAt && deadlineMs && deadlineMs <= nowMs) {
+      await processScheduledGroupAssignmentTimeoutById(item.id);
+    }
+  }
+});
+
+exports.assignScheduledWorkOrderToGroupEmployee = onCall({
+  region: REGION,
+  timeoutSeconds: 120,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  const adminProfile = await assertAdmin(adminUid);
+  const workOrderId = String(request.data?.workOrderId || "").trim();
+  const employeeUid = String(request.data?.employeeUid || "").trim();
+  if (!workOrderId || !employeeUid || workOrderId.includes("/") || employeeUid.includes("/")) {
+    throw new HttpsError("invalid-argument", "Phiếu hoặc nhân viên được chọn không hợp lệ.");
+  }
+
+  const workOrderRef = db.doc(`workOrders/${workOrderId}`);
+  const employeeRef = db.doc(`users/${employeeUid}`);
+  const [workOrderSnapshot, employeeSnapshot, taskSnapshot, activeTaskSnapshot, lunchTaskSnapshot] = await Promise.all([
+    workOrderRef.get(),
+    employeeRef.get(),
+    db.collection("tasks").where("workOrderId", "==", workOrderId).get(),
+    db.collection("tasks").where("assignedToUid", "==", employeeUid).get(),
+    db.collection("tasks").where("sourceScheduledWorkOrderId", "==", workOrderId).get()
+  ]);
+  if (!workOrderSnapshot.exists) throw new HttpsError("not-found", "Phiếu lên lịch không còn tồn tại.");
+  const workOrder = workOrderSnapshot.data() || {};
+  const scheduleId = String(workOrder.scheduleId || "");
+  const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+  const tasks = taskSnapshot.docs.map((item) => ({ ref: item.ref, id: item.id, ...item.data() }));
+  const lunchTasks = lunchTaskSnapshot.docs.map((item) => ({ ref: item.ref, id: item.id, ...item.data() }));
+  const employee = employeeSnapshot.data() || {};
+
+  if (!scheduleId || workOrder.scheduledWorkOrder !== true || workOrder.scheduledGroupAssignmentPending !== true || workOrder.status !== "draft") {
+    throw new HttpsError("failed-precondition", "Phiếu lên lịch đã được giao hoặc không còn sẵn sàng.");
+  }
+  if (!tasks.length || tasks.some((task) => task.status !== "draft")) {
+    throw new HttpsError("failed-precondition", "Danh sách công việc của Phiếu lên lịch không còn ở trạng thái Chưa giao việc.");
+  }
+  if (employee.role !== "employee" || employee.employmentStatus === "off") {
+    throw new HttpsError("failed-precondition", "Nhân viên đã chọn đang Off hoặc không còn hợp lệ.");
+  }
+  if (String(employee.employeeGroupId || "") !== String(workOrder.scheduledEmployeeGroupId || "")) {
+    throw new HttpsError("permission-denied", "Chỉ được giao Phiếu cho nhân viên thuộc đúng nhóm đã lên lịch.");
+  }
+  const blockingTask = activeTaskSnapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .find((task) => (
+      task.isLunchBreak !== true
+      && ["doing", "hotel", "redo", "overdue"].includes(String(task.status || ""))
+    ));
+  if (blockingTask) {
+    throw new HttpsError("failed-precondition", `${String(employee.name || "Nhân viên")} đang có công việc chưa hoàn thành.`);
+  }
+
+  if (tasks.some((task) => task.isHotel === true)) {
+    const hotelSnapshot = await db.collection("tasks").where("isHotel", "==", true).get();
+    const blockingHotel = hotelSnapshot.docs
+      .map((item) => ({ id: item.id, ...item.data() }))
+      .find((task) => !tasks.some((candidate) => candidate.id === task.id) && isActivelyAssignedHotelTask(task));
+    if (blockingHotel) {
+      throw new HttpsError("failed-precondition", "Đang có một Phiếu Hotel khác hoạt động. Hãy đợi Phiếu đó hoàn thành.");
+    }
+  }
+
+  const now = Timestamp.now();
+  const adminName = String(adminProfile?.name || request.auth.token?.email || "Admin").slice(0, 120);
+  const employeeName = String(employee.name || employee.email || "Nhân viên").slice(0, 120);
+  let queueCursorMs = now.toMillis();
+  const orderedTasks = tasks.slice().sort((left, right) => Number(left.rowIndex || 0) - Number(right.rowIndex || 0));
+
+  const result = await db.runTransaction(async (transaction) => {
+    const allSnapshots = await transaction.getAll(
+      workOrderRef,
+      scheduleRef,
+      employeeRef,
+      ...orderedTasks.map((task) => task.ref),
+      ...lunchTasks.map((task) => task.ref)
+    );
+    const freshWorkOrder = allSnapshots[0]?.data() || {};
+    const freshSchedule = allSnapshots[1]?.data() || {};
+    const freshEmployee = allSnapshots[2]?.data() || {};
+    if (freshWorkOrder.scheduledGroupAssignmentPending !== true || freshWorkOrder.status !== "draft") {
+      throw new HttpsError("already-exists", "Phiếu lên lịch vừa được giao bởi một thao tác khác.");
+    }
+    if (freshSchedule.status !== "generated") {
+      throw new HttpsError("failed-precondition", "Lịch này không còn ở trạng thái chờ giao.");
+    }
+    if (freshEmployee.employmentStatus === "off" || String(freshEmployee.employeeGroupId || "") !== String(freshWorkOrder.scheduledEmployeeGroupId || "")) {
+      throw new HttpsError("failed-precondition", "Nhân viên không còn đủ điều kiện nhận Phiếu của nhóm này.");
+    }
+
+    orderedTasks.forEach((task, index) => {
+      const freshTask = allSnapshots[3 + index]?.data() || {};
+      if (freshTask.status !== "draft") {
+        throw new HttpsError("failed-precondition", "Một công việc trong Phiếu đã được thay đổi.");
+      }
+      const deadlineMinutes = Math.max(0, Number(freshTask.deadlineMinutes || 0));
+      if (deadlineMinutes <= 0) {
+        throw new HttpsError("failed-precondition", `Công việc “${String(freshTask.title || "Công việc")}” không còn thời gian thực hiện.`);
+      }
+      const queueStartAt = Timestamp.fromMillis(queueCursorMs);
+      queueCursorMs += Math.round(deadlineMinutes * 60 * 1000);
+      transaction.update(task.ref, {
+        assignedToUid: employeeUid,
+        assignedToName: employeeName,
+        assignedByUid: adminUid,
+        assignedByName: adminName,
+        status: freshTask.isLunchBreak === true ? "lunch_break" : freshTask.isHotel === true ? "hotel" : "doing",
+        dispatchedAt: now,
+        queueStartAt,
+        deadlineAt: Timestamp.fromMillis(queueCursorMs),
+        pauseStartedAt: null,
+        remainingMsAtPause: null,
+        accumulatedWorkedMs: Math.max(0, Number(freshTask.accumulatedWorkedMs || 0)),
+        scheduledAssignedAt: now,
+        scheduledAssignedByUid: adminUid
+      });
+    });
+
+    lunchTasks.forEach((lunchTask, index) => {
+      const freshLunch = allSnapshots[3 + orderedTasks.length + index]?.data() || {};
+      if (freshLunch.autoCreatedByScheduledGroupTimeout !== true || !["lunch_break", "overdue"].includes(String(freshLunch.status || ""))) return;
+      const start = firestoreTimestampOrNull(freshLunch.queueStartAt)
+        || firestoreTimestampOrNull(freshLunch.dispatchedAt)
+        || firestoreTimestampOrNull(freshLunch.createdAt)
+        || now;
+      const actualMs = Math.max(0, Number(freshLunch.accumulatedWorkedMs || 0))
+        + Math.max(0, now.toMillis() - start.toMillis());
+      const actualMinutes = Math.max(0, Math.ceil(actualMs / 60000));
+      const deadlineMinutes = Math.max(1, Number(freshLunch.deadlineMinutes || SCHEDULED_GROUP_LUNCH_DEFAULT_MINUTES));
+      const differenceMinutes = Math.abs(deadlineMinutes - actualMinutes);
+      const resultType = actualMinutes > deadlineMinutes ? "slower" : actualMinutes < deadlineMinutes ? "faster" : "on_time";
+      const differencePercent = resultType === "on_time"
+        ? 0
+        : Number(((differenceMinutes / (resultType === "slower" ? actualMinutes : deadlineMinutes)) * 100).toFixed(1));
+      transaction.update(lunchTask.ref, {
+        status: "completed",
+        submittedAt: now,
+        approvedAt: now,
+        actualMinutes,
+        resultType,
+        differenceMinutes,
+        differencePercent,
+        autoCompletedByScheduledGroupAssignment: true,
+        autoCompletedAt: now,
+        assignedScheduledWorkOrderId: workOrderId,
+        assignedScheduledEmployeeUid: employeeUid
+      });
+    });
+
+    transaction.update(workOrderRef, {
+      status: "dispatched",
+      scheduledGroupAssignmentPending: false,
+      scheduledAssignedAt: now,
+      scheduledAssignedToUid: employeeUid,
+      scheduledAssignedToName: employeeName,
+      updatedAt: now
+    });
+    transaction.update(scheduleRef, {
+      status: "assigned",
+      assignedAt: now,
+      assignedToUid: employeeUid,
+      assignedToName: employeeName,
+      updatedAt: now
+    });
+
+    const historyRef = db.doc(`workAssignmentHistory/${`scheduled_${scheduleId}`.slice(0, 180)}`);
+    transaction.set(historyRef, {
+      id: historyRef.id,
+      workOrderId,
+      workOrderName: String(freshWorkOrder.name || "Phiếu công việc lên lịch"),
+      workOrderCreatedAt: firestoreTimestampOrNull(freshWorkOrder.createdAt) || now,
+      assignedAt: now,
+      assignedByUid: adminUid,
+      assignedByName: adminName,
+      assignedEmployeeUids: [employeeUid],
+      assignedEmployeeNames: [employeeName],
+      taskIds: orderedTasks.map((task) => task.id),
+      taskNames: orderedTasks.map((task) => String(task.title || "Công việc")),
+      taskAssignments: orderedTasks.map((task) => ({
+        taskId: task.id,
+        taskName: String(task.title || "Công việc"),
+        employeeUid,
+        employeeName
+      })),
+      taskCount: orderedTasks.length,
+      source: "scheduled_group_assigned",
+      scheduleId,
+      scheduledEmployeeGroupId: String(freshWorkOrder.scheduledEmployeeGroupId || ""),
+      scheduledEmployeeGroupName: String(freshWorkOrder.scheduledEmployeeGroupName || ""),
+      completedScheduledLunchCount: lunchTasks.length
+    }, { merge: false });
+
+    const employeeNotificationRef = db.doc(`notifications/${`scheduledAssigned_${scheduleId}_${crypto.createHash("sha256").update(employeeUid).digest("hex").slice(0, 18)}`.slice(0, 180)}`);
+    transaction.set(employeeNotificationRef, {
+      id: employeeNotificationRef.id,
+      recipientUid: employeeUid,
+      type: "scheduled_work_order_assigned",
+      title: "Bạn có Phiếu công việc lên lịch mới",
+      message: `Admin đã giao Phiếu “${String(freshWorkOrder.name || "Phiếu công việc")}” của nhóm ${String(freshWorkOrder.scheduledEmployeeGroupName || "Nhân viên")} cho bạn.`,
+      taskId: orderedTasks[0].id,
+      taskTitle: String(orderedTasks[0].title || "Công việc"),
+      actorUid: adminUid,
+      actorName: adminName,
+      createdAt: now,
+      readAt: null
+    }, { merge: false });
+
+    return { employeeName, completedLunchCount: lunchTasks.length, taskCount: orderedTasks.length };
+  });
+
+  return { assigned: true, workOrderId, employeeUid, ...result };
 });
 
 

@@ -137,6 +137,11 @@ const assignDraftTaskFromSupervisionLunchCallable = httpsCallable(
   functions,
   "assignDraftTaskFromSupervisionLunch"
 );
+const createScheduledWorkOrderCallable = httpsCallable(functions, "createScheduledWorkOrder");
+const assignScheduledWorkOrderToGroupEmployeeCallable = httpsCallable(
+  functions,
+  "assignScheduledWorkOrderToGroupEmployee"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -187,6 +192,8 @@ const state = {
   photoShareCacheKey: "",
   unsubs: [],
   editingWorkOrderId: null,
+  taskModalMode: "create",
+  scheduledAssignmentWorkOrderId: "",
   editingWorkTemplateId: null,
   adminStatusFilter: "all",
   adminCompletedTypeFilter: "all",
@@ -355,10 +362,17 @@ const TASK_REVIEW_ALERT_AUTO_PLAY_TIMEOUT_MS = 1800;
 
 function getPendingTaskReviewCount(excludedTaskId = "") {
   const excludedId = String(excludedTaskId || "").trim();
-  return state.tasks.filter((task) => (
+  const submittedTaskCount = state.tasks.filter((task) => (
     task?.status === "submitted"
     && (!excludedId || task.id !== excludedId)
   )).length;
+  const scheduledDraftCount = state.workOrders.filter((workOrder) => (
+    workOrder?.scheduledWorkOrder === true
+    && workOrder?.status === "draft"
+    && workOrder?.scheduledGroupAssignmentPending === true
+  )).length;
+
+  return submittedTaskCount + scheduledDraftCount;
 }
 
 function getTaskReviewAlertButtons() {
@@ -510,7 +524,7 @@ function syncTaskReviewAlertSound() {
     if (!state.taskReviewAlertNeedsGestureToastShown) {
       state.taskReviewAlertNeedsGestureToastShown = true;
       toast(
-        `Có ${pendingCount} công việc đang chờ xác nhận. Âm báo sẽ tự bật ngay khi Admin chạm vào trang.`,
+        `Có ${pendingCount} Phiếu/công việc cần xử lý. Âm báo sẽ tự bật ngay khi Admin chạm vào trang.`,
         "info"
       );
     }
@@ -902,6 +916,8 @@ const els = {
   saveSupervisorPermissionsBtn: $("#saveSupervisorPermissionsBtn"),
   openTaskModalBtn: $("#openTaskModalBtn"),
   floatingCreateTaskBtn: $("#floatingCreateTaskBtn"),
+  openScheduledWorkOrderBtn: $("#openScheduledWorkOrderBtn"),
+  openScheduledWorkOrderMobileBtn: $("#openScheduledWorkOrderMobileBtn"),
   openWorkTemplatePageBtn: $("#openWorkTemplatePageBtn"),
   openEmployeeManagerPageBtn: $("#openEmployeeManagerPageBtn"),
   exportDataBtn: $("#exportDataBtn"),
@@ -955,6 +971,18 @@ const els = {
   addTaskRowBtn: $("#addTaskRowBtn"),
   taskRowsContainer: $("#taskRowsContainer"),
   saveDraftBtn: $("#saveDraftBtn"),
+  createTaskBtn: $("#createTaskBtn"),
+  scheduledWorkOrderConfig: $("#scheduledWorkOrderConfig"),
+  scheduledWorkOrderDate: $("#scheduledWorkOrderDate"),
+  scheduledWorkOrderTime: $("#scheduledWorkOrderTime"),
+  scheduledWorkOrderGroup: $("#scheduledWorkOrderGroup"),
+  scheduleWorkOrderBtn: $("#scheduleWorkOrderBtn"),
+  scheduledGroupAssignmentModal: $("#scheduledGroupAssignmentModal"),
+  scheduledGroupAssignmentForm: $("#scheduledGroupAssignmentForm"),
+  scheduledGroupAssignmentSummary: $("#scheduledGroupAssignmentSummary"),
+  scheduledGroupEmployeeSelect: $("#scheduledGroupEmployeeSelect"),
+  scheduledGroupAssignmentHelp: $("#scheduledGroupAssignmentHelp"),
+  confirmScheduledGroupAssignmentBtn: $("#confirmScheduledGroupAssignmentBtn"),
   deleteAllWorkOrdersBtn: $("#deleteAllWorkOrdersBtn"),
   openWorkOrderSettingsBtn: $("#openWorkOrderSettingsBtn"),
   workOrderSettingsPasswordModal: $("#workOrderSettingsPasswordModal"),
@@ -5579,6 +5607,8 @@ function applyManagementPermissionUI() {
   els.importDataBtn?.classList.toggle("hidden", !canImport);
   els.openGoogleCalendarImportBtn?.classList.toggle("hidden", !isAdmin);
   els.openGoogleCalendarImportMobileBtn?.classList.toggle("hidden", !isAdmin);
+  els.openScheduledWorkOrderBtn?.classList.toggle("hidden", !isAdmin);
+  els.openScheduledWorkOrderMobileBtn?.classList.toggle("hidden", !isAdmin);
   els.openEmployeeStatusHistoryBtn?.classList.toggle("hidden", !isAdmin);
   if (!isAdmin) closeEmployeeStatusHistoryModal();
 
@@ -5827,6 +5857,7 @@ function setupAdminDashboard() {
     (snapshot) => {
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       renderAdminTasks();
+      syncTaskReviewAlertSound();
     },
     handleSnapshotError
   );
@@ -6416,6 +6447,19 @@ function refreshEmployeeGroupControls() {
   if (els.employeeProfileGroupSelect) {
     els.employeeProfileGroupSelect.innerHTML = employeeGroupOptionsHtml(editValue);
     els.employeeProfileGroupSelect.value = state.employeeGroups.some((group) => group.id === editValue) ? editValue : "";
+  }
+
+  const scheduledValue = els.scheduledWorkOrderGroup?.value || "";
+  if (els.scheduledWorkOrderGroup) {
+    els.scheduledWorkOrderGroup.innerHTML = [
+      '<option value="">Chọn nhóm nhân viên</option>',
+      ...state.employeeGroups.map((group) => (
+        `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name || "Nhóm chưa đặt tên")}</option>`
+      ))
+    ].join("");
+    els.scheduledWorkOrderGroup.value = state.employeeGroups.some((group) => group.id === scheduledValue)
+      ? scheduledValue
+      : "";
   }
 
   renderEmployeeGroupList();
@@ -8438,6 +8482,13 @@ function activateTaskRow(row, { focusTitle = false, scrollIntoView = false } = {
 function addTaskRow({ focusTitle = false, scrollIntoView = false } = {}) {
   const row = createTaskRowElement();
   els.taskRowsContainer.appendChild(row);
+  if (state.taskModalMode === "schedule") {
+    const assignee = row.querySelector(".row-assignee");
+    if (assignee) {
+      assignee.value = "";
+      assignee.disabled = true;
+    }
+  }
   updateTaskRowHeadings();
   activateTaskRow(row, { focusTitle, scrollIntoView });
   syncPhotoRequirementDefaultFromTaskTypes();
@@ -8826,9 +8877,39 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   }
 });
 
+function setTaskModalMode(mode = "create") {
+  const scheduleMode = mode === "schedule";
+  state.taskModalMode = scheduleMode ? "schedule" : "create";
+  els.taskModal?.classList.toggle("is-schedule-mode", scheduleMode);
+  els.scheduledWorkOrderConfig?.classList.toggle("hidden", !scheduleMode);
+  els.saveDraftBtn?.classList.toggle("hidden", scheduleMode);
+  els.createTaskBtn?.classList.toggle("hidden", scheduleMode);
+  els.scheduleWorkOrderBtn?.classList.toggle("hidden", !scheduleMode);
+
+  $$("#taskRowsContainer .row-assignee").forEach((select) => {
+    if (scheduleMode) select.value = "";
+    select.disabled = scheduleMode;
+  });
+}
+
+function localDateTimeInputValues(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return {
+    date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    time: `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  };
+}
+
+function closeTaskModal() {
+  els.taskModal?.classList.add("hidden");
+  state.editingWorkOrderId = null;
+  setTaskModalMode("create");
+}
+
 function openCreateWorkOrderModal() {
   if (!requirePermission("createWorkOrder", "Tài khoản của bạn chưa được cấp quyền tạo Phiếu công việc.")) return;
 
+  setTaskModalMode("create");
   state.editingWorkOrderId = null;
   $("#taskModalTitle").textContent = "+ Tạo phiếu công việc";
   els.workOrderName.value = "";
@@ -8848,8 +8929,42 @@ function openCreateWorkOrderModal() {
 els.openTaskModalBtn?.addEventListener("click", openCreateWorkOrderModal);
 els.floatingCreateTaskBtn?.addEventListener("click", openCreateWorkOrderModal);
 
+function openScheduledWorkOrderModal() {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được lên lịch Phiếu công việc.", "error");
+    return;
+  }
+  if (!state.employeeGroups.length) {
+    toast("Hãy tạo ít nhất một Nhóm nhân viên trước khi lên lịch.", "error");
+    return;
+  }
+
+  state.editingWorkOrderId = null;
+  els.workOrderName.value = "";
+  resetTaskRows();
+  resetPhotoRequirementControls();
+  setTaskModalMode("schedule");
+
+  const defaultMoment = new Date(Date.now() + 5 * 60 * 1000);
+  const inputs = localDateTimeInputValues(defaultMoment);
+  if (els.scheduledWorkOrderDate) els.scheduledWorkOrderDate.value = inputs.date;
+  if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = inputs.time;
+  if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = "";
+  if (els.requiredPhotoCount) els.requiredPhotoCount.value = 1;
+  setPhotoRequirementChecked(true);
+
+  $("#taskModalTitle").textContent = "🗓 Lên lịch Phiếu công việc";
+  els.taskModal.classList.remove("hidden");
+  setMobileTaskPanelMenuOpen(false);
+}
+
+els.openScheduledWorkOrderBtn?.addEventListener("click", openScheduledWorkOrderModal);
+els.openScheduledWorkOrderMobileBtn?.addEventListener("click", openScheduledWorkOrderModal);
+
 function openEditWorkOrderModal(workOrderId) {
   if (!requirePermission("editWorkOrder", "Tài khoản của bạn chưa được cấp quyền sửa Phiếu chưa giao.")) return;
+
+  setTaskModalMode("create");
 
   const tasksInGroup = state.tasks
     .filter((task) => (task.workOrderId || "legacy") === workOrderId)
@@ -8898,9 +9013,7 @@ function openEditWorkOrderModal(workOrderId) {
 }
 
 $$("[data-close-modal]").forEach((button) => {
-  button.addEventListener("click", () => {
-    els.taskModal.classList.add("hidden");
-  });
+  button.addEventListener("click", closeTaskModal);
 });
 
 function readTaskRowsData() {
@@ -9699,13 +9812,100 @@ async function persistWorkOrder(dispatch, button) {
   }
 }
 
+async function createScheduledWorkOrder(button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được lên lịch Phiếu công việc.", "error");
+    return;
+  }
+
+  setButtonLoading(button, true, "Đang lên lịch...");
+
+  try {
+    const name = els.workOrderName?.value?.trim() || "";
+    const employeeGroupId = els.scheduledWorkOrderGroup?.value || "";
+    const dateValue = els.scheduledWorkOrderDate?.value || "";
+    const timeValue = els.scheduledWorkOrderTime?.value || "";
+    const selectedGroup = state.employeeGroups.find((group) => group.id === employeeGroupId);
+
+    if (!name) throw new Error("Vui lòng nhập tên Phiếu công việc.");
+    if (!dateValue || !timeValue) throw new Error("Vui lòng chọn đầy đủ ngày và giờ lên lịch.");
+    if (!selectedGroup) throw new Error("Vui lòng chọn Nhóm nhân viên hợp lệ.");
+
+    const scheduledMoment = new Date(dateValue + "T" + timeValue);
+    if (!Number.isFinite(scheduledMoment.getTime())) {
+      throw new Error("Ngày giờ lên lịch không hợp lệ.");
+    }
+    if (scheduledMoment.getTime() < Date.now() + 5000) {
+      throw new Error("Thời điểm lên lịch phải sau thời điểm hiện tại ít nhất 5 giây.");
+    }
+
+    const rows = readTaskRowsData().map((row) => ({
+      ...row,
+      assignedToUid: "",
+      assignedEmployee: null
+    }));
+    await prepareHotelRowsForPersistence(rows);
+    const validationError = validateTaskRows(rows);
+    if (validationError) throw new Error(validationError);
+
+    const photoOptions = readPhotoRequirementOptions();
+    const photoValidationError = validatePhotoRequirementOptions(photoOptions);
+    if (photoValidationError) throw new Error(photoValidationError);
+
+    const payloadRows = rows.map((row) => ({
+      title: row.title,
+      description: row.description,
+      taskDate: row.taskDate,
+      deadlineMinutes: Number(row.deadlineMinutes || 0),
+      isLunchBreak: Boolean(row.isLunchBreak),
+      isHotel: Boolean(row.isHotel),
+      isShip: Boolean(row.isShip),
+      hotelPetCount: Number(row.hotelPetCount || 0),
+      workPhotos: Array.isArray(row.workPhotos) ? row.workPhotos : []
+    }));
+
+    const result = await createScheduledWorkOrderCallable({
+      name,
+      employeeGroupId,
+      scheduledForMs: scheduledMoment.getTime(),
+      photoRequired: photoOptions.photoRequired,
+      requiredPhotoCount: photoOptions.requiredPhotoCount,
+      rows: payloadRows
+    });
+
+    closeTaskModal();
+    els.workOrderName.value = "";
+    resetTaskRows();
+    resetPhotoRequirementControls();
+
+    const groupName = result?.data?.employeeGroupName || selectedGroup.name || "Nhóm nhân viên";
+    toast(
+      "Đã lên lịch Phiếu “" + name + "” cho " + groupName + " lúc " + formatDateTime(scheduledMoment) + ".",
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    toast(error?.message || "Không thể lên lịch Phiếu công việc.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 els.createTaskForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (state.taskModalMode === "schedule") {
+    await createScheduledWorkOrder(els.scheduleWorkOrderBtn);
+    return;
+  }
   await persistWorkOrder(true, $("#createTaskBtn"));
 });
 
 els.saveDraftBtn.addEventListener("click", async () => {
   await persistWorkOrder(false, els.saveDraftBtn);
+});
+
+els.scheduleWorkOrderBtn?.addEventListener("click", async () => {
+  await createScheduledWorkOrder(els.scheduleWorkOrderBtn);
 });
 
 async function dispatchWorkOrder(workOrderId, button) {
@@ -10273,7 +10473,12 @@ function syncMobileSheetBodyLock() {
 }
 
 function hasVisibleTaskPanelMenuAction() {
-  return [els.deleteAllWorkOrdersBtn, els.openWorkOrderSettingsBtn, els.openGoogleCalendarImportMobileBtn]
+  return [
+    els.deleteAllWorkOrdersBtn,
+    els.openWorkOrderSettingsBtn,
+    els.openGoogleCalendarImportMobileBtn,
+    els.openScheduledWorkOrderMobileBtn
+  ]
     .some((button) => button && !button.classList.contains("hidden"));
 }
 
@@ -13418,6 +13623,13 @@ function withEmptyDraftGroups(groups, showEmptyDrafts) {
 function renderTicketGroup(group, mode = "admin") {
   const isDraft = !group.tasks.length || group.tasks.every((task) => task.status === "draft");
   const hasSubmittedTask = mode === "admin" && group.tasks.some((task) => task.status === "submitted");
+  const workOrder = getWorkOrderMeta(group.key);
+  const isScheduledGroupPending = Boolean(
+    workOrder?.scheduledWorkOrder === true
+    && workOrder?.status === "draft"
+    && workOrder?.scheduledGroupAssignmentPending === true
+  );
+  const scheduledAssignmentDeadlineMs = timestampToDate(workOrder?.scheduledAssignmentDeadlineAt)?.getTime() || 0;
   // Admin có thể thấy toàn bộ task trong phiếu, nhưng Nhân viên chỉ đọc được task của chính mình.
   // Vì vậy tiêu đề phiếu phải dùng tổng số công việc lưu ở workOrders.taskCount, không dùng số task đang hiển thị.
   const taskCount = Number(group.totalTaskCount || group.tasks.length || 0);
@@ -13426,11 +13638,13 @@ function renderTicketGroup(group, mode = "admin") {
   const actionButtons = [];
 
   if (mode === "admin" && isDraft) {
-    if (hasPermission("editWorkOrder")) {
+    if (isScheduledGroupPending && group.tasks.length) {
+      actionButtons.push(`<button class="btn schedule-work-order-btn small" data-action="open-scheduled-group-assignment" data-work-order-id="${escapeHtml(group.key)}" type="button">👤 Giao cho nhóm</button>`);
+    } else if (hasPermission("editWorkOrder")) {
       actionButtons.push(`<button class="btn ghost small" data-action="edit-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Sửa phiếu</button>`);
     }
 
-    if (group.tasks.length && hasPermission("dispatchWorkOrder")) {
+    if (!isScheduledGroupPending && group.tasks.length && hasPermission("dispatchWorkOrder")) {
       actionButtons.push(`<button class="btn secondary small" data-action="dispatch-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">🚀 Giao việc</button>`);
     }
   }
@@ -13444,6 +13658,7 @@ function renderTicketGroup(group, mode = "admin") {
   const ticketClasses = [
     "ticket-group",
     isDraft ? "is-draft-ticket" : "",
+    isScheduledGroupPending ? "is-scheduled-group-ticket" : "",
     hasSubmittedTask ? "is-awaiting-admin-confirmation" : ""
   ].filter(Boolean).join(" ");
 
@@ -13455,6 +13670,14 @@ function renderTicketGroup(group, mode = "admin") {
             <span class="ticket-badge ${isDraft ? "is-draft-badge" : ""}">${isDraft ? "Chưa giao việc" : "Phiếu công việc"}</span>
             <h4 title="${escapeHtml(ticketTitle)}">${escapeHtml(ticketTitle)}</h4>
             ${hasSubmittedTask ? '<span class="admin-confirm-attention-badge">Chờ xác nhận hoàn thành</span>' : ""}
+            ${isScheduledGroupPending ? `
+              <div class="scheduled-group-ticket-status">
+                <span>🗓 Nhóm: ${escapeHtml(workOrder?.scheduledEmployeeGroupName || "Nhân viên")}</span>
+                <span class="scheduled-group-countdown" data-scheduled-assignment-deadline-ms="${scheduledAssignmentDeadlineMs}" data-scheduled-assignment-countdown>
+                  ${scheduledAssignmentDeadlineMs > Date.now() ? `Còn ${formatCountdown(scheduledAssignmentDeadlineMs - Date.now())}` : "Đã hết 10 phút - chờ giao việc"}
+                </span>
+              </div>
+            ` : ""}
           </div>
         </div>
         ${headerActions}
@@ -13656,6 +13879,7 @@ function renderEmployeeTasks() {
 function canAdminReassignTask(task, mode, displayStatus = null) {
   if (mode !== "admin" || !hasPermission("reassignTasks")) return false;
   if (!task?.id) return false;
+  if (isScheduledGroupLockedLunchTask(task)) return false;
 
   const visibleStatus = displayStatus || getDisplayStatus(task);
 
@@ -13682,6 +13906,20 @@ function isAutoWorkSupervisionLunchTask(task) {
     || Boolean(task.workSupervisionCycleId)
     || String(task.workOrderId || "").startsWith("supervisionLunch_")
     || String(task.id || "").startsWith("supervisionLunch_");
+}
+
+function isScheduledGroupLockedLunchTask(task) {
+  if (!task || !isLunchBreakTask(task)) return false;
+
+  return task.autoCreatedByScheduledGroupTimeout === true
+    || task.preventEmployeeCompletion === true
+    || Boolean(task.sourceScheduledWorkOrderId)
+    || String(task.workOrderId || "").startsWith("scheduledGroupLunch_")
+    || String(task.id || "").startsWith("scheduledGroupLunch_");
+}
+
+function isEmployeeCompletionLockedLunchTask(task) {
+  return isAutoWorkSupervisionLunchTask(task) || isScheduledGroupLockedLunchTask(task);
 }
 
 function getDraftTasksForSupervisionLunchAssignment() {
@@ -14040,7 +14278,7 @@ function renderTaskCard(task, mode) {
 
   const canEmployeeSubmit =
     mode === "employee" &&
-    !isAutoWorkSupervisionLunchTask(task) &&
+    !isEmployeeCompletionLockedLunchTask(task) &&
     ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status) &&
     task.status !== "completed" &&
     task.status !== "submitted" &&
@@ -14109,8 +14347,11 @@ function renderTaskCard(task, mode) {
     canAdminExtendTime: canAdminExtendTaskTime(task, mode),
     canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
     showDisabledAutoSupervisionLunchSubmit: mode === "employee"
-      && isAutoWorkSupervisionLunchTask(task)
+      && isEmployeeCompletionLockedLunchTask(task)
       && task.status === "lunch_break",
+    disabledAutomaticLunchMessage: isScheduledGroupLockedLunchTask(task)
+      ? "Chờ Admin giao Phiếu lên lịch cho một nhân viên trong nhóm"
+      : "Chờ Admin chọn công việc tiếp theo",
     submitPhotoReady: photoCompletionState.ready,
     submitPhotoBlockedReason: getTaskPhotoCompletionBlockedMessage(task),
     submitInvalidPhotoCount: photoCompletionState.required && !photoCompletionState.ready
@@ -14755,6 +14996,7 @@ function canAdminEndAssignedTask(task, mode) {
     || !task?.assignedToUid
     || isEndTaskButtonHidden()
   ) return false;
+  if (isScheduledGroupLockedLunchTask(task)) return false;
 
   // Admin được chủ động kết thúc mọi công việc đã giao đang còn chạy.
   // Không hiện nút cho Phiếu nháp, Chờ chọn người, Chờ xác nhận hoặc Đã hoàn thành.
@@ -14847,11 +15089,12 @@ function renderTaskActions(task, permissions) {
   }
 
   if (permissions.showDisabledAutoSupervisionLunchSubmit) {
+    const lockedMessage = permissions.disabledAutomaticLunchMessage || "Chờ Admin giao công việc";
     buttons.push(`
-      <button class="btn primary" type="button" disabled title="Phiếu này chỉ kết thúc khi Admin giao một công việc Chưa giao việc cho bạn">
+      <button class="btn primary" type="button" disabled title="${escapeHtml(lockedMessage)}">
         Hoàn thành
       </button>
-      <span class="task-photo-block-message">Chờ Admin chọn công việc tiếp theo</span>
+      <span class="task-photo-block-message">${escapeHtml(lockedMessage)}</span>
     `);
   }
 
@@ -14943,6 +15186,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "open-reassign-employee") {
     openReassignEmployeeModal(taskId);
+  }
+
+  if (action === "open-scheduled-group-assignment") {
+    openScheduledGroupAssignmentModal(button.dataset.workOrderId);
   }
 
   if (action === "upload-task-photos") {
@@ -17206,6 +17453,110 @@ async function openPhotoUploadPicker(taskId, button) {
 }
 
 // =========================
+// Giao Phiếu lên lịch cho đúng một nhân viên trong Nhóm đã chọn
+// =========================
+function getScheduledGroupAssignmentCandidates(workOrder) {
+  const groupId = String(workOrder?.scheduledEmployeeGroupId || "");
+  return state.employees
+    .filter((employee) => (
+      employee.uid
+      && employee.employeeGroupId === groupId
+      && isEmployeeWorking(employee)
+      && !employeeHasUnfinishedNonLunchTask(employee.uid)
+    ))
+    .sort((left, right) => (left.name || left.email || "").localeCompare(
+      right.name || right.email || "",
+      "vi"
+    ));
+}
+
+function closeScheduledGroupAssignmentModal() {
+  state.scheduledAssignmentWorkOrderId = "";
+  els.scheduledGroupAssignmentForm?.reset();
+  els.scheduledGroupAssignmentModal?.classList.add("hidden");
+}
+
+function openScheduledGroupAssignmentModal(workOrderId) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được giao Phiếu lên lịch.", "error");
+    return;
+  }
+
+  const workOrder = getWorkOrderMeta(workOrderId);
+  if (
+    !workOrder
+    || workOrder.scheduledWorkOrder !== true
+    || workOrder.status !== "draft"
+    || workOrder.scheduledGroupAssignmentPending !== true
+  ) {
+    toast("Phiếu lên lịch này không còn chờ giao.", "error");
+    return;
+  }
+
+  const candidates = getScheduledGroupAssignmentCandidates(workOrder);
+  state.scheduledAssignmentWorkOrderId = workOrder.id;
+  if (els.scheduledGroupAssignmentSummary) {
+    els.scheduledGroupAssignmentSummary.textContent =
+      "Phiếu “" + (workOrder.name || "Phiếu công việc") + "” • Nhóm "
+      + (workOrder.scheduledEmployeeGroupName || "Nhân viên");
+  }
+  if (els.scheduledGroupEmployeeSelect) {
+    els.scheduledGroupEmployeeSelect.innerHTML = [
+      '<option value="">Chọn nhân viên</option>',
+      ...candidates.map((employee) => (
+        '<option value="' + escapeHtml(employee.uid) + '">'
+        + escapeHtml(employee.name || employee.email || "Nhân viên")
+        + (employee.email ? " - " + escapeHtml(employee.email) : "")
+        + "</option>"
+      ))
+    ].join("");
+    els.scheduledGroupEmployeeSelect.disabled = !candidates.length;
+  }
+  if (els.scheduledGroupAssignmentHelp) {
+    els.scheduledGroupAssignmentHelp.textContent = candidates.length
+      ? "Chọn đúng một nhân viên đang làm trong nhóm. Toàn bộ công việc trong Phiếu sẽ được giao cho người này."
+      : "Hiện không có nhân viên đang làm trong nhóm và sẵn sàng nhận việc.";
+  }
+  if (els.confirmScheduledGroupAssignmentBtn) {
+    els.confirmScheduledGroupAssignmentBtn.disabled = !candidates.length;
+  }
+  els.scheduledGroupAssignmentModal?.classList.remove("hidden");
+}
+
+$$("[data-close-scheduled-group-assignment]").forEach((button) => {
+  button.addEventListener("click", closeScheduledGroupAssignmentModal);
+});
+
+els.scheduledGroupAssignmentForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const workOrderId = state.scheduledAssignmentWorkOrderId;
+  const employeeUid = els.scheduledGroupEmployeeSelect?.value || "";
+  const button = els.confirmScheduledGroupAssignmentBtn;
+
+  setButtonLoading(button, true, "Đang giao Phiếu...");
+  try {
+    if (!workOrderId) throw new Error("Không tìm thấy Phiếu lên lịch cần giao.");
+    if (!employeeUid) throw new Error("Vui lòng chọn một nhân viên trong nhóm.");
+
+    const result = await assignScheduledWorkOrderToGroupEmployeeCallable({
+      workOrderId,
+      employeeUid
+    });
+    closeScheduledGroupAssignmentModal();
+    toast(
+      "Đã giao Phiếu cho " + (result?.data?.employeeName || "nhân viên")
+      + " và kết thúc các Phiếu nghỉ trưa chờ giao việc của nhóm.",
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    toast(error?.message || "Không thể giao Phiếu lên lịch.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+});
+
+// =========================
 // Đổi nhân viên phụ trách task
 // =========================
 function renderReassignEmployeeOptions(taskId) {
@@ -17952,8 +18303,12 @@ async function submitTask(taskId, button) {
       throw new Error("Bạn không có quyền hoàn thành công việc này.");
     }
 
-    if (isAutoWorkSupervisionLunchTask(task)) {
-      throw new Error("Phiếu nghỉ trưa tự động do Giám sát tạo chỉ kết thúc khi Admin giao một công việc Chưa giao việc cho bạn.");
+    if (isEmployeeCompletionLockedLunchTask(task)) {
+      throw new Error(
+        isScheduledGroupLockedLunchTask(task)
+          ? "Phiếu nghỉ trưa này chỉ kết thúc khi Admin giao Phiếu lên lịch cho một nhân viên trong nhóm."
+          : "Phiếu nghỉ trưa tự động do Giám sát tạo chỉ kết thúc khi Admin giao một công việc Chưa giao việc cho bạn."
+      );
     }
 
     const photoBlockedMessage = getTaskPhotoCompletionBlockedMessage(task);
@@ -18088,6 +18443,10 @@ async function endAssignedTask(taskId, button) {
       id: taskSnap.id,
       ...taskSnap.data()
     };
+
+    if (isScheduledGroupLockedLunchTask(task)) {
+      throw new Error("Phiếu nghỉ trưa này chỉ kết thúc khi Phiếu lên lịch được giao cho một nhân viên trong nhóm.");
+    }
 
     if (!task.assignedToUid) {
       throw new Error("Công việc này chưa được giao cho nhân viên.");
@@ -18523,6 +18882,15 @@ function calculateResultFromActualMinutes(task, actualMinutesInput) {
 setInterval(updateCountdowns, 1000);
 
 function updateCountdowns() {
+  $$("[data-scheduled-assignment-deadline-ms]").forEach((countdown) => {
+    const deadlineMs = Number(countdown.dataset.scheduledAssignmentDeadlineMs || 0);
+    const remainingMs = deadlineMs - Date.now();
+    countdown.textContent = remainingMs > 0
+      ? "Còn " + formatCountdown(remainingMs) + " để giao Phiếu"
+      : "Đã hết 10 phút - chờ giao việc";
+    countdown.classList.toggle("is-expired", remainingMs <= 0);
+  });
+
   $$('[data-task-card]').forEach((card) => {
     const rawStatus = card.dataset.rawStatus;
     const countdowns = Array.from(card.querySelectorAll('[data-countdown]'));

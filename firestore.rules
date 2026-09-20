@@ -647,8 +647,20 @@ service cloud.firestore {
         && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
         && !(
           dataIsLunchBreak(resource.data)
-          && resource.data.keys().hasAny(["autoCreatedByWorkSupervision"])
-          && resource.data.autoCreatedByWorkSupervision == true
+          && (
+            (
+              resource.data.keys().hasAny(["autoCreatedByWorkSupervision"])
+              && resource.data.autoCreatedByWorkSupervision == true
+            )
+            || (
+              resource.data.keys().hasAny(["autoCreatedByScheduledGroupTimeout"])
+              && resource.data.autoCreatedByScheduledGroupTimeout == true
+            )
+            || (
+              resource.data.keys().hasAny(["preventEmployeeCompletion"])
+              && resource.data.preventEmployeeCompletion == true
+            )
+          )
         )
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "submittedAt"])
         && request.resource.data.status == "submitted"
