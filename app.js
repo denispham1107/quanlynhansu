@@ -5857,6 +5857,7 @@ function setupAdminDashboard() {
     (snapshot) => {
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       renderAdminTasks();
+      renderWorkSupervisionCountdown();
       syncTaskReviewAlertSound();
     },
     handleSnapshotError
@@ -11823,6 +11824,10 @@ function resetWorkSupervisionEmployeeNotificationState() {
 }
 
 function getWorkSupervisionEmployeeReminderContext() {
+  // Phiếu lên lịch có thông báo/bộ đếm 10 phút riêng. Không phát nhắc lại
+  // theo chu kỳ 15 giây của Giám sát công việc chung.
+  if (getCurrentEmployeeScheduledGroupCountdownState()) return null;
+
   const data = state.workSupervisionState || {};
   const cycleId = String(data.cycleId || "").trim();
   const currentUid = String(state.user?.uid || "").trim();
@@ -11945,6 +11950,95 @@ async function requestWorkSupervisionProcessing(data = {}) {
   }
 }
 
+function hasGeneralUnassignedWorkForSupervision() {
+  const today = todayInputValue();
+  return state.tasks.some((task) => (
+    task?.scheduledWorkOrder !== true
+    && (
+      (task.status === "draft" && getTaskDateValue(task) === today)
+      || task.status === "waiting_assignee"
+    )
+  ));
+}
+
+function getActiveScheduledGroupCountdownStates() {
+  const scheduledWorkOrders = state.workOrders
+    .filter((workOrder) => (
+      workOrder?.scheduledWorkOrder === true
+      && workOrder?.status === "draft"
+      && workOrder?.scheduledGroupAssignmentPending === true
+      && workOrder?.scheduledEmployeeGroupId
+      && timestampToDate(workOrder?.scheduledAssignmentDeadlineAt)
+    ))
+    .sort((left, right) => (
+      (timestampToDate(left.scheduledAssignmentDeadlineAt)?.getTime() || Number.MAX_SAFE_INTEGER)
+      - (timestampToDate(right.scheduledAssignmentDeadlineAt)?.getTime() || Number.MAX_SAFE_INTEGER)
+    ));
+
+  return scheduledWorkOrders.flatMap((workOrder) => {
+    const groupId = String(workOrder.scheduledEmployeeGroupId || "");
+    const groupName = String(workOrder.scheduledEmployeeGroupName || "Nhóm nhân viên");
+    return state.employees
+      .filter((employee) => (
+        employee?.uid
+        && isEmployeeWorking(employee)
+        && String(employee.employeeGroupId || "") === groupId
+      ))
+      .map((employee) => ({
+        kind: "scheduled_group",
+        id: "scheduled:" + workOrder.id + ":" + employee.uid,
+        cycleId: String(workOrder.scheduleId || workOrder.id),
+        employeeUid: employee.uid,
+        employeeName: getEmployeeSummaryName(employee),
+        groupId,
+        groupName,
+        workOrderId: workOrder.id,
+        workOrderName: String(workOrder.name || "Phiếu lên lịch"),
+        endsAt: workOrder.scheduledAssignmentDeadlineAt,
+        active: true,
+        status: "counting"
+      }));
+  });
+}
+
+function getCurrentEmployeeScheduledGroupCountdownState() {
+  if (
+    state.profile?.role !== "employee"
+    || !state.user?.uid
+    || !isEmployeeWorking(state.profile)
+    || !state.profile?.employeeGroupId
+  ) return null;
+
+  const groupId = String(state.profile.employeeGroupId || "");
+  const workOrder = state.workOrders
+    .filter((item) => (
+      item?.scheduledWorkOrder === true
+      && item?.status === "draft"
+      && item?.scheduledGroupAssignmentPending === true
+      && String(item.scheduledEmployeeGroupId || "") === groupId
+      && timestampToDate(item.scheduledAssignmentDeadlineAt)
+    ))
+    .sort((left, right) => (
+      (timestampToDate(left.scheduledAssignmentDeadlineAt)?.getTime() || Number.MAX_SAFE_INTEGER)
+      - (timestampToDate(right.scheduledAssignmentDeadlineAt)?.getTime() || Number.MAX_SAFE_INTEGER)
+    ))[0];
+
+  if (!workOrder) return null;
+  return {
+    kind: "scheduled_group",
+    cycleId: String(workOrder.scheduleId || workOrder.id),
+    employeeUid: state.user.uid,
+    employeeName: getEmployeeSummaryName(state.profile),
+    groupId,
+    groupName: String(workOrder.scheduledEmployeeGroupName || state.profile.employeeGroupName || "Nhóm nhân viên"),
+    workOrderId: workOrder.id,
+    workOrderName: String(workOrder.name || "Phiếu lên lịch"),
+    endsAt: workOrder.scheduledAssignmentDeadlineAt,
+    active: true,
+    status: "counting"
+  };
+}
+
 function getActiveAdminWorkSupervisionStates() {
   return (Array.isArray(state.workSupervisionStates) ? state.workSupervisionStates : [])
     .filter((item) => item?.active === true && item?.status === "counting")
@@ -11957,7 +12051,19 @@ function getActiveAdminWorkSupervisionStates() {
 }
 
 function renderWorkSupervisionCountdown() {
-  const adminStates = getActiveAdminWorkSupervisionStates();
+  // Phiếu thường dùng state Giám sát do máy chủ tạo. Phiếu “Lên lịch” dùng
+  // chính mốc 10 phút và nhóm đã lưu trên workOrder, không dùng bộ đếm chung.
+  const regularStates = hasGeneralUnassignedWorkForSupervision()
+    ? getActiveAdminWorkSupervisionStates()
+    : [];
+  const scheduledStates = getActiveScheduledGroupCountdownStates();
+  const scheduledEmployeeCount = new Set(scheduledStates.map((item) => item.employeeUid)).size;
+  const adminStates = [...scheduledStates, ...regularStates].sort((left, right) => {
+    const leftEnd = timestampToDate(left.endsAt)?.getTime() || Number.MAX_SAFE_INTEGER;
+    const rightEnd = timestampToDate(right.endsAt)?.getTime() || Number.MAX_SAFE_INTEGER;
+    return leftEnd - rightEnd
+      || String(left.employeeName || "").localeCompare(String(right.employeeName || ""), "vi");
+  });
   const showAdmin = isAdminProfile() && adminStates.length > 0;
   els.adminWorkSupervisionBanner?.classList.toggle("hidden", !showAdmin);
 
@@ -11968,14 +12074,21 @@ function renderWorkSupervisionCountdown() {
       const remainingMs = endsAt ? endsAt.getTime() - Date.now() : 0;
       if (remainingMs <= 0) {
         waitingCount += 1;
-        void requestWorkSupervisionProcessing(item);
+        if (item.kind !== "scheduled_group") void requestWorkSupervisionProcessing(item);
       }
     });
 
     if (els.adminWorkSupervisionMessage) {
-      els.adminWorkSupervisionMessage.textContent = waitingCount > 0
-        ? `${adminStates.length} nhân viên đang có bộ đếm riêng; ${waitingCount} bộ đếm đã hết và đang được máy chủ xử lý.`
-        : `${adminStates.length} nhân viên đang được giám sát bằng các bộ đếm riêng. Nhân viên nào nhận việc mới thì chỉ bộ đếm của người đó dừng.`;
+      if (scheduledStates.length && !regularStates.length) {
+        const groupNames = [...new Set(scheduledStates.map((item) => item.groupName).filter(Boolean))];
+        els.adminWorkSupervisionMessage.textContent = waitingCount > 0
+          ? `${scheduledEmployeeCount} nhân viên đúng nhóm đang chờ nhận Phiếu lên lịch; ${waitingCount} bộ đếm 10 phút đã hết và đang chờ giao Phiếu.`
+          : `${scheduledEmployeeCount} nhân viên thuộc ${groupNames.join(", ")} đang đếm ngược 10 phút. Nhân viên nhóm khác không tham gia bộ đếm này.`;
+      } else {
+        els.adminWorkSupervisionMessage.textContent = waitingCount > 0
+          ? `${adminStates.length} nhân viên đang có bộ đếm riêng; ${waitingCount} bộ đếm đã hết và đang được máy chủ xử lý.`
+          : `${adminStates.length} nhân viên đang được giám sát bằng các bộ đếm riêng. Nhân viên nào nhận việc mới thì chỉ bộ đếm của người đó dừng.`;
+      }
     }
 
     if (els.adminWorkSupervisionCountdown) {
@@ -11983,9 +12096,12 @@ function renderWorkSupervisionCountdown() {
         const endsAt = timestampToDate(item.endsAt);
         const remainingMs = endsAt ? endsAt.getTime() - Date.now() : 0;
         const waitingForServer = remainingMs <= 0;
+        const employeeLabel = item.kind === "scheduled_group"
+          ? `${item.employeeName || "Nhân viên"} • ${item.groupName || "Nhóm nhân viên"}`
+          : (item.employeeName || "Nhân viên");
         return `
           <span class="work-supervision-countdown-item${waitingForServer ? " is-waiting" : ""}">
-            <span class="work-supervision-countdown-employee">${escapeHtml(item.employeeName || "Nhân viên")}</span>
+            <span class="work-supervision-countdown-employee">${escapeHtml(employeeLabel)}</span>
             <strong>${waitingForServer ? "00:00" : formatWorkSupervisionCountdown(remainingMs)}</strong>
           </span>
         `;
@@ -11995,7 +12111,9 @@ function renderWorkSupervisionCountdown() {
     els.adminWorkSupervisionCountdown.innerHTML = "";
   }
 
-  const data = state.workSupervisionState || {};
+  const scheduledEmployeeState = getCurrentEmployeeScheduledGroupCountdownState();
+  const data = scheduledEmployeeState || state.workSupervisionState || {};
+  const isScheduledEmployeeCountdown = data.kind === "scheduled_group";
   const active = data.active === true && data.status === "counting";
   const currentUid = String(state.user?.uid || "").trim();
   const employeeUid = String(data.employeeUid || data.id || "").trim();
@@ -12009,9 +12127,11 @@ function renderWorkSupervisionCountdown() {
 
   els.employeeWorkSupervisionBanner?.classList.toggle("hidden", !employeeIncluded);
   if (employeeIncluded) {
-    const countdownMinutes = Math.min(30, Math.max(1, Math.trunc(Number(
-      data.countdownMinutes || getWorkOrderControlSettings().workSupervisionCountdownMinutes || 5
-    ))));
+    const countdownMinutes = isScheduledEmployeeCountdown
+      ? 10
+      : Math.min(30, Math.max(1, Math.trunc(Number(
+        data.countdownMinutes || getWorkOrderControlSettings().workSupervisionCountdownMinutes || 5
+      ))));
     const lunchCreditMinutes = Math.min(30, Math.max(0, Math.trunc(Number(
       data.lunchCreditMinutes ?? getWorkOrderControlSettings().workSupervisionLunchCreditMinutes ?? countdownMinutes
     ))));
@@ -12021,14 +12141,22 @@ function renderWorkSupervisionCountdown() {
         : formatWorkSupervisionCountdown(remainingMs);
     }
     if (els.employeeWorkSupervisionMessage) {
-      els.employeeWorkSupervisionMessage.textContent = waitingForServer
-        ? `Bộ đếm riêng ${countdownMinutes} phút của bạn đã hết. Hệ thống đang kiểm tra và tạo Phiếu nghỉ trưa tự động, cộng sẵn ${lunchCreditMinutes} phút theo Cài đặt.`
-        : `Đây là bộ đếm riêng của bạn. Nếu hết ${countdownMinutes} phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn ${lunchCreditMinutes} phút theo Cài đặt.`;
+      if (isScheduledEmployeeCountdown) {
+        els.employeeWorkSupervisionMessage.textContent = waitingForServer
+          ? `Bộ đếm 10 phút của Phiếu “${data.workOrderName}” dành cho nhóm ${data.groupName} đã hết. Hệ thống đang chờ Admin giao Phiếu.`
+          : `Bạn thuộc nhóm ${data.groupName} được chọn cho Phiếu lên lịch “${data.workOrderName}”. Nhân viên ngoài nhóm không tham gia bộ đếm 10 phút này.`;
+      } else {
+        els.employeeWorkSupervisionMessage.textContent = waitingForServer
+          ? `Bộ đếm riêng ${countdownMinutes} phút của bạn đã hết. Hệ thống đang kiểm tra và tạo Phiếu nghỉ trưa tự động, cộng sẵn ${lunchCreditMinutes} phút theo Cài đặt.`
+          : `Đây là bộ đếm riêng của bạn. Nếu hết ${countdownMinutes} phút mà bạn vẫn chưa nhận công việc mới, hệ thống sẽ tự tạo Phiếu nghỉ trưa và cộng sẵn ${lunchCreditMinutes} phút theo Cài đặt.`;
+      }
     }
 
     if (waitingForServer) {
       resetWorkSupervisionEmployeeNotificationState();
-      void requestWorkSupervisionProcessing(data);
+      if (!isScheduledEmployeeCountdown) void requestWorkSupervisionProcessing(data);
+    } else if (isScheduledEmployeeCountdown) {
+      resetWorkSupervisionEmployeeNotificationState();
     } else {
       notifyWorkSupervisionEmployeeEvery15Seconds();
     }
@@ -12112,6 +12240,7 @@ function setupEmployeeDashboard() {
       state.employeeUnassignedTaskCountPendingKey = "";
       state.employeeUnassignedTaskCountRequestSerial += 1;
       renderEmployeeTasks();
+      renderWorkSupervisionCountdown();
     },
     (error) => {
       console.error(error);

@@ -1696,11 +1696,9 @@ async function loadWorkSupervisionContext(nowMs = Date.now()) {
     db.collection("tasks")
       .where("status", "==", "draft")
       .where("taskDate", "==", draftWorkOrderDateKey)
-      .limit(1)
       .get(),
     db.collection("tasks")
       .where("status", "==", "waiting_assignee")
-      .limit(1)
       .get()
   ]);
 
@@ -1721,8 +1719,15 @@ async function loadWorkSupervisionContext(nowMs = Date.now()) {
   const allFreeEmployees = workingEmployees.filter((employee) => !busyUids.has(employee.uid));
   const freeEmployees = allFreeEmployees.filter((employee) => !excludedEmployeeUidSet.has(employee.uid));
 
-  const draftWorkOrderCount = draftTasksSnap.empty ? 0 : 1;
-  const waitingAssigneeWorkOrderCount = waitingAssigneeTasksSnap.empty ? 0 : 1;
+  // Phiếu tạo bởi “Lên lịch” có bộ đếm 10 phút và cơ chế tạo Nghỉ trưa riêng,
+  // giới hạn theo scheduledEmployeeGroupId. Không đưa các task này vào Giám sát
+  // công việc chung, nếu không mọi nhân viên đang rảnh ở nhóm khác cũng bị đếm.
+  const draftWorkOrderCount = draftTasksSnap.docs.some(
+    (snap) => snap.data()?.scheduledWorkOrder !== true
+  ) ? 1 : 0;
+  const waitingAssigneeWorkOrderCount = waitingAssigneeTasksSnap.docs.some(
+    (snap) => snap.data()?.scheduledWorkOrder !== true
+  ) ? 1 : 0;
   const availableWorkOrderCount = draftWorkOrderCount + waitingAssigneeWorkOrderCount;
 
   const admins = adminsSnap.docs
