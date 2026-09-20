@@ -804,9 +804,16 @@ async function ensureNextDailyScheduledOccurrence(scheduleId, schedule = {}) {
   const nextScheduleRef = db.doc(`scheduledWorkOrders/${nextScheduleId}`);
   const currentScheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
   let created = false;
+  let canCreateNext = false;
 
   await db.runTransaction(async (transaction) => {
-    const nextSnapshot = await transaction.get(nextScheduleRef);
+    const [nextSnapshot, currentSnapshot] = await transaction.getAll(nextScheduleRef, currentScheduleRef);
+    const currentSchedule = currentSnapshot?.data() || {};
+    if (
+      !currentSnapshot?.exists
+      || ["cancelled", "deleting"].includes(String(currentSchedule.status || ""))
+    ) return;
+    canCreateNext = true;
     if (!nextSnapshot.exists) {
       const now = Timestamp.now();
       transaction.set(nextScheduleRef, {
@@ -846,6 +853,7 @@ async function ensureNextDailyScheduledOccurrence(scheduleId, schedule = {}) {
     }, { merge: true });
   });
 
+  if (!canCreateNext) return null;
   if (created) await tryEnqueueScheduledMaterialization(nextScheduleId, nextScheduledAt);
   return { nextScheduleId, nextScheduledAt, created };
 }
@@ -1015,6 +1023,98 @@ exports.listScheduledWorkOrders = onCall({
   return { schedules };
 });
 
+exports.deleteScheduledWorkOrder = onCall({
+  region: REGION,
+  timeoutSeconds: 120,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  await assertAdmin(adminUid);
+  const scheduleId = String(request.data?.scheduleId || "").trim();
+  if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) {
+    throw new HttpsError("invalid-argument", "Lịch Phiếu công việc không hợp lệ.");
+  }
+
+  const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+  const schedule = await db.runTransaction(async (transaction) => {
+    const scheduleSnapshot = await transaction.get(scheduleRef);
+    if (!scheduleSnapshot.exists) {
+      throw new HttpsError("not-found", "Lịch Phiếu công việc không còn tồn tại.");
+    }
+    const currentSchedule = scheduleSnapshot.data() || {};
+    if (String(currentSchedule.createdByUid || "") !== adminUid) {
+      throw new HttpsError("permission-denied", "Bạn không có quyền xóa lịch này.");
+    }
+    const deletionPreviousStatus = String(
+      currentSchedule.deletionPreviousStatus || currentSchedule.status || "pending"
+    );
+    transaction.update(scheduleRef, {
+      status: "deleting",
+      deletionPreviousStatus,
+      deletingAt: Timestamp.now(),
+      deletingByUid: adminUid,
+      updatedAt: Timestamp.now()
+    });
+    return { ...currentSchedule, deletionPreviousStatus };
+  });
+
+  const generatedWorkOrderId = String(schedule.generatedWorkOrderId || "").trim();
+  const workOrderRef = generatedWorkOrderId
+    ? db.doc(`workOrders/${generatedWorkOrderId}`)
+    : null;
+  const [workOrderSnapshot, taskSnapshot, lunchTaskSnapshot] = await Promise.all([
+    workOrderRef ? workOrderRef.get() : Promise.resolve(null),
+    generatedWorkOrderId
+      ? db.collection("tasks").where("workOrderId", "==", generatedWorkOrderId).get()
+      : Promise.resolve(null),
+    generatedWorkOrderId
+      ? db.collection("tasks").where("sourceScheduledWorkOrderId", "==", generatedWorkOrderId).get()
+      : Promise.resolve(null)
+  ]);
+  const workOrder = workOrderSnapshot?.exists ? workOrderSnapshot.data() || {} : {};
+  const shouldRemoveGeneratedDraft = Boolean(
+    String(schedule.deletionPreviousStatus || schedule.status || "") === "generated"
+    || (
+      workOrderSnapshot?.exists
+      && workOrder.scheduledWorkOrder === true
+      && workOrder.status === "draft"
+      && workOrder.scheduledGroupAssignmentPending === true
+    )
+  );
+
+  const refsToDelete = new Map();
+  if (shouldRemoveGeneratedDraft && workOrderRef) {
+    refsToDelete.set(workOrderRef.path, workOrderRef);
+    taskSnapshot?.docs.forEach((item) => refsToDelete.set(item.ref.path, item.ref));
+    lunchTaskSnapshot?.docs.forEach((item) => {
+      refsToDelete.set(item.ref.path, item.ref);
+      const lunchWorkOrderId = String(item.data()?.workOrderId || "").trim();
+      if (lunchWorkOrderId && !lunchWorkOrderId.includes("/")) {
+        const lunchWorkOrderRef = db.doc(`workOrders/${lunchWorkOrderId}`);
+        refsToDelete.set(lunchWorkOrderRef.path, lunchWorkOrderRef);
+      }
+    });
+  }
+  // Xóa bản ghi lịch sau cùng để nếu một batch dọn dữ liệu liên quan gặp lỗi,
+  // Admin vẫn có thể thử lại thao tác từ danh sách lịch.
+  refsToDelete.set(scheduleRef.path, scheduleRef);
+
+  const refs = [...refsToDelete.values()];
+  for (let offset = 0; offset < refs.length; offset += 450) {
+    const batch = db.batch();
+    refs.slice(offset, offset + 450).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+
+  return {
+    deleted: true,
+    scheduleId,
+    deletedGeneratedDraft: shouldRemoveGeneratedDraft,
+    deletedDocumentCount: refs.length
+  };
+});
+
 async function materializeScheduledWorkOrderById(scheduleIdInput) {
   const scheduleId = String(scheduleIdInput || "").trim();
   if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) return null;
@@ -1023,7 +1123,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
   const scheduleSnapshot = await scheduleRef.get();
   if (!scheduleSnapshot.exists) return null;
   const schedule = scheduleSnapshot.data() || {};
-  if (schedule.status === "assigned" || schedule.status === "cancelled") return null;
+  if (["assigned", "cancelled", "deleting"].includes(String(schedule.status || ""))) return null;
 
   const workOrderId = `scheduled_${scheduleId}`.slice(0, 180);
   const workOrderRef = db.doc(`workOrders/${workOrderId}`);
@@ -1044,7 +1144,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
     const groupSnapshot = snapshots[2];
     const freshSchedule = freshScheduleSnapshot.data() || {};
 
-    if (["assigned", "cancelled"].includes(String(freshSchedule.status || ""))) return;
+    if (["assigned", "cancelled", "deleting"].includes(String(freshSchedule.status || ""))) return;
     if (workOrderSnapshot.exists || freshSchedule.status === "generated") {
       alreadyGenerated = true;
       assignmentDeadlineAt = firestoreTimestampOrNull(

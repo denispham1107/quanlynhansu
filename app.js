@@ -139,6 +139,7 @@ const assignDraftTaskFromSupervisionLunchCallable = httpsCallable(
 );
 const createScheduledWorkOrderCallable = httpsCallable(functions, "createScheduledWorkOrder");
 const listScheduledWorkOrdersCallable = httpsCallable(functions, "listScheduledWorkOrders");
+const deleteScheduledWorkOrderCallable = httpsCallable(functions, "deleteScheduledWorkOrder");
 const assignScheduledWorkOrderToGroupEmployeeCallable = httpsCallable(
   functions,
   "assignScheduledWorkOrderToGroupEmployee"
@@ -196,6 +197,7 @@ const state = {
   taskModalMode: "create",
   scheduledAssignmentWorkOrderId: "",
   scheduledWorkOrders: [],
+  scheduledListReturnToTaskModal: false,
   editingWorkTemplateId: null,
   adminStatusFilter: "all",
   adminCompletedTypeFilter: "all",
@@ -9952,8 +9954,13 @@ els.scheduleWorkOrderBtn?.addEventListener("click", async () => {
   await createScheduledWorkOrder(els.scheduleWorkOrderBtn);
 });
 
-function closeScheduledWorkOrderListModal() {
+function returnToScheduledWorkOrderModal() {
   els.scheduledWorkOrderListModal?.classList.add("hidden");
+  if (state.scheduledListReturnToTaskModal) {
+    setTaskModalMode("schedule");
+    els.taskModal?.classList.remove("hidden");
+  }
+  state.scheduledListReturnToTaskModal = false;
 }
 
 function scheduledWorkOrderStatusLabel(status) {
@@ -9997,10 +10004,19 @@ function renderScheduledWorkOrderList() {
     const countdownMinutes = normalizeScheduledCountdownMinutes(schedule.assignmentCountdownMinutes);
     return `
       <article class="scheduled-work-order-list-item">
-        <div class="scheduled-work-order-list-main">
-          ${escapeHtml(formatScheduledListDateTime(schedule.scheduledForMs))},
-          ${escapeHtml(schedule.employeeGroupName || "Nhóm nhân viên")},
-          “${escapeHtml(title)}”
+        <div class="scheduled-work-order-list-row">
+          <div class="scheduled-work-order-list-main">
+            ${escapeHtml(formatScheduledListDateTime(schedule.scheduledForMs))},
+            ${escapeHtml(schedule.employeeGroupName || "Nhóm nhân viên")},
+            “${escapeHtml(title)}”
+          </div>
+          <button
+            class="btn danger scheduled-work-order-delete-btn"
+            type="button"
+            data-delete-scheduled-work-order="${escapeHtml(schedule.id)}"
+            aria-label="Xóa vĩnh viễn lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"
+            title="Xóa vĩnh viễn lịch"
+          >×</button>
         </div>
         <div class="scheduled-work-order-list-meta">
           <span>${escapeHtml(repeatLabel)}</span>
@@ -10020,6 +10036,12 @@ async function openScheduledWorkOrderListModal() {
   if (els.scheduledWorkOrderList) {
     els.scheduledWorkOrderList.innerHTML = '<div class="empty-state">Đang tải danh sách lịch...</div>';
   }
+  state.scheduledListReturnToTaskModal = Boolean(
+    state.taskModalMode === "schedule"
+    && els.taskModal
+    && !els.taskModal.classList.contains("hidden")
+  );
+  els.taskModal?.classList.add("hidden");
   els.scheduledWorkOrderListModal?.classList.remove("hidden");
   setButtonLoading(els.viewScheduledWorkOrdersBtn, true, "Đang tải...");
   try {
@@ -10037,9 +10059,49 @@ async function openScheduledWorkOrderListModal() {
   }
 }
 
+async function deleteScheduledWorkOrder(scheduleId, button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được xóa lịch Phiếu công việc.", "error");
+    return;
+  }
+  const schedule = state.scheduledWorkOrders.find((item) => item.id === scheduleId);
+  if (!schedule) {
+    toast("Lịch Phiếu công việc không còn tồn tại.", "error");
+    return;
+  }
+  const scheduledAt = formatScheduledListDateTime(schedule.scheduledForMs);
+  const confirmed = window.confirm(
+    `Xóa vĩnh viễn lịch “${schedule.name || "Phiếu công việc"}” lúc ${scheduledAt}?\n\n`
+    + "Hành động này không thể hoàn tác. Nếu Phiếu chưa giao việc đã được tạo từ lịch này, Phiếu đó cũng sẽ bị xóa."
+  );
+  if (!confirmed) return;
+
+  setButtonLoading(button, true, "…");
+  try {
+    await deleteScheduledWorkOrderCallable({ scheduleId });
+    state.scheduledWorkOrders = state.scheduledWorkOrders.filter((item) => item.id !== scheduleId);
+    renderScheduledWorkOrderList();
+    toast(`Đã xóa vĩnh viễn lịch “${schedule.name || "Phiếu công việc"}”.`, "success");
+  } catch (error) {
+    console.error(error);
+    toast(error?.message || "Không thể xóa lịch Phiếu công việc.", "error");
+    setButtonLoading(button, false);
+  }
+}
+
 els.viewScheduledWorkOrdersBtn?.addEventListener("click", openScheduledWorkOrderListModal);
-$$('[data-close-scheduled-work-order-list]').forEach((button) => {
-  button.addEventListener("click", closeScheduledWorkOrderListModal);
+$$('[data-back-scheduled-work-order-list]').forEach((button) => {
+  button.addEventListener("click", returnToScheduledWorkOrderModal);
+});
+els.scheduledWorkOrderList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-delete-scheduled-work-order]");
+  if (!button) return;
+  deleteScheduledWorkOrder(button.dataset.deleteScheduledWorkOrder || "", button);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || els.scheduledWorkOrderListModal?.classList.contains("hidden")) return;
+  event.preventDefault();
+  returnToScheduledWorkOrderModal();
 });
 
 async function dispatchWorkOrder(workOrderId, button) {

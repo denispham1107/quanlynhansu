@@ -198,6 +198,93 @@ for (const profile of profiles) {
   if (!passed) failures.push({ profile: profile.name, result });
 }
 
+await send("Runtime.evaluate", {
+  returnByValue: true,
+  expression: `(() => {
+    const taskModal = document.getElementById("taskModal");
+    const listModal = document.getElementById("scheduledWorkOrderListModal");
+    const list = document.getElementById("scheduledWorkOrderList");
+    taskModal.classList.add("hidden");
+    listModal.style.removeProperty("display");
+    listModal.classList.remove("hidden");
+    list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
+      <article class="scheduled-work-order-list-item">
+        <div class="scheduled-work-order-list-row">
+          <div class="scheduled-work-order-list-main">22/09/2026, 08:30:00, Nhóm nhân viên, “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
+          <button class="btn danger scheduled-work-order-delete-btn" type="button">×</button>
+        </div>
+        <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span></div>
+      </article>
+    \`).join("");
+    return true;
+  })()`
+});
+
+for (const profile of profiles) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: profile.width,
+    height: profile.height,
+    deviceScaleFactor: 3,
+    mobile: true,
+    screenWidth: profile.width,
+    screenHeight: profile.height,
+  });
+  await delay(120);
+  const measurement = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const round = (value) => Math.round(value * 100) / 100;
+      const box = (element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: round(rect.left), right: round(rect.right), top: round(rect.top), bottom: round(rect.bottom), width: round(rect.width), height: round(rect.height) };
+      };
+      const modal = document.getElementById("scheduledWorkOrderListModal");
+      const cardElement = modal.querySelector(".scheduled-work-order-list-card");
+      const listElement = document.getElementById("scheduledWorkOrderList");
+      const firstRowElement = listElement.querySelector(".scheduled-work-order-list-row");
+      const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
+      const card = box(cardElement);
+      const list = box(listElement);
+      const firstRow = box(firstRowElement);
+      const firstDeleteButton = box(firstDeleteButtonElement);
+      return {
+        modalOverflowY: getComputedStyle(modal).overflowY,
+        cardOverflowY: getComputedStyle(cardElement).overflowY,
+        listOverflowY: getComputedStyle(listElement).overflowY,
+        viewportWidth: document.documentElement.clientWidth,
+        viewportHeight: document.documentElement.clientHeight,
+        scrollWidth: document.documentElement.scrollWidth,
+        card,
+        list,
+        firstRow,
+        firstDeleteButton,
+        listClientHeight: listElement.clientHeight,
+        listScrollHeight: listElement.scrollHeight,
+        listInsideCard: list.left >= card.left - 0.5 && list.right <= card.right + 0.5 && list.top >= card.top - 0.5 && list.bottom <= card.bottom + 0.5,
+        deleteButtonInsideRow: firstDeleteButton.left >= firstRow.left - 0.5 && firstDeleteButton.right <= firstRow.right + 0.5 && firstDeleteButton.top >= firstRow.top - 0.5 && firstDeleteButton.bottom <= firstRow.bottom + 0.5,
+        cardInsideViewport: card.left >= -0.5 && card.right <= document.documentElement.clientWidth + 0.5 && card.top >= -0.5 && card.bottom <= document.documentElement.clientHeight + 0.5,
+        taskModalHidden: document.getElementById("taskModal").classList.contains("hidden"),
+      };
+    })()`
+  });
+  const result = measurement.result.value;
+  const passed = result.taskModalHidden
+    && result.card.width > 0
+    && result.card.height > 0
+    && result.list.width > 0
+    && result.list.height > 0
+    && result.listInsideCard
+    && result.deleteButtonInsideRow
+    && result.cardInsideViewport
+    && result.modalOverflowY === "hidden"
+    && result.cardOverflowY === "hidden"
+    && ["auto", "scroll"].includes(result.listOverflowY)
+    && result.listScrollHeight > result.listClientHeight
+    && result.scrollWidth <= profile.width;
+  console.log(`${passed ? "PASS" : "FAIL"} | Danh sách lịch ${profile.name} | list ${result.listClientHeight}/${result.listScrollHeight} | scroll ${result.scrollWidth}/${profile.width}`);
+  if (!passed) failures.push({ profile: `Danh sách lịch ${profile.name}`, result });
+}
+
 socket.close();
 browser.kill();
 await Promise.race([
