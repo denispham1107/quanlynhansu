@@ -100,6 +100,56 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
   await delay(100);
 }
 
+const failures = [];
+
+await send("Emulation.setDeviceMetricsOverride", {
+  width: 1600,
+  height: 900,
+  deviceScaleFactor: 1,
+  mobile: false,
+  screenWidth: 1600,
+  screenHeight: 900,
+});
+const desktopScheduleButtonCheck = await send("Runtime.evaluate", {
+  returnByValue: true,
+  expression: `(() => {
+    const adminView = document.getElementById("adminView");
+    const deleteButton = document.getElementById("deleteAllWorkOrdersBtn");
+    const scheduleButton = document.getElementById("openScheduledWorkOrderBtn");
+    const importButton = document.getElementById("openGoogleCalendarImportBtn");
+    adminView.classList.remove("hidden");
+    scheduleButton.classList.remove("hidden");
+    importButton.classList.remove("hidden");
+    const box = (element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const deleteBox = box(deleteButton);
+    const scheduleBox = box(scheduleButton);
+    const importBox = box(importButton);
+    const icon = scheduleButton.querySelector(".schedule-calendar-icon");
+    const iconBox = box(icon);
+    return {
+      sameRow: Math.abs(deleteBox.top - scheduleBox.top) < 1 && Math.abs(scheduleBox.top - importBox.top) < 1,
+      correctOrder: deleteBox.right <= scheduleBox.left && scheduleBox.right <= importBox.left,
+      iconInside: iconBox.left >= scheduleBox.left && iconBox.right <= scheduleBox.right && iconBox.top >= scheduleBox.top && iconBox.bottom <= scheduleBox.bottom,
+      hasVectorIcon: Boolean(icon?.querySelector("svg rect") && icon?.querySelectorAll("svg circle").length === 6),
+      scheduleParentId: scheduleButton.parentElement?.id || "",
+      pageScrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth,
+    };
+  })()`
+});
+const desktopResult = desktopScheduleButtonCheck.result.value;
+const desktopPassed = desktopResult.sameRow
+  && desktopResult.correctOrder
+  && desktopResult.iconInside
+  && desktopResult.hasVectorIcon
+  && desktopResult.scheduleParentId === "mobileTaskPanelMenu"
+  && desktopResult.pageScrollWidth <= desktopResult.viewportWidth;
+console.log(`${desktopPassed ? "PASS" : "FAIL"} | Desktop Lên lịch giữa Xóa và Nạp lịch | scroll ${desktopResult.pageScrollWidth}/${desktopResult.viewportWidth}`);
+if (!desktopPassed) failures.push({ profile: "Desktop schedule action", result: desktopResult });
+
 const prepareExpression = `(() => {
   const modal = document.getElementById("taskModal");
   const card = modal?.querySelector(".task-create-modal-card");
@@ -131,7 +181,6 @@ const prepareExpression = `(() => {
 })()`;
 await send("Runtime.evaluate", { expression: prepareExpression, returnByValue: true });
 
-const failures = [];
 for (const profile of profiles) {
   await send("Emulation.setDeviceMetricsOverride", {
     width: profile.width,

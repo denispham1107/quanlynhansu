@@ -10544,7 +10544,6 @@
         </div>
         <div class="hero-actions management-dashboard-actions">
           <button id="openTaskModalBtn" class="btn primary large">+ Tạo phiếu công việc</button>
-          <button id="openScheduledWorkOrderBtn" class="btn schedule-work-order-btn schedule-work-order-desktop-btn large hidden" type="button">🗓 Lên lịch</button>
           <button id="openWorkTemplatePageBtn" class="btn ghost large" type="button">Danh sách công việc</button>
           <button id="openEmployeeManagerPageBtn" class="btn ghost large" type="button">Danh sách nhân viên</button>
           <div id="mobileDataActionsGroup" class="backup-actions dashboard-data-actions">
@@ -10623,7 +10622,36 @@
             >⋮</button>
             <div id="mobileTaskPanelMenu" class="mobile-task-panel-menu" aria-hidden="true">
               <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
-              <button id="openScheduledWorkOrderMobileBtn" class="btn schedule-work-order-btn schedule-work-order-mobile-btn small hidden" type="button">🗓 Lên lịch</button>
+              <button id="openScheduledWorkOrderBtn" class="btn schedule-work-order-btn schedule-work-order-desktop-btn small hidden" type="button">
+                <span class="schedule-calendar-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <rect x="2.75" y="4.75" width="18.5" height="16.25" rx="3.25"></rect>
+                    <path d="M3 9.25h18M7.5 2.75v4M16.5 2.75v4"></path>
+                    <circle cx="7.5" cy="13" r="1"></circle>
+                    <circle cx="12" cy="13" r="1"></circle>
+                    <circle cx="16.5" cy="13" r="1"></circle>
+                    <circle cx="7.5" cy="17" r="1"></circle>
+                    <circle cx="12" cy="17" r="1"></circle>
+                    <circle cx="16.5" cy="17" r="1"></circle>
+                  </svg>
+                </span>
+                <span>Lên lịch</span>
+              </button>
+              <button id="openScheduledWorkOrderMobileBtn" class="btn schedule-work-order-btn schedule-work-order-mobile-btn small hidden" type="button">
+                <span class="schedule-calendar-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <rect x="2.75" y="4.75" width="18.5" height="16.25" rx="3.25"></rect>
+                    <path d="M3 9.25h18M7.5 2.75v4M16.5 2.75v4"></path>
+                    <circle cx="7.5" cy="13" r="1"></circle>
+                    <circle cx="12" cy="13" r="1"></circle>
+                    <circle cx="16.5" cy="13" r="1"></circle>
+                    <circle cx="7.5" cy="17" r="1"></circle>
+                    <circle cx="12" cy="17" r="1"></circle>
+                    <circle cx="16.5" cy="17" r="1"></circle>
+                  </svg>
+                </span>
+                <span>Lên lịch</span>
+              </button>
               <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn calendar-import-header-btn small calendar-import-desktop-only hidden" type="button">📅 Nạp lịch</button>
               <button id="openWorkOrderSettingsBtn" class="btn settings-action-btn small hidden" type="button" aria-haspopup="dialog" aria-controls="workOrderSettingsModal">
                 <span aria-hidden="true">⚙</span> Cài đặt
@@ -11834,7 +11862,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260921-schedule-list-fix-v81"></script>
+  <script type="module" src="app.js?v=20260921-schedule-button-v82"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12452,6 +12480,16 @@
     background:linear-gradient(135deg,#7c3aed,#4f46e5)!important;
     box-shadow:0 12px 26px rgba(124,58,237,.24)!important;
   }
+  .schedule-calendar-icon {
+    display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px;
+    width:26px; height:26px; border:1px solid rgba(255,255,255,.28); border-radius:8px;
+    background:rgba(255,255,255,.14); box-shadow:inset 0 1px 0 rgba(255,255,255,.24);
+  }
+  .schedule-calendar-icon svg {
+    display:block; width:19px; height:19px; overflow:visible;
+    fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round;
+  }
+  .schedule-calendar-icon circle { fill:currentColor; stroke:none; }
   .schedule-work-order-btn:hover { color:#fff!important; filter:brightness(.96); }
   .schedule-work-order-mobile-btn { display:none!important; }
   .scheduled-work-order-config {
