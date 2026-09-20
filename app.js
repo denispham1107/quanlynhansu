@@ -133,6 +133,10 @@ const editCompletedHotelActualTimeCallable = httpsCallable(
   "editCompletedHotelActualTime"
 );
 const updateEmployeeProfileCallable = httpsCallable(functions, "updateEmployeeProfile");
+const assignDraftTaskFromSupervisionLunchCallable = httpsCallable(
+  functions,
+  "assignDraftTaskFromSupervisionLunch"
+);
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -13663,6 +13667,76 @@ function isAutoWorkSupervisionLunchTask(task) {
     || String(task.id || "").startsWith("supervisionLunch_");
 }
 
+function getDraftTasksForSupervisionLunchAssignment() {
+  const draftWorkOrderIds = new Set(
+    state.workOrders
+      .filter((workOrder) => workOrder.status === "draft")
+      .map((workOrder) => workOrder.id)
+  );
+
+  return state.tasks
+    .filter((task) => task.status === "draft" && draftWorkOrderIds.has(task.workOrderId))
+    .sort((left, right) => {
+      const leftWorkOrder = state.workOrders.find((item) => item.id === left.workOrderId);
+      const rightWorkOrder = state.workOrders.find((item) => item.id === right.workOrderId);
+      const createdDifference = (timestampToDate(leftWorkOrder?.createdAt)?.getTime() || 0)
+        - (timestampToDate(rightWorkOrder?.createdAt)?.getTime() || 0);
+      return createdDifference || Number(left.rowIndex || 0) - Number(right.rowIndex || 0);
+    });
+}
+
+function renderSupervisionLunchDraftTaskPicker(task, mode) {
+  if (mode !== "admin" || !isAdminProfile()) return "";
+  if (!isAutoWorkSupervisionLunchTask(task) || task.status !== "lunch_break") return "";
+
+  const draftTasks = getDraftTasksForSupervisionLunchAssignment();
+  const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
+  const rows = draftTasks.map((draftTask) => {
+    const workOrder = state.workOrders.find((item) => item.id === draftTask.workOrderId);
+    const isReady = Boolean(
+      String(draftTask.title || "").trim()
+      && getTaskDateValue(draftTask)
+      && Number(draftTask.deadlineMinutes || 0) > 0
+    );
+    return `
+      <button
+        class="supervision-lunch-draft-task-item"
+        type="button"
+        data-action="assign-draft-task-from-supervision-lunch"
+        data-lunch-task-id="${escapeHtml(task.id)}"
+        data-source-task-id="${escapeHtml(draftTask.id)}"
+        ${isReady ? "" : "disabled"}
+        title="${isReady ? `Giao ngay cho ${escapeHtml(employeeName)} và kết thúc nghỉ trưa` : "Công việc đang thiếu tên, ngày giao hoặc thời gian"}"
+      >
+        <span class="supervision-lunch-draft-task-copy">
+          <strong>${escapeHtml(draftTask.title || "(Chưa đặt tên công việc)")}</strong>
+          <small>Phiếu: ${escapeHtml(workOrder?.name || draftTask.workOrderName || "Phiếu chưa giao việc")}</small>
+        </span>
+        <span class="supervision-lunch-draft-task-meta">
+          <small>${escapeHtml(formatDateOnly(getTaskDateValue(draftTask)))}</small>
+          <strong>${formatMinutes(draftTask.deadlineMinutes)}</strong>
+        </span>
+        <span class="supervision-lunch-draft-task-assign">${isReady ? "Giao việc" : "Thiếu thông tin"}</span>
+      </button>
+    `;
+  }).join("");
+
+  return `
+    <section class="supervision-lunch-draft-task-picker">
+      <div class="supervision-lunch-draft-task-head">
+        <div>
+          <strong>Danh sách công việc</strong>
+          <span>Chọn một công việc Chưa giao việc để giao ngay cho ${escapeHtml(employeeName)} và tự động kết thúc Phiếu nghỉ trưa này.</span>
+        </div>
+        <span class="supervision-lunch-draft-task-count">${draftTasks.length} công việc</span>
+      </div>
+      <div class="supervision-lunch-draft-task-list">
+        ${rows || '<div class="supervision-lunch-draft-task-empty">Hiện không có công việc nào thuộc Phiếu Chưa giao việc.</div>'}
+      </div>
+    </section>
+  `;
+}
+
 function getHotelPetCount(task) {
   const count = normalizeHotelPetCount(task?.hotelPetCount);
   return count || (isHotelTask(task) ? HOTEL_BASE_PET_COUNT : 0);
@@ -13949,6 +14023,7 @@ function renderTaskCard(task, mode) {
 
   const canEmployeeSubmit =
     mode === "employee" &&
+    !isAutoWorkSupervisionLunchTask(task) &&
     ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status) &&
     task.status !== "completed" &&
     task.status !== "submitted" &&
@@ -14016,6 +14091,9 @@ function renderTaskCard(task, mode) {
     canAdminEndTask: canAdminEndAssignedTask(task, mode),
     canAdminExtendTime: canAdminExtendTaskTime(task, mode),
     canEmployeeUploadPhotos: canEmployeeUploadTaskPhotos(task, mode, displayStatus),
+    showDisabledAutoSupervisionLunchSubmit: mode === "employee"
+      && isAutoWorkSupervisionLunchTask(task)
+      && task.status === "lunch_break",
     submitPhotoReady: photoCompletionState.ready,
     submitPhotoBlockedReason: getTaskPhotoCompletionBlockedMessage(task),
     submitInvalidPhotoCount: photoCompletionState.required && !photoCompletionState.ready
@@ -14105,6 +14183,7 @@ function renderTaskCard(task, mode) {
           </div>
         </div>
 
+        ${renderSupervisionLunchDraftTaskPicker(task, mode)}
         ${renderWorkPhotoBox(task, mode)}
         ${renderPhotoReportBox(task, mode)}
         ${renderPhotoRequirementHistoryBox(task)}
@@ -14748,6 +14827,15 @@ function renderTaskActions(task, permissions) {
     `);
   }
 
+  if (permissions.showDisabledAutoSupervisionLunchSubmit) {
+    buttons.push(`
+      <button class="btn primary" type="button" disabled title="Phiếu này chỉ kết thúc khi Admin giao một công việc Chưa giao việc cho bạn">
+        Hoàn thành
+      </button>
+      <span class="task-photo-block-message">Chờ Admin chọn công việc tiếp theo</span>
+    `);
+  }
+
   if (permissions.canEmployeeSubmit) {
     const disabled = permissions.submitPhotoReady ? "" : " disabled";
     const blockedReason = permissions.submitPhotoBlockedReason || "Cần đăng đủ số lượng ảnh hợp lệ theo quy định trước khi hoàn thành";
@@ -14862,6 +14950,14 @@ document.addEventListener("click", async (event) => {
 
   if (action === "submit-task") {
     await submitTask(taskId, button);
+  }
+
+  if (action === "assign-draft-task-from-supervision-lunch") {
+    await assignDraftTaskFromSupervisionLunch(
+      button.dataset.lunchTaskId,
+      button.dataset.sourceTaskId,
+      button
+    );
   }
 
   if (action === "approve-task") {
@@ -17797,6 +17893,32 @@ els.extendTimeForm?.addEventListener("submit", async (event) => {
   }
 });
 
+async function assignDraftTaskFromSupervisionLunch(lunchTaskId, sourceTaskId, button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được chọn và giao công việc từ Phiếu nghỉ trưa tự động.", "error");
+    return;
+  }
+  if (!lunchTaskId || !sourceTaskId) return;
+
+  setButtonLoading(button, true, "Đang giao...");
+  try {
+    const response = await assignDraftTaskFromSupervisionLunchCallable({
+      lunchTaskId,
+      sourceTaskId
+    });
+    const result = response.data || {};
+    toast(
+      `Đã giao “${result.sourceTaskTitle || "công việc"}” cho ${result.employeeName || "nhân viên"} và kết thúc Phiếu nghỉ trưa.`,
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    toast(error.message || "Không giao được công việc từ Phiếu nghỉ trưa tự động.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 async function submitTask(taskId, button) {
   setButtonLoading(button, true, "Đang gửi...");
 
@@ -17809,6 +17931,10 @@ async function submitTask(taskId, button) {
 
     if (!task || task.assignedToUid !== state.user.uid) {
       throw new Error("Bạn không có quyền hoàn thành công việc này.");
+    }
+
+    if (isAutoWorkSupervisionLunchTask(task)) {
+      throw new Error("Phiếu nghỉ trưa tự động do Giám sát tạo chỉ kết thúc khi Admin giao một công việc Chưa giao việc cho bạn.");
     }
 
     const photoBlockedMessage = getTaskPhotoCompletionBlockedMessage(task);

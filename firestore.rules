@@ -645,6 +645,11 @@ service cloud.firestore {
       allow update: if signedIn()
         && resource.data.assignedToUid == request.auth.uid
         && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
+        && !(
+          dataIsLunchBreak(resource.data)
+          && resource.data.keys().hasAny(["autoCreatedByWorkSupervision"])
+          && resource.data.autoCreatedByWorkSupervision == true
+        )
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "submittedAt"])
         && request.resource.data.status == "submitted"
         && request.resource.data.submittedAt == request.time

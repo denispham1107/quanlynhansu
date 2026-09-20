@@ -8566,7 +8566,68 @@
       line-height: 1.45;
     }
 
+    .supervision-lunch-draft-task-picker {
+      margin-top: 12px;
+      padding: 14px;
+      border: 1px solid #93c5fd;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #eff6ff, #ffffff);
+    }
+
+    .supervision-lunch-draft-task-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .supervision-lunch-draft-task-head > div,
+    .supervision-lunch-draft-task-copy,
+    .supervision-lunch-draft-task-meta {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .supervision-lunch-draft-task-head strong { color: #1e3a8a; font-size: 15px; font-weight: 950; }
+    .supervision-lunch-draft-task-head span { color: #475569; font-size: 12px; line-height: 1.4; }
+    .supervision-lunch-draft-task-count { flex: 0 0 auto; padding: 5px 9px; border-radius: 999px; background: #dbeafe; color: #1d4ed8 !important; font-weight: 900; white-space: nowrap; }
+    .supervision-lunch-draft-task-list { display: grid; gap: 7px; max-height: 320px; overflow: auto; padding-right: 2px; }
+    .supervision-lunch-draft-task-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      min-width: 0;
+      padding: 11px 12px;
+      border: 1px solid #bfdbfe;
+      border-radius: 13px;
+      background: #fff;
+      color: #17233b;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+    }
+    .supervision-lunch-draft-task-item:hover:not(:disabled) { transform: translateY(-1px); border-color: #3b82f6; box-shadow: 0 8px 18px rgba(37,99,235,.12); }
+    .supervision-lunch-draft-task-item:disabled { cursor: not-allowed; opacity: .58; }
+    .supervision-lunch-draft-task-copy strong,
+    .supervision-lunch-draft-task-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .supervision-lunch-draft-task-copy strong { font-size: 13px; }
+    .supervision-lunch-draft-task-copy small,
+    .supervision-lunch-draft-task-meta small { color: #64748b; font-size: 11px; }
+    .supervision-lunch-draft-task-meta { text-align: right; white-space: nowrap; }
+    .supervision-lunch-draft-task-meta strong { color: #334155; font-size: 12px; }
+    .supervision-lunch-draft-task-assign { padding: 7px 10px; border-radius: 10px; background: #2563eb; color: #fff; font-size: 12px; font-weight: 900; white-space: nowrap; }
+    .supervision-lunch-draft-task-empty { padding: 18px 12px; border: 1px dashed #bfdbfe; border-radius: 12px; color: #64748b; text-align: center; }
+
     @media (max-width: 768px) {
+      .supervision-lunch-draft-task-head { flex-direction: column; }
+      .supervision-lunch-draft-task-item { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+      .supervision-lunch-draft-task-meta { display: none; }
+      .supervision-lunch-draft-task-assign { padding: 7px 8px; }
       .work-supervision-countdown-banner {
         align-items: stretch;
         flex-direction: column;
@@ -11672,7 +11733,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260920-employee-groups-v73"></script>
+  <script type="module" src="app.js?v=20260920-supervision-lunch-assignment-v74"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

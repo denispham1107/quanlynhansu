@@ -472,6 +472,205 @@ exports.updateEmployeeProfile = onCall({
   return { updated: true, employeeUid, name, employeeGroupId, employeeGroupName };
 });
 
+exports.assignDraftTaskFromSupervisionLunch = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  const adminProfile = await assertAdmin(adminUid);
+  const lunchTaskId = String(request.data?.lunchTaskId || "").trim();
+  const sourceTaskId = String(request.data?.sourceTaskId || "").trim();
+
+  if (!lunchTaskId || !sourceTaskId || lunchTaskId === sourceTaskId
+    || lunchTaskId.includes("/") || sourceTaskId.includes("/")
+    || lunchTaskId.length > 180 || sourceTaskId.length > 180) {
+    throw new HttpsError("invalid-argument", "Phiếu nghỉ trưa hoặc công việc được chọn không hợp lệ.");
+  }
+
+  const lunchRef = db.doc(`tasks/${lunchTaskId}`);
+  const sourceTaskRef = db.doc(`tasks/${sourceTaskId}`);
+  const splitWorkOrderRef = db.doc(`workOrders/${`supervisionAssigned_${sourceTaskId}`.slice(0, 180)}`);
+  const now = Timestamp.now();
+  const adminName = String(adminProfile?.name || request.auth.token?.email || "Admin").slice(0, 120);
+
+  const result = await db.runTransaction(async (transaction) => {
+    const [lunchSnapshot, sourceTaskSnapshot] = await transaction.getAll(lunchRef, sourceTaskRef);
+    if (!lunchSnapshot.exists) {
+      throw new HttpsError("not-found", "Phiếu nghỉ trưa tự động không còn tồn tại.");
+    }
+    if (!sourceTaskSnapshot.exists) {
+      throw new HttpsError("not-found", "Công việc chưa giao đã chọn không còn tồn tại.");
+    }
+
+    const lunchTask = lunchSnapshot.data() || {};
+    const sourceTask = sourceTaskSnapshot.data() || {};
+    const isAutomaticLunch = lunchTask.isLunchBreak === true
+      && lunchTask.autoCreatedByWorkSupervision === true;
+    if (!isAutomaticLunch || lunchTask.status !== "lunch_break" || !lunchTask.assignedToUid) {
+      throw new HttpsError("failed-precondition", "Phiếu nghỉ trưa tự động đã kết thúc hoặc không còn sẵn sàng.");
+    }
+    if (sourceTask.status !== "draft") {
+      throw new HttpsError("failed-precondition", "Công việc này đã được giao bởi một thao tác khác.");
+    }
+
+    const workOrderId = String(sourceTask.workOrderId || "").trim();
+    if (!workOrderId) {
+      throw new HttpsError("failed-precondition", "Công việc chưa thuộc Phiếu công việc hợp lệ.");
+    }
+    const workOrderRef = db.doc(`workOrders/${workOrderId}`);
+    const workOrderSnapshot = await transaction.get(workOrderRef);
+    if (!workOrderSnapshot.exists || workOrderSnapshot.data()?.status !== "draft") {
+      throw new HttpsError("failed-precondition", "Phiếu công việc này không còn ở trạng thái Chưa giao việc.");
+    }
+
+    const siblingDraftQuery = db.collection("tasks")
+      .where("workOrderId", "==", workOrderId);
+    const siblingTaskSnapshot = await transaction.get(siblingDraftQuery);
+    const siblingDraftCount = siblingTaskSnapshot.docs
+      .filter((item) => item.data()?.status === "draft")
+      .length;
+
+    if (sourceTask.isHotel === true) {
+      const activeHotelSnapshot = await transaction.get(
+        db.collection("tasks").where("isHotel", "==", true)
+      );
+      const blockingHotel = activeHotelSnapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .find((task) => task.id !== sourceTaskId && isActivelyAssignedHotelTask(task));
+      if (blockingHotel) {
+        throw new HttpsError("failed-precondition", `Phiếu Hotel “${String(blockingHotel.title || "Làm Hotel")}" đang được thực hiện. Hãy đợi Phiếu này hoàn thành.`);
+      }
+    }
+
+    const activeStart = firestoreTimestampOrNull(lunchTask.queueStartAt)
+      || firestoreTimestampOrNull(lunchTask.dispatchedAt)
+      || firestoreTimestampOrNull(lunchTask.createdAt)
+      || now;
+    const accumulatedWorkedMs = Math.max(0, Number(lunchTask.accumulatedWorkedMs || 0));
+    const actualMs = accumulatedWorkedMs + Math.max(0, now.toMillis() - activeStart.toMillis());
+    const actualMinutes = Math.max(0, Math.ceil(actualMs / 60000));
+    const lunchResult = completedLunchResultFields(actualMinutes);
+    const employeeUid = String(lunchTask.assignedToUid || "");
+    const employeeName = String(lunchTask.assignedToName || "Nhân viên");
+    const deadlineMinutes = Math.max(0, Number(sourceTask.deadlineMinutes || 0));
+    if (deadlineMinutes <= 0) {
+      throw new HttpsError("failed-precondition", "Công việc đã chọn chưa có thời gian hoàn thành hợp lệ.");
+    }
+
+    const nextStatus = sourceTask.isLunchBreak === true
+      ? "lunch_break"
+      : sourceTask.isHotel === true
+        ? "hotel"
+        : "doing";
+    const originalWorkOrder = workOrderSnapshot.data() || {};
+    const shouldSplitWorkOrder = siblingDraftCount > 1;
+    const assignedWorkOrderId = shouldSplitWorkOrder ? splitWorkOrderRef.id : workOrderId;
+    const assignedWorkOrderName = String(originalWorkOrder.name || sourceTask.workOrderName || "Phiếu công việc");
+
+    transaction.update(lunchRef, {
+      status: "completed",
+      submittedAt: now,
+      approvedAt: now,
+      actualMinutes,
+      resultType: lunchResult.resultType,
+      differenceMinutes: lunchResult.differenceMinutes,
+      differencePercent: lunchResult.differencePercent,
+      autoCompletedByDraftTaskAssignment: true,
+      autoCompletedAt: now,
+      autoCompletedByUid: adminUid,
+      autoCompletedByName: adminName,
+      assignedDraftTaskId: sourceTaskId
+    });
+
+    transaction.update(sourceTaskRef, {
+      assignedToUid: employeeUid,
+      assignedToName: employeeName,
+      assignedByUid: adminUid,
+      assignedByName: adminName,
+      status: nextStatus,
+      dispatchedAt: now,
+      queueStartAt: now,
+      deadlineAt: Timestamp.fromMillis(now.toMillis() + Math.round(deadlineMinutes * 60 * 1000)),
+      pauseStartedAt: null,
+      remainingMsAtPause: null,
+      accumulatedWorkedMs: Math.max(0, Number(sourceTask.accumulatedWorkedMs || 0)),
+      workOrderId: assignedWorkOrderId,
+      workOrderName: assignedWorkOrderName,
+      workOrderTaskCount: shouldSplitWorkOrder ? 1 : Number(sourceTask.workOrderTaskCount || 1),
+      rowIndex: shouldSplitWorkOrder ? 0 : Number(sourceTask.rowIndex || 0),
+      originalDraftWorkOrderId: shouldSplitWorkOrder ? workOrderId : String(sourceTask.originalDraftWorkOrderId || ""),
+      assignedFromSupervisionLunchTaskId: lunchTaskId,
+      assignedFromSupervisionLunchAt: now
+    });
+
+    if (shouldSplitWorkOrder) {
+      transaction.set(splitWorkOrderRef, {
+        id: splitWorkOrderRef.id,
+        name: assignedWorkOrderName,
+        createdByUid: adminUid,
+        createdByName: adminName,
+        createdAt: now,
+        updatedAt: now,
+        taskCount: 1,
+        status: "dispatched",
+        splitFromDraftWorkOrderId: workOrderId,
+        assignedFromSupervisionLunchTaskId: lunchTaskId
+      }, { merge: false });
+      transaction.update(workOrderRef, {
+        taskCount: Math.max(1, siblingDraftCount - 1),
+        updatedAt: now
+      });
+    } else {
+      transaction.update(workOrderRef, {
+        status: "dispatched",
+        updatedAt: now
+      });
+    }
+
+    const employeeNotificationRef = db.collection("notifications").doc();
+    transaction.set(employeeNotificationRef, {
+      id: employeeNotificationRef.id,
+      recipientUid: employeeUid,
+      type: "task_assigned_from_supervision_lunch",
+      title: "Bạn có công việc mới",
+      message: `Admin đã giao cho bạn “${String(sourceTask.title || "Công việc")}" và Phiếu nghỉ trưa tự động đã kết thúc.`,
+      taskId: sourceTaskId,
+      taskTitle: String(sourceTask.title || "Công việc"),
+      actorUid: adminUid,
+      actorName: adminName,
+      createdAt: now,
+      readAt: null
+    });
+
+    const adminNotificationRef = db.collection("notifications").doc();
+    transaction.set(adminNotificationRef, {
+      id: adminNotificationRef.id,
+      recipientUid: adminUid,
+      type: "task_assigned_from_supervision_lunch_admin",
+      title: "Đã giao việc và kết thúc nghỉ trưa",
+      message: `Đã giao “${String(sourceTask.title || "Công việc")}" cho ${employeeName}. Phiếu nghỉ trưa tự động đã kết thúc sau ${actualMinutes} phút.`,
+      taskId: sourceTaskId,
+      taskTitle: String(sourceTask.title || "Công việc"),
+      actorUid: adminUid,
+      actorName: adminName,
+      createdAt: now,
+      readAt: null
+    });
+
+    return {
+      sourceTaskId,
+      sourceTaskTitle: String(sourceTask.title || "Công việc"),
+      employeeUid,
+      employeeName,
+      lunchActualMinutes: actualMinutes
+    };
+  });
+
+  return { assigned: true, ...result };
+});
+
 
 // =========================
 // Giám sát công việc -> mỗi nhân viên có một bộ đếm riêng
