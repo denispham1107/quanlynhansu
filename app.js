@@ -13125,11 +13125,22 @@ function renderWorkAssignmentHistory(historyItems = []) {
     const historyType = String(history?.historyType || "");
     const isCountdownStarted = historyType === "work_supervision_countdown_started";
     const isCountdownEnded = historyType === "work_supervision_countdown_ended";
-    const isAutomaticSupervisionLunch = history?.autoCreatedByWorkSupervision === true
+    const historySource = String(history?.source || "");
+    const historyWorkOrderId = String(history?.workOrderId || "");
+    const isHotelOvertimeLunch = history?.autoCreatedByHotelOvertime === true
+      || historySource === "hotel_overtime_auto_lunch"
+      || historyWorkOrderId.startsWith("hotelOvertimeLunch_");
+    const isShipOvertimeLunch = history?.autoCreatedByShipOvertime === true
+      || historySource === "ship_overtime_auto_lunch"
+      || historyWorkOrderId.startsWith("shipOvertimeLunch_");
+    const isAutomaticSupervisionLunch = !isHotelOvertimeLunch && !isShipOvertimeLunch && (
+      history?.autoCreatedByWorkSupervision === true
       || historyType === "automatic_lunch_break"
-      || String(history?.source || "") === "work_supervision_auto_lunch"
-      || String(history?.workOrderId || "").startsWith("supervisionLunch_");
-    const isGreenSupervisionHistory = isAutomaticSupervisionLunch || isCountdownStarted || isCountdownEnded;
+      || historySource === "work_supervision_auto_lunch"
+      || historyWorkOrderId.startsWith("supervisionLunch_")
+    );
+    const isAutomaticLunch = isAutomaticSupervisionLunch || isHotelOvertimeLunch || isShipOvertimeLunch;
+    const isGreenSupervisionHistory = isAutomaticLunch || isCountdownStarted || isCountdownEnded;
     const supervisionEmployeeName = String(
       history?.workSupervisionEmployeeName
       || history?.assignedEmployeeNames?.[0]
@@ -13149,6 +13160,12 @@ function renderWorkAssignmentHistory(historyItems = []) {
     } else if (isAutomaticSupervisionLunch) {
       lineText = `${history.workOrderName || "Phiếu nghỉ trưa tự động"} - ${createdDateText} - ${createdTimeText} - Giám sát công việc đã tạo Phiếu nghỉ trưa tự động lúc: ${assignedTimeText} ${employeeText}`;
       historyBadgeText = "Nghỉ trưa tự động";
+    } else if (isHotelOvertimeLunch) {
+      lineText = `${history.workOrderName || "Phiếu nghỉ trưa tự động"} - ${createdDateText} - ${createdTimeText} - Hệ thống đã tạo Phiếu nghỉ trưa do Hotel quá giờ lúc: ${assignedTimeText} ${employeeText}`;
+      historyBadgeText = "Nghỉ bù Hotel";
+    } else if (isShipOvertimeLunch) {
+      lineText = `${history.workOrderName || "Phiếu nghỉ trưa tự động"} - ${createdDateText} - ${createdTimeText} - Hệ thống đã tạo Phiếu nghỉ trưa do Ship quá giờ lúc: ${assignedTimeText} ${employeeText}`;
+      historyBadgeText = "Nghỉ bù Ship";
     } else {
       lineText = `${history.workOrderName || "Phiếu công việc"} - ${createdDateText} - ${createdTimeText} - đã giao việc: ${taskText} lúc: ${assignedTimeText} ${employeeText}`;
       historyBadgeText = "Lịch sử giao việc";
@@ -14322,8 +14339,10 @@ function renderLunchBreakHistoryBox(task) {
       <ul class="extension-list">
         <li>
           <strong>${escapeHtml(employeeName)} đã nghỉ trưa được ${escapeHtml(formatMinutes(actualMinutes))}</strong>
-          <span>${task.autoCreatedByHotelOvertime === true
-            ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Hotel quá quy định."
+          <span>${task.autoCreatedByShipOvertime === true
+            ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Ship quá quy định."
+            : task.autoCreatedByHotelOvertime === true
+              ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Hotel quá quy định."
             : task.autoCreatedByHotelMissingPhotos === true
               ? "Phiếu được hệ thống tự tạo và hoàn thành bằng tổng thời gian thực tế của các Phiếu Hotel vì chưa đăng đủ ảnh bắt buộc trong ngày."
               : "Thời gian tính từ lúc bắt đầu nghỉ trưa đến khi hoàn thành."}</span>
@@ -17991,11 +18010,14 @@ async function approveTask(taskId, button) {
     // Như vậy khi task đang ở trạng thái "Chờ Admin xác nhận", đồng hồ vẫn chạy bình thường
     // cho đến lúc Admin duyệt và kết quả nhanh/chậm phản ánh đúng thời gian duyệt thực tế.
     const approvedDate = new Date();
-    // Riêng Phiếu nghỉ trưa tự động của “Giám sát công việc”, thời gian thực tế
-    // phải chốt tại lúc nhân viên bấm “Hoàn thành”, đồng thời cộng thêm số phút
-    // do Admin cài đặt đã được ghi trong accumulatedWorkedMs. Kể cả cài đặt là 0 phút,
-    // không cộng thêm thời gian chờ Admin duyệt.
-    const resultCalculatedAt = isLunchBreakTask(task) && task.autoCreatedByWorkSupervision === true
+    // Phiếu Ship và Phiếu nghỉ trưa tự động của “Giám sát công việc” chốt thời gian
+    // tại lúc nhân viên bấm “Hoàn thành”, không cộng thời gian chờ Admin duyệt.
+    // Với Phiếu nghỉ trưa Giám sát, accumulatedWorkedMs vẫn chứa phần phút Admin
+    // đã cài đặt cộng sẵn (kể cả khi phần cộng sẵn là 0 phút).
+    const resultCalculatedAt = (
+      isShipTask(task)
+      || (isLunchBreakTask(task) && task.autoCreatedByWorkSupervision === true)
+    )
       ? (timestampToDate(task.submittedAt) || approvedDate)
       : approvedDate;
     const result = calculateResultAt(task, resultCalculatedAt);

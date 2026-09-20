@@ -1480,6 +1480,32 @@ function hotelTaskEndedSeconds(task = {}) {
   return Math.max(0, Math.ceil((accumulatedWorkedMs + activeMs) / 1000));
 }
 
+function shipTaskActualSeconds(task = {}) {
+  if (task.status !== "completed" || task.isShip !== true) return 0;
+
+  const storedSeconds = Number(task.shipActualSeconds);
+  if (Object.prototype.hasOwnProperty.call(task, "shipActualSeconds") && Number.isFinite(storedSeconds)) {
+    return Math.max(0, Math.round(storedSeconds));
+  }
+
+  // Chốt thời gian Ship tại lúc nhân viên bấm “Hoàn thành”, không cộng thời gian
+  // chờ Admin duyệt. Trường hợp Admin chủ động kết thúc thì submittedAt cũng được
+  // ghi cùng thời điểm kết thúc nên vẫn dùng chung công thức này.
+  const completedAt = firestoreTimestampOrNull(task.submittedAt)
+    || firestoreTimestampOrNull(task.approvedAt);
+  const startedAt = firestoreTimestampOrNull(task.queueStartAt)
+    || firestoreTimestampOrNull(task.dispatchedAt)
+    || firestoreTimestampOrNull(task.createdAt);
+  const accumulatedWorkedMs = Math.max(0, Number(task.accumulatedWorkedMs || 0));
+
+  if (completedAt && startedAt) {
+    const activeMs = Math.max(0, completedAt.toMillis() - startedAt.toMillis());
+    return Math.max(0, Math.ceil((accumulatedWorkedMs + activeMs) / 1000));
+  }
+
+  return Math.max(0, Math.round(Number(task.actualMinutes || 0) * 60));
+}
+
 function hotelPhotoIsInvalid(photo = {}) {
   const validationStatus = String(photo.validationStatus || photo.validity || "").trim().toLowerCase();
   const capturedBeforeAssignment = photo.capturedBeforeAssignment === true
@@ -2203,6 +2229,153 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
   }
 }
 
+async function syncShipOvertimeLunch(taskId, beforeTask, afterTask) {
+  const sourceTask = afterTask || beforeTask;
+  if (!sourceTask || sourceTask.isShip !== true || sourceTask.isLunchBreak === true) return;
+
+  const isCompleted = afterTask?.isShip === true && afterTask.status === "completed";
+  const actualSeconds = isCompleted ? shipTaskActualSeconds(afterTask) : 0;
+  const deadlineSeconds = isCompleted
+    ? Math.max(0, Math.round(Number(afterTask.deadlineMinutes || 0) * 60))
+    : 0;
+  const overtimeSeconds = isCompleted ? Math.max(0, actualSeconds - deadlineSeconds) : 0;
+  const dateKey = String(sourceTask.taskDate || "").trim();
+  const sourceTaskRef = db.doc(`tasks/${taskId}`);
+  const autoWorkOrderId = `shipOvertimeLunch_${taskId}`;
+  const autoTaskId = `shipOvertimeLunch_${taskId}`;
+  const autoWorkOrderRef = db.doc(`workOrders/${autoWorkOrderId}`);
+  const autoTaskRef = db.doc(`tasks/${autoTaskId}`);
+
+  await db.runTransaction(async (transaction) => {
+    const [autoTaskSnapshot, autoWorkOrderSnapshot] = await transaction.getAll(
+      autoTaskRef,
+      autoWorkOrderRef
+    );
+    const employeeUid = String(sourceTask.assignedToUid || "");
+    const assignedByUid = String(sourceTask.assignedByUid || "system");
+    const employeeNotificationId = employeeUid
+      ? `shipOvertimeLunch_${taskId}_${crypto.createHash("sha256").update(employeeUid).digest("hex").slice(0, 18)}`
+      : "";
+    const adminNotificationId = assignedByUid && assignedByUid !== "system"
+      ? `shipOvertimeLunchAdmin_${taskId}_${crypto.createHash("sha256").update(assignedByUid).digest("hex").slice(0, 18)}`
+      : "";
+
+    if (overtimeSeconds <= 0 || !afterTask?.assignedToUid || !dateKey) {
+      if (autoTaskSnapshot.exists) transaction.delete(autoTaskRef);
+      if (autoWorkOrderSnapshot.exists) transaction.delete(autoWorkOrderRef);
+      if (employeeNotificationId) transaction.delete(db.doc(`notifications/${employeeNotificationId}`));
+      if (adminNotificationId) transaction.delete(db.doc(`notifications/${adminNotificationId}`));
+      return;
+    }
+
+    const now = Timestamp.now();
+    const employeeName = String(afterTask.assignedToName || "Nhân viên");
+    const overtimeMinutes = overtimeSeconds / 60;
+    const workOrderName = `Nghỉ trưa bù do Ship quá giờ - ${employeeName}`.slice(0, 180);
+    const description = `Tự động tạo và hoàn thành do Phiếu Ship “${String(afterTask.title || "Công việc Ship")}” làm quá ${formatHotelSeconds(overtimeSeconds)} so với thời gian quy định.`;
+
+    if (
+      Number(afterTask.shipActualSeconds || 0) !== actualSeconds
+      || Number(afterTask.shipOvertimeSeconds || 0) !== overtimeSeconds
+    ) {
+      transaction.set(sourceTaskRef, {
+        shipActualSeconds: actualSeconds,
+        shipOvertimeSeconds: overtimeSeconds,
+        shipOvertimeSyncedAt: now
+      }, { merge: true });
+    }
+
+    transaction.set(autoWorkOrderRef, {
+      id: autoWorkOrderId,
+      name: workOrderName,
+      createdByUid: assignedByUid,
+      createdByName: "Hệ thống Ship",
+      createdAt: autoWorkOrderSnapshot.data()?.createdAt || now,
+      updatedAt: now,
+      taskCount: 1,
+      status: "dispatched",
+      autoCreatedByShipOvertime: true,
+      sourceShipTaskId: taskId
+    }, { merge: false });
+
+    transaction.set(autoTaskRef, {
+      id: autoTaskId,
+      title: "Phiếu nghỉ trưa",
+      description,
+      taskDate: dateKey,
+      assignedToUid: employeeUid,
+      assignedToName: employeeName,
+      assignedByUid,
+      assignedByName: "Hệ thống Ship",
+      workOrderId: autoWorkOrderId,
+      workOrderName,
+      workOrderTaskCount: 1,
+      rowIndex: 0,
+      createdAt: autoTaskSnapshot.data()?.createdAt || now,
+      deadlineMinutes: overtimeMinutes,
+      isLunchBreak: true,
+      isHotel: false,
+      isShip: false,
+      hotelPetCount: 0,
+      hotelAllowedMinutes: 0,
+      deadlineAt: now,
+      dispatchedAt: now,
+      queueStartAt: now,
+      pauseStartedAt: null,
+      remainingMsAtPause: null,
+      accumulatedWorkedMs: overtimeSeconds * 1000,
+      submittedAt: now,
+      approvedAt: now,
+      status: "completed",
+      actualMinutes: overtimeMinutes,
+      resultType: "on_time",
+      differenceMinutes: 0,
+      differencePercent: 0,
+      autoCreatedByShipOvertime: true,
+      sourceShipTaskId: taskId,
+      shipOvertimeSeconds: overtimeSeconds,
+      workPhotos: [],
+      workPhotoCount: 0,
+      lastWorkPhotoUploadedAt: null,
+      photoRequired: false,
+      requiredPhotoCount: 0,
+      photos: [],
+      photoCount: 0,
+      lastPhotoUploadedAt: null
+    }, { merge: false });
+
+    transaction.set(db.doc(`notifications/${employeeNotificationId}`), {
+      id: employeeNotificationId,
+      recipientUid: employeeUid,
+      type: "ship_overtime_lunch_created",
+      title: "Đã cộng Phiếu nghỉ trưa do Ship quá giờ",
+      message: `Bạn làm Ship quá ${formatHotelSeconds(overtimeSeconds)}. Hệ thống đã tự tạo và hoàn thành Phiếu nghỉ trưa đúng bằng thời gian này.`,
+      taskId: autoTaskId,
+      taskTitle: "Phiếu nghỉ trưa",
+      actorUid: "system",
+      actorName: "Hệ thống Ship",
+      createdAt: now,
+      readAt: null
+    }, { merge: false });
+
+    if (assignedByUid && assignedByUid !== "system") {
+      transaction.set(db.doc(`notifications/${adminNotificationId}`), {
+        id: adminNotificationId,
+        recipientUid: assignedByUid,
+        type: "ship_overtime_lunch_created_admin",
+        title: "Đã tạo Phiếu nghỉ trưa do Ship quá giờ",
+        message: `${employeeName} làm Ship quá ${formatHotelSeconds(overtimeSeconds)}. Hệ thống đã tự tạo và hoàn thành Phiếu nghỉ trưa tương ứng.`,
+        taskId: autoTaskId,
+        taskTitle: "Phiếu nghỉ trưa",
+        actorUid: "system",
+        actorName: "Hệ thống Ship",
+        createdAt: now,
+        readAt: null
+      }, { merge: false });
+    }
+  });
+}
+
 function isActivelyAssignedHotelTask(task = {}) {
   return task.isHotel === true
     && Boolean(String(task.assignedToUid || "").trim())
@@ -2313,6 +2486,11 @@ exports.syncHotelBudgetAndOvertimeLunch = onDocumentWritten({
 
   await enforceSingleActiveHotelTask(event.params.taskId, afterTask);
   await syncHotelBudgetAndOvertimeLunch(
+    event.params.taskId,
+    beforeTask,
+    afterTask
+  );
+  await syncShipOvertimeLunch(
     event.params.taskId,
     beforeTask,
     afterTask
@@ -3233,11 +3411,14 @@ function normalizeHistoryDocumentId(value) {
 function isAutomaticSupervisionLunchHistory(history = {}) {
   return history?.autoCreatedByWorkSupervision === true
     || history?.autoCreatedByHotelOvertime === true
+    || history?.autoCreatedByShipOvertime === true
     || String(history?.historyType || "") === "automatic_lunch_break"
     || String(history?.source || "") === "work_supervision_auto_lunch"
     || String(history?.source || "") === "hotel_overtime_auto_lunch"
+    || String(history?.source || "") === "ship_overtime_auto_lunch"
     || String(history?.workOrderId || "").startsWith("supervisionLunch_")
-    || String(history?.workOrderId || "").startsWith("hotelOvertimeLunch_");
+    || String(history?.workOrderId || "").startsWith("hotelOvertimeLunch_")
+    || String(history?.workOrderId || "").startsWith("shipOvertimeLunch_");
 }
 
 function automaticLunchHistoryDeletionMarkerRef(historyId) {
@@ -3347,7 +3528,9 @@ async function ensureInitialWorkAssignmentHistory(workOrderId, beforeData, after
     || String(workOrderId || "").startsWith("supervisionLunch_");
   const isHotelOvertimeLunch = afterData.autoCreatedByHotelOvertime === true
     || String(workOrderId || "").startsWith("hotelOvertimeLunch_");
-  const isAutomaticLunch = isAutomaticSupervisionLunch || isHotelOvertimeLunch;
+  const isShipOvertimeLunch = afterData.autoCreatedByShipOvertime === true
+    || String(workOrderId || "").startsWith("shipOvertimeLunch_");
+  const isAutomaticLunch = isAutomaticSupervisionLunch || isHotelOvertimeLunch || isShipOvertimeLunch;
 
   // Nếu Admin đã chủ động xóa dòng lịch sử của Phiếu nghỉ trưa tự động thì tuyệt đối
   // không được tự tạo lại ở các lần backfill/trigger sau. Marker chỉ được ghi bởi
@@ -3445,11 +3628,15 @@ async function ensureInitialWorkAssignmentHistory(workOrderId, beforeData, after
       ? "work_supervision_auto_lunch"
       : isHotelOvertimeLunch
         ? "hotel_overtime_auto_lunch"
-      : (beforeData?.status === "draft" ? "draft_dispatched" : "created_and_dispatched"),
+        : isShipOvertimeLunch
+          ? "ship_overtime_auto_lunch"
+          : (beforeData?.status === "draft" ? "draft_dispatched" : "created_and_dispatched"),
     historyType: isAutomaticLunch ? "automatic_lunch_break" : "assignment",
     autoCreatedByWorkSupervision: isAutomaticSupervisionLunch,
     autoCreatedByHotelOvertime: isHotelOvertimeLunch,
+    autoCreatedByShipOvertime: isShipOvertimeLunch,
     sourceHotelTaskId: isHotelOvertimeLunch ? String(afterData.sourceHotelTaskId || "") : "",
+    sourceShipTaskId: isShipOvertimeLunch ? String(afterData.sourceShipTaskId || "") : "",
     workSupervisionCycleId: isAutomaticSupervisionLunch
       ? String(afterData.workSupervisionCycleId || "")
       : "",
