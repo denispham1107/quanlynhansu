@@ -10622,22 +10622,7 @@
             >⋮</button>
             <div id="mobileTaskPanelMenu" class="mobile-task-panel-menu" aria-hidden="true">
               <button id="deleteAllWorkOrdersBtn" class="btn danger small" type="button">🗑 Xoá toàn bộ phiếu</button>
-              <button id="openScheduledWorkOrderBtn" class="btn schedule-work-order-btn schedule-work-order-desktop-btn small hidden" type="button">
-                <span class="schedule-calendar-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false">
-                    <rect x="2.75" y="4.75" width="18.5" height="16.25" rx="3.25"></rect>
-                    <path d="M3 9.25h18M7.5 2.75v4M16.5 2.75v4"></path>
-                    <circle cx="7.5" cy="13" r="1"></circle>
-                    <circle cx="12" cy="13" r="1"></circle>
-                    <circle cx="16.5" cy="13" r="1"></circle>
-                    <circle cx="7.5" cy="17" r="1"></circle>
-                    <circle cx="12" cy="17" r="1"></circle>
-                    <circle cx="16.5" cy="17" r="1"></circle>
-                  </svg>
-                </span>
-                <span>Lên lịch</span>
-              </button>
-              <button id="openScheduledWorkOrderMobileBtn" class="btn schedule-work-order-btn schedule-work-order-mobile-btn small hidden" type="button">
+              <button id="openScheduledWorkOrderBtn" class="btn schedule-work-order-btn small hidden" type="button">
                 <span class="schedule-calendar-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false">
                     <rect x="2.75" y="4.75" width="18.5" height="16.25" rx="3.25"></rect>
@@ -11862,7 +11847,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260921-scheduled-assignee-lock-v83"></script>
+  <script type="module" src="app.js?v=20260921-single-mobile-schedule-v84"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12480,6 +12465,7 @@
     background:linear-gradient(135deg,#7c3aed,#4f46e5)!important;
     box-shadow:0 12px 26px rgba(124,58,237,.24)!important;
   }
+  .schedule-work-order-btn.hidden { display:none!important; }
   .schedule-calendar-icon {
     display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px;
     width:26px; height:26px; border:1px solid rgba(255,255,255,.28); border-radius:8px;
@@ -12491,7 +12477,6 @@
   }
   .schedule-calendar-icon circle { fill:currentColor; stroke:none; }
   .schedule-work-order-btn:hover { color:#fff!important; filter:brightness(.96); }
-  .schedule-work-order-mobile-btn { display:none!important; }
   .scheduled-work-order-config {
     width:100%; min-width:0; max-width:100%; box-sizing:border-box; overflow:hidden;
     padding:16px; border:1px dashed #a78bfa; border-radius:18px;
@@ -12601,9 +12586,6 @@
   }
 
   @media (max-width: 768px) {
-    .schedule-work-order-desktop-btn { display:none!important; }
-    .mobile-task-panel-menu .schedule-work-order-mobile-btn.hidden { display:none!important; }
-    .mobile-task-panel-menu .schedule-work-order-mobile-btn:not(.hidden) { display:flex!important; }
     .scheduled-work-order-config { padding:13px; }
     #scheduleWorkOrderBtn { width:100%; }
   }

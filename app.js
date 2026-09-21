@@ -922,7 +922,6 @@ const els = {
   openTaskModalBtn: $("#openTaskModalBtn"),
   floatingCreateTaskBtn: $("#floatingCreateTaskBtn"),
   openScheduledWorkOrderBtn: $("#openScheduledWorkOrderBtn"),
-  openScheduledWorkOrderMobileBtn: $("#openScheduledWorkOrderMobileBtn"),
   openWorkTemplatePageBtn: $("#openWorkTemplatePageBtn"),
   openEmployeeManagerPageBtn: $("#openEmployeeManagerPageBtn"),
   exportDataBtn: $("#exportDataBtn"),
@@ -5619,7 +5618,6 @@ function applyManagementPermissionUI() {
   els.openGoogleCalendarImportBtn?.classList.toggle("hidden", !isAdmin);
   els.openGoogleCalendarImportMobileBtn?.classList.toggle("hidden", !isAdmin);
   els.openScheduledWorkOrderBtn?.classList.toggle("hidden", !isAdmin);
-  els.openScheduledWorkOrderMobileBtn?.classList.toggle("hidden", !isAdmin);
   els.openEmployeeStatusHistoryBtn?.classList.toggle("hidden", !isAdmin);
   if (!isAdmin) closeEmployeeStatusHistoryModal();
 
@@ -8995,7 +8993,6 @@ function openScheduledWorkOrderModal() {
 }
 
 els.openScheduledWorkOrderBtn?.addEventListener("click", openScheduledWorkOrderModal);
-els.openScheduledWorkOrderMobileBtn?.addEventListener("click", openScheduledWorkOrderModal);
 els.scheduledWorkOrderCountdownMinutes?.addEventListener("input", updateScheduledCountdownPreview);
 
 function openEditWorkOrderModal(workOrderId) {
@@ -10673,7 +10670,7 @@ function hasVisibleTaskPanelMenuAction() {
     els.deleteAllWorkOrdersBtn,
     els.openWorkOrderSettingsBtn,
     els.openGoogleCalendarImportMobileBtn,
-    els.openScheduledWorkOrderMobileBtn
+    els.openScheduledWorkOrderBtn
   ]
     .some((button) => button && !button.classList.contains("hidden"));
 }

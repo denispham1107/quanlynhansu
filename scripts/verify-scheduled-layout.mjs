@@ -150,6 +150,52 @@ const desktopPassed = desktopResult.sameRow
 console.log(`${desktopPassed ? "PASS" : "FAIL"} | Desktop Lên lịch giữa Xóa và Nạp lịch | scroll ${desktopResult.pageScrollWidth}/${desktopResult.viewportWidth}`);
 if (!desktopPassed) failures.push({ profile: "Desktop schedule action", result: desktopResult });
 
+await send("Emulation.setDeviceMetricsOverride", {
+  width: 390,
+  height: 844,
+  deviceScaleFactor: 3,
+  mobile: true,
+  screenWidth: 390,
+  screenHeight: 844,
+});
+await delay(120);
+const mobileScheduleButtonCheck = await send("Runtime.evaluate", {
+  returnByValue: true,
+  expression: `(() => {
+    document.getElementById("appView").classList.remove("hidden");
+    document.getElementById("adminView").classList.remove("hidden");
+    const menu = document.getElementById("mobileTaskPanelMenu");
+    const scheduleButton = document.getElementById("openScheduledWorkOrderBtn");
+    menu.classList.add("is-open");
+    scheduleButton.classList.remove("hidden");
+    const visibleScheduleButtons = [...menu.querySelectorAll(".schedule-work-order-btn")]
+      .filter((button) => {
+        const style = getComputedStyle(button);
+        const rect = button.getBoundingClientRect();
+        return style.display !== "none" && rect.width > 0 && rect.height > 0;
+      });
+    const menuRect = menu.getBoundingClientRect();
+    const buttonRect = scheduleButton.getBoundingClientRect();
+    return {
+      visibleCount: visibleScheduleButtons.length,
+      visibleIds: visibleScheduleButtons.map((button) => button.id),
+      buttonInsideMenu: buttonRect.left >= menuRect.left - 0.5
+        && buttonRect.right <= menuRect.right + 0.5
+        && buttonRect.top >= menuRect.top - 0.5
+        && buttonRect.bottom <= menuRect.bottom + 0.5,
+      pageScrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth,
+    };
+  })()`
+});
+const mobileScheduleResult = mobileScheduleButtonCheck.result.value;
+const mobileSchedulePassed = mobileScheduleResult.visibleCount === 1
+  && mobileScheduleResult.visibleIds[0] === "openScheduledWorkOrderBtn"
+  && mobileScheduleResult.buttonInsideMenu
+  && mobileScheduleResult.pageScrollWidth <= mobileScheduleResult.viewportWidth;
+console.log(`${mobileSchedulePassed ? "PASS" : "FAIL"} | Mobile chỉ có một nút Lên lịch | ${mobileScheduleResult.visibleCount} nút`);
+if (!mobileSchedulePassed) failures.push({ profile: "Mobile single schedule action", result: mobileScheduleResult });
+
 const prepareExpression = `(() => {
   const modal = document.getElementById("taskModal");
   const card = modal?.querySelector(".task-create-modal-card");

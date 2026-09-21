@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260921-scheduled-assignee-lock-v83";
+const CACHE_NAME = "culao-task-shell-v20260921-single-mobile-schedule-v84";
 const APP_SHELL = [
   "./",
   "./index.html",
