@@ -197,6 +197,7 @@ const state = {
   taskModalMode: "create",
   scheduledAssignmentWorkOrderId: "",
   scheduledWorkOrders: [],
+  scheduledWorkOrderStatusFilter: "all",
   scheduledListReturnToTaskModal: false,
   editingWorkTemplateId: null,
   adminStatusFilter: "all",
@@ -987,6 +988,8 @@ const els = {
   scheduleWorkOrderBtn: $("#scheduleWorkOrderBtn"),
   scheduledWorkOrderListModal: $("#scheduledWorkOrderListModal"),
   scheduledWorkOrderList: $("#scheduledWorkOrderList"),
+  scheduledWorkOrderStatusFilter: $("#scheduledWorkOrderStatusFilter"),
+  scheduledWorkOrderFilterCount: $("#scheduledWorkOrderFilterCount"),
   scheduledGroupAssignmentModal: $("#scheduledGroupAssignmentModal"),
   scheduledGroupAssignmentForm: $("#scheduledGroupAssignmentForm"),
   scheduledGroupAssignmentSummary: $("#scheduledGroupAssignmentSummary"),
@@ -9984,15 +9987,45 @@ function formatScheduledListDateTime(milliseconds) {
   }).format(date);
 }
 
+function scheduledWorkOrderMatchesStatusFilter(schedule, filterValue = "all") {
+  const status = String(schedule?.status || "pending");
+  if (filterValue === "assigned") return status === "assigned";
+  if (filterValue === "unassigned") return status === "pending" || status === "generated";
+  return true;
+}
+
+function scheduledWorkOrderFilterLabel(filterValue = "all") {
+  return ({
+    unassigned: "Chưa giao việc",
+    assigned: "Đã giao việc"
+  })[filterValue] || "Tất cả trạng thái";
+}
+
 function renderScheduledWorkOrderList() {
   if (!els.scheduledWorkOrderList) return;
   const schedules = Array.isArray(state.scheduledWorkOrders) ? state.scheduledWorkOrders : [];
+  const activeFilter = ["all", "unassigned", "assigned"].includes(state.scheduledWorkOrderStatusFilter)
+    ? state.scheduledWorkOrderStatusFilter
+    : "all";
+  const filteredSchedules = schedules.filter((schedule) => (
+    scheduledWorkOrderMatchesStatusFilter(schedule, activeFilter)
+  ));
+  if (els.scheduledWorkOrderStatusFilter) {
+    els.scheduledWorkOrderStatusFilter.value = activeFilter;
+  }
+  if (els.scheduledWorkOrderFilterCount) {
+    els.scheduledWorkOrderFilterCount.textContent = `${filteredSchedules.length}/${schedules.length} lịch`;
+  }
   if (!schedules.length) {
     els.scheduledWorkOrderList.innerHTML = '<div class="empty-state">Chưa có lịch Phiếu công việc nào.</div>';
     return;
   }
+  if (!filteredSchedules.length) {
+    els.scheduledWorkOrderList.innerHTML = `<div class="empty-state">Không có lịch ở trạng thái “${escapeHtml(scheduledWorkOrderFilterLabel(activeFilter))}”.</div>`;
+    return;
+  }
 
-  els.scheduledWorkOrderList.innerHTML = schedules.map((schedule) => {
+  els.scheduledWorkOrderList.innerHTML = filteredSchedules.map((schedule) => {
     const taskNames = Array.isArray(schedule.taskNames) && schedule.taskNames.length
       ? schedule.taskNames.join("; ")
       : "Chưa có tên công việc";
@@ -10032,6 +10065,12 @@ async function openScheduledWorkOrderListModal() {
   }
   if (els.scheduledWorkOrderList) {
     els.scheduledWorkOrderList.innerHTML = '<div class="empty-state">Đang tải danh sách lịch...</div>';
+  }
+  if (els.scheduledWorkOrderStatusFilter) {
+    els.scheduledWorkOrderStatusFilter.value = state.scheduledWorkOrderStatusFilter;
+  }
+  if (els.scheduledWorkOrderFilterCount) {
+    els.scheduledWorkOrderFilterCount.textContent = "Đang tải...";
   }
   state.scheduledListReturnToTaskModal = Boolean(
     state.taskModalMode === "schedule"
@@ -10087,6 +10126,11 @@ async function deleteScheduledWorkOrder(scheduleId, button) {
 }
 
 els.viewScheduledWorkOrdersBtn?.addEventListener("click", openScheduledWorkOrderListModal);
+els.scheduledWorkOrderStatusFilter?.addEventListener("change", () => {
+  const nextFilter = els.scheduledWorkOrderStatusFilter?.value || "all";
+  state.scheduledWorkOrderStatusFilter = ["unassigned", "assigned"].includes(nextFilter) ? nextFilter : "all";
+  renderScheduledWorkOrderList();
+});
 $$('[data-back-scheduled-work-order-list]').forEach((button) => {
   button.addEventListener("click", returnToScheduledWorkOrderModal);
 });

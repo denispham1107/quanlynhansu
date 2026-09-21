@@ -333,13 +333,19 @@ for (const profile of profiles) {
         const rect = element.getBoundingClientRect();
         return { left: round(rect.left), right: round(rect.right), top: round(rect.top), bottom: round(rect.bottom), width: round(rect.width), height: round(rect.height) };
       };
-      const modal = document.getElementById("scheduledWorkOrderListModal");
-      const cardElement = modal.querySelector(".scheduled-work-order-list-card");
-      const listElement = document.getElementById("scheduledWorkOrderList");
+    const modal = document.getElementById("scheduledWorkOrderListModal");
+    const cardElement = modal.querySelector(".scheduled-work-order-list-card");
+    const filterElement = modal.querySelector(".scheduled-work-order-list-filter");
+    const filterShellElement = modal.querySelector(".scheduled-work-order-filter-shell");
+    const filterSelectElement = document.getElementById("scheduledWorkOrderStatusFilter");
+    const listElement = document.getElementById("scheduledWorkOrderList");
       const firstRowElement = listElement.querySelector(".scheduled-work-order-list-row");
       const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
-      const card = box(cardElement);
-      const list = box(listElement);
+    const card = box(cardElement);
+    const filter = box(filterElement);
+    const filterShell = box(filterShellElement);
+    const filterSelect = box(filterSelectElement);
+    const list = box(listElement);
       const firstRow = box(firstRowElement);
       const firstDeleteButton = box(firstDeleteButtonElement);
       return {
@@ -349,13 +355,18 @@ for (const profile of profiles) {
         viewportWidth: document.documentElement.clientWidth,
         viewportHeight: document.documentElement.clientHeight,
         scrollWidth: document.documentElement.scrollWidth,
-        card,
-        list,
+      card,
+      filter,
+      filterShell,
+      filterSelect,
+      list,
         firstRow,
         firstDeleteButton,
         listClientHeight: listElement.clientHeight,
         listScrollHeight: listElement.scrollHeight,
-        listInsideCard: list.left >= card.left - 0.5 && list.right <= card.right + 0.5 && list.top >= card.top - 0.5 && list.bottom <= card.bottom + 0.5,
+      listInsideCard: list.left >= card.left - 0.5 && list.right <= card.right + 0.5 && list.top >= card.top - 0.5 && list.bottom <= card.bottom + 0.5,
+      filterInsideCard: filter.left >= card.left - 0.5 && filter.right <= card.right + 0.5 && filter.top >= card.top - 0.5 && filter.bottom <= card.bottom + 0.5,
+      selectInsideShell: filterSelect.left >= filterShell.left - 0.5 && filterSelect.right <= filterShell.right + 0.5 && filterSelect.top >= filterShell.top - 0.5 && filterSelect.bottom <= filterShell.bottom + 0.5,
         deleteButtonInsideRow: firstDeleteButton.left >= firstRow.left - 0.5 && firstDeleteButton.right <= firstRow.right + 0.5 && firstDeleteButton.top >= firstRow.top - 0.5 && firstDeleteButton.bottom <= firstRow.bottom + 0.5,
         cardInsideViewport: card.left >= -0.5 && card.right <= document.documentElement.clientWidth + 0.5 && card.top >= -0.5 && card.bottom <= document.documentElement.clientHeight + 0.5,
         taskModalHidden: document.getElementById("taskModal").classList.contains("hidden"),
@@ -368,7 +379,12 @@ for (const profile of profiles) {
     && result.card.height > 0
     && result.list.width > 0
     && result.list.height > 0
+    && result.filter.width > 0
+    && result.filterShell.width > 0
+    && result.filterSelect.width > 0
     && result.listInsideCard
+    && result.filterInsideCard
+    && result.selectInsideShell
     && result.deleteButtonInsideRow
     && result.cardInsideViewport
     && result.modalOverflowY === "hidden"
