@@ -198,6 +198,10 @@ const state = {
   scheduledAssignmentWorkOrderId: "",
   scheduledWorkOrders: [],
   scheduledWorkOrderStatusFilter: "all",
+  scheduledWorkOrderTimeFilter: "today",
+  scheduledWorkOrderDateFilter: "",
+  scheduledWorkOrderDateFromFilter: "",
+  scheduledWorkOrderDateToFilter: "",
   scheduledListReturnToTaskModal: false,
   editingWorkTemplateId: null,
   adminStatusFilter: "all",
@@ -989,6 +993,12 @@ const els = {
   scheduledWorkOrderListModal: $("#scheduledWorkOrderListModal"),
   scheduledWorkOrderList: $("#scheduledWorkOrderList"),
   scheduledWorkOrderStatusFilter: $("#scheduledWorkOrderStatusFilter"),
+  scheduledWorkOrderTimeFilter: $("#scheduledWorkOrderTimeFilter"),
+  scheduledWorkOrderDateFilterField: $("#scheduledWorkOrderDateFilterField"),
+  scheduledWorkOrderDateFilter: $("#scheduledWorkOrderDateFilter"),
+  scheduledWorkOrderDateRangeFilter: $("#scheduledWorkOrderDateRangeFilter"),
+  scheduledWorkOrderDateFromFilter: $("#scheduledWorkOrderDateFromFilter"),
+  scheduledWorkOrderDateToFilter: $("#scheduledWorkOrderDateToFilter"),
   scheduledWorkOrderFilterCount: $("#scheduledWorkOrderFilterCount"),
   scheduledGroupAssignmentModal: $("#scheduledGroupAssignmentModal"),
   scheduledGroupAssignmentForm: $("#scheduledGroupAssignmentForm"),
@@ -10004,18 +10014,99 @@ function scheduledWorkOrderFilterLabel(filterValue = "all") {
   })[filterValue] || "Tất cả trạng thái";
 }
 
+function normalizeScheduledWorkOrderTimeFilter(filterValue = "today") {
+  return ["today", "yesterday", "date", "range"].includes(filterValue)
+    ? filterValue
+    : "today";
+}
+
+function scheduledWorkOrderDateValue(schedule) {
+  const date = new Date(Number(schedule?.scheduledForMs || 0));
+  return Number.isFinite(date.getTime()) ? toLocalDateInputValue(date) : "";
+}
+
+function scheduledWorkOrderMatchesTimeFilter(schedule, filterValue = "today") {
+  const activeFilter = normalizeScheduledWorkOrderTimeFilter(filterValue);
+  const scheduleDate = scheduledWorkOrderDateValue(schedule);
+  if (!scheduleDate) return false;
+  if (activeFilter === "today") return scheduleDate === todayInputValue();
+  if (activeFilter === "yesterday") return scheduleDate === yesterdayInputValue();
+  if (activeFilter === "date") {
+    return Boolean(state.scheduledWorkOrderDateFilter)
+      && scheduleDate === state.scheduledWorkOrderDateFilter;
+  }
+
+  const fromDate = state.scheduledWorkOrderDateFromFilter;
+  const toDate = state.scheduledWorkOrderDateToFilter;
+  if (!fromDate || !toDate) return false;
+  const rangeStart = fromDate <= toDate ? fromDate : toDate;
+  const rangeEnd = fromDate <= toDate ? toDate : fromDate;
+  return scheduleDate >= rangeStart && scheduleDate <= rangeEnd;
+}
+
+function scheduledWorkOrderTimeFilterLabel(filterValue = "today") {
+  const activeFilter = normalizeScheduledWorkOrderTimeFilter(filterValue);
+  if (activeFilter === "date") {
+    return state.scheduledWorkOrderDateFilter
+      ? `Ngày ${formatDateOnly(state.scheduledWorkOrderDateFilter)}`
+      : "Ngày đã chọn";
+  }
+  if (activeFilter === "range") {
+    if (!state.scheduledWorkOrderDateFromFilter || !state.scheduledWorkOrderDateToFilter) {
+      return "Khoảng thời gian đã chọn";
+    }
+    const rangeStart = state.scheduledWorkOrderDateFromFilter <= state.scheduledWorkOrderDateToFilter
+      ? state.scheduledWorkOrderDateFromFilter
+      : state.scheduledWorkOrderDateToFilter;
+    const rangeEnd = state.scheduledWorkOrderDateFromFilter <= state.scheduledWorkOrderDateToFilter
+      ? state.scheduledWorkOrderDateToFilter
+      : state.scheduledWorkOrderDateFromFilter;
+    return `${formatDateOnly(rangeStart)} – ${formatDateOnly(rangeEnd)}`;
+  }
+  return activeFilter === "yesterday" ? "Hôm qua" : "Hôm nay";
+}
+
+function syncScheduledWorkOrderTimeFilterControls() {
+  const activeFilter = normalizeScheduledWorkOrderTimeFilter(state.scheduledWorkOrderTimeFilter);
+  state.scheduledWorkOrderTimeFilter = activeFilter;
+  if (els.scheduledWorkOrderTimeFilter) els.scheduledWorkOrderTimeFilter.value = activeFilter;
+  els.scheduledWorkOrderDateFilterField?.classList.toggle("hidden", activeFilter !== "date");
+  els.scheduledWorkOrderDateRangeFilter?.classList.toggle("hidden", activeFilter !== "range");
+  if (els.scheduledWorkOrderDateFilter) {
+    els.scheduledWorkOrderDateFilter.value = state.scheduledWorkOrderDateFilter;
+  }
+  if (els.scheduledWorkOrderDateFromFilter) {
+    els.scheduledWorkOrderDateFromFilter.value = state.scheduledWorkOrderDateFromFilter;
+  }
+  if (els.scheduledWorkOrderDateToFilter) {
+    els.scheduledWorkOrderDateToFilter.value = state.scheduledWorkOrderDateToFilter;
+  }
+}
+
+function resetScheduledWorkOrderTimeFilter() {
+  const today = todayInputValue();
+  state.scheduledWorkOrderTimeFilter = "today";
+  state.scheduledWorkOrderDateFilter = today;
+  state.scheduledWorkOrderDateFromFilter = today;
+  state.scheduledWorkOrderDateToFilter = today;
+  syncScheduledWorkOrderTimeFilterControls();
+}
+
 function renderScheduledWorkOrderList() {
   if (!els.scheduledWorkOrderList) return;
   const schedules = Array.isArray(state.scheduledWorkOrders) ? state.scheduledWorkOrders : [];
-  const activeFilter = ["all", "unassigned", "assigned"].includes(state.scheduledWorkOrderStatusFilter)
+  const activeStatusFilter = ["all", "unassigned", "assigned"].includes(state.scheduledWorkOrderStatusFilter)
     ? state.scheduledWorkOrderStatusFilter
     : "all";
+  const activeTimeFilter = normalizeScheduledWorkOrderTimeFilter(state.scheduledWorkOrderTimeFilter);
   const filteredSchedules = schedules.filter((schedule) => (
-    scheduledWorkOrderMatchesStatusFilter(schedule, activeFilter)
+    scheduledWorkOrderMatchesStatusFilter(schedule, activeStatusFilter)
+    && scheduledWorkOrderMatchesTimeFilter(schedule, activeTimeFilter)
   ));
   if (els.scheduledWorkOrderStatusFilter) {
-    els.scheduledWorkOrderStatusFilter.value = activeFilter;
+    els.scheduledWorkOrderStatusFilter.value = activeStatusFilter;
   }
+  syncScheduledWorkOrderTimeFilterControls();
   if (els.scheduledWorkOrderFilterCount) {
     els.scheduledWorkOrderFilterCount.textContent = `${filteredSchedules.length}/${schedules.length} lịch`;
   }
@@ -10024,7 +10115,9 @@ function renderScheduledWorkOrderList() {
     return;
   }
   if (!filteredSchedules.length) {
-    els.scheduledWorkOrderList.innerHTML = `<div class="empty-state">Không có lịch ở trạng thái “${escapeHtml(scheduledWorkOrderFilterLabel(activeFilter))}”.</div>`;
+    const timeLabel = scheduledWorkOrderTimeFilterLabel(activeTimeFilter);
+    const statusLabel = scheduledWorkOrderFilterLabel(activeStatusFilter);
+    els.scheduledWorkOrderList.innerHTML = `<div class="empty-state">Không có lịch phù hợp với “${escapeHtml(timeLabel)}” và trạng thái “${escapeHtml(statusLabel)}”.</div>`;
     return;
   }
 
@@ -10072,6 +10165,7 @@ async function openScheduledWorkOrderListModal() {
   if (els.scheduledWorkOrderList) {
     els.scheduledWorkOrderList.innerHTML = '<div class="empty-state">Đang tải danh sách lịch...</div>';
   }
+  resetScheduledWorkOrderTimeFilter();
   if (els.scheduledWorkOrderStatusFilter) {
     els.scheduledWorkOrderStatusFilter.value = state.scheduledWorkOrderStatusFilter;
   }
@@ -10135,6 +10229,33 @@ els.viewScheduledWorkOrdersBtn?.addEventListener("click", openScheduledWorkOrder
 els.scheduledWorkOrderStatusFilter?.addEventListener("change", () => {
   const nextFilter = els.scheduledWorkOrderStatusFilter?.value || "all";
   state.scheduledWorkOrderStatusFilter = ["unassigned", "assigned"].includes(nextFilter) ? nextFilter : "all";
+  renderScheduledWorkOrderList();
+});
+els.scheduledWorkOrderTimeFilter?.addEventListener("change", () => {
+  state.scheduledWorkOrderTimeFilter = normalizeScheduledWorkOrderTimeFilter(
+    els.scheduledWorkOrderTimeFilter?.value || "today"
+  );
+  const today = todayInputValue();
+  if (state.scheduledWorkOrderTimeFilter === "date" && !state.scheduledWorkOrderDateFilter) {
+    state.scheduledWorkOrderDateFilter = today;
+  }
+  if (state.scheduledWorkOrderTimeFilter === "range") {
+    if (!state.scheduledWorkOrderDateFromFilter) state.scheduledWorkOrderDateFromFilter = today;
+    if (!state.scheduledWorkOrderDateToFilter) state.scheduledWorkOrderDateToFilter = today;
+  }
+  syncScheduledWorkOrderTimeFilterControls();
+  renderScheduledWorkOrderList();
+});
+els.scheduledWorkOrderDateFilter?.addEventListener("change", () => {
+  state.scheduledWorkOrderDateFilter = els.scheduledWorkOrderDateFilter?.value || "";
+  renderScheduledWorkOrderList();
+});
+els.scheduledWorkOrderDateFromFilter?.addEventListener("change", () => {
+  state.scheduledWorkOrderDateFromFilter = els.scheduledWorkOrderDateFromFilter?.value || "";
+  renderScheduledWorkOrderList();
+});
+els.scheduledWorkOrderDateToFilter?.addEventListener("change", () => {
+  state.scheduledWorkOrderDateToFilter = els.scheduledWorkOrderDateToFilter?.value || "";
   renderScheduledWorkOrderList();
 });
 $$('[data-back-scheduled-work-order-list]').forEach((button) => {

@@ -11347,19 +11347,54 @@
         </div>
         <button class="icon-btn" type="button" data-back-scheduled-work-order-list aria-label="Quay lại Lên lịch" title="Quay lại Lên lịch">←</button>
       </div>
-      <div class="scheduled-work-order-list-filter" aria-label="Bộ lọc trạng thái lịch Phiếu công việc">
-        <label for="scheduledWorkOrderStatusFilter">Trạng thái</label>
-        <div class="scheduled-work-order-filter-shell">
-          <select id="scheduledWorkOrderStatusFilter">
-            <option value="all">Tất cả trạng thái</option>
-            <option value="unassigned">Chưa giao việc</option>
-            <option value="assigned">Đã giao việc</option>
-          </select>
+      <div class="scheduled-work-order-list-content">
+        <div class="scheduled-work-order-list-filter" aria-label="Bộ lọc thời gian và trạng thái lịch Phiếu công việc">
+          <label class="scheduled-work-order-filter-field" for="scheduledWorkOrderTimeFilter">
+            <span>Thời gian</span>
+            <div class="scheduled-work-order-filter-shell">
+              <select id="scheduledWorkOrderTimeFilter">
+                <option value="today">Hôm nay</option>
+                <option value="yesterday">Hôm qua</option>
+                <option value="date">Chọn một ngày</option>
+                <option value="range">Chọn khoảng thời gian</option>
+              </select>
+            </div>
+          </label>
+          <label class="scheduled-work-order-filter-field" for="scheduledWorkOrderStatusFilter">
+            <span>Trạng thái</span>
+            <div class="scheduled-work-order-filter-shell">
+              <select id="scheduledWorkOrderStatusFilter">
+                <option value="all">Tất cả trạng thái</option>
+                <option value="unassigned">Chưa giao việc</option>
+                <option value="assigned">Đã giao việc</option>
+              </select>
+            </div>
+          </label>
+          <label id="scheduledWorkOrderDateFilterField" class="scheduled-work-order-filter-field scheduled-work-order-date-filter hidden" for="scheduledWorkOrderDateFilter">
+            <span>Ngày cần xem</span>
+            <div class="scheduled-work-order-date-shell">
+              <input id="scheduledWorkOrderDateFilter" type="date">
+            </div>
+          </label>
+          <div id="scheduledWorkOrderDateRangeFilter" class="scheduled-work-order-date-range hidden" aria-label="Khoảng thời gian cần xem">
+            <label class="scheduled-work-order-filter-field" for="scheduledWorkOrderDateFromFilter">
+              <span>Từ ngày</span>
+              <div class="scheduled-work-order-date-shell">
+                <input id="scheduledWorkOrderDateFromFilter" type="date">
+              </div>
+            </label>
+            <label class="scheduled-work-order-filter-field" for="scheduledWorkOrderDateToFilter">
+              <span>Đến ngày</span>
+              <div class="scheduled-work-order-date-shell">
+                <input id="scheduledWorkOrderDateToFilter" type="date">
+              </div>
+            </label>
+          </div>
+          <span id="scheduledWorkOrderFilterCount" class="scheduled-work-order-filter-count" aria-live="polite"></span>
         </div>
-        <span id="scheduledWorkOrderFilterCount" class="scheduled-work-order-filter-count" aria-live="polite"></span>
-      </div>
-      <div id="scheduledWorkOrderList" class="scheduled-work-order-list" aria-live="polite">
-        <div class="empty-state">Đang tải danh sách lịch...</div>
+        <div id="scheduledWorkOrderList" class="scheduled-work-order-list" aria-live="polite">
+          <div class="empty-state">Đang tải danh sách lịch...</div>
+        </div>
       </div>
       <div class="modal-footer-actions">
         <button class="btn ghost" type="button" data-back-scheduled-work-order-list>← Quay lại Lên lịch</button>
@@ -11858,7 +11893,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260923-wait-for-free-scheduled-group-v86"></script>
+  <script type="module" src="app.js?v=20260923-scheduled-date-filters-v87"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12563,29 +12598,56 @@
     min-height:0; overflow:hidden!important; box-sizing:border-box;
   }
   #scheduledWorkOrderListModal .scheduled-work-order-list-card > .modal-header,
-  #scheduledWorkOrderListModal .scheduled-work-order-list-card > .scheduled-work-order-list-filter,
   #scheduledWorkOrderListModal .scheduled-work-order-list-card > .modal-footer-actions { flex:0 0 auto; }
+  #scheduledWorkOrderListModal .scheduled-work-order-list-content {
+    display:block; min-width:0; min-height:0; flex:1 1 auto; padding:0 8px 0 0;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable;
+  }
   .scheduled-work-order-list-filter {
-    display:grid; grid-template-columns:auto minmax(180px,280px) minmax(0,1fr); align-items:center; gap:10px;
+    display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; gap:10px;
     min-width:0; margin-bottom:12px; padding:10px 12px; box-sizing:border-box;
     border:1px solid #ddd6fe; border-radius:15px; background:#faf5ff;
   }
-  .scheduled-work-order-list-filter > label { min-width:0; color:#172033; font-weight:850; }
-  .scheduled-work-order-filter-shell {
+  .scheduled-work-order-filter-field {
+    display:grid; gap:6px; min-width:0; color:#172033; font-weight:850;
+  }
+  .scheduled-work-order-filter-field > span { min-width:0; }
+  .scheduled-work-order-filter-shell,
+  .scheduled-work-order-date-shell {
     display:block; width:100%; min-width:0; max-width:100%; overflow:hidden; box-sizing:border-box;
     border:1px solid #c4b5fd; border-radius:12px; background:#fff;
   }
-  .scheduled-work-order-filter-shell:focus-within { border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,.12); }
+  .scheduled-work-order-filter-shell:focus-within,
+  .scheduled-work-order-date-shell:focus-within { border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,.12); }
   .scheduled-work-order-filter-shell > select {
     display:block!important; width:100%!important; min-width:0!important; max-width:100%!important;
     margin:0!important; padding:10px 36px 10px 12px!important; box-sizing:border-box!important;
     border:0!important; border-radius:0!important; outline:0!important; background-color:transparent!important;
     box-shadow:none!important; color:#172033; font:inherit; font-weight:750;
   }
-  .scheduled-work-order-filter-count { min-width:0; color:#6d28d9; font-size:.84rem; font-weight:800; text-align:right; }
+  .scheduled-work-order-date-shell > input[type="date"] {
+    display:block!important; width:100%!important; min-width:0!important; max-width:100%!important;
+    inline-size:100%!important; min-inline-size:0!important; max-inline-size:100%!important;
+    margin:0!important; padding:10px 12px!important; box-sizing:border-box!important;
+    border:0!important; border-radius:0!important; outline:0!important; background:#fff!important;
+    box-shadow:none!important; color:#172033; font:inherit; font-weight:750; overflow:hidden!important;
+  }
+  .scheduled-work-order-date-shell > input[type="date"]::-webkit-date-and-time-value,
+  .scheduled-work-order-date-shell > input[type="date"]::-webkit-datetime-edit {
+    width:100%!important; min-width:0!important; max-width:100%!important;
+    inline-size:100%!important; min-inline-size:0!important; max-inline-size:100%!important;
+    overflow:hidden!important; box-sizing:border-box!important;
+  }
+  .scheduled-work-order-date-filter { grid-column:1 / -1; }
+  .scheduled-work-order-date-range {
+    display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; min-width:0; grid-column:1 / -1;
+  }
+  .scheduled-work-order-filter-count {
+    min-width:0; grid-column:1 / -1; color:#6d28d9; font-size:.84rem; font-weight:800; text-align:left;
+  }
   #scheduledWorkOrderListModal .scheduled-work-order-list {
-    display:grid; align-content:start; gap:10px; min-width:0; min-height:0; padding:2px 8px 2px 2px;
-    flex:1 1 auto; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable;
+    display:grid; align-content:start; gap:10px; min-width:0; padding:2px 0 2px 2px;
+    overflow:visible;
   }
   .scheduled-work-order-list-item {
     display:grid; gap:8px; min-width:0; padding:13px 14px;
@@ -12614,8 +12676,7 @@
     #taskModal .scheduled-control-shell > input[type="time"] {
       font-size:16px !important; overflow:hidden !important; text-overflow:ellipsis;
     }
-    .scheduled-work-order-list-filter { grid-template-columns:auto minmax(0,1fr); }
-    .scheduled-work-order-filter-count { grid-column:1 / -1; text-align:left; }
+    .scheduled-work-order-list-filter { grid-template-columns:repeat(2,minmax(0,1fr)); }
   }
 
   @media (max-width: 768px) {
@@ -12636,9 +12697,11 @@
       max-height:calc(100dvh - 130px)!important; border-radius:22px;
     }
     .scheduled-work-order-list-filter { grid-template-columns:minmax(0,1fr); gap:7px; padding:10px; }
-    .scheduled-work-order-list-filter > label,
-    .scheduled-work-order-filter-shell,
+    .scheduled-work-order-filter-field,
+    .scheduled-work-order-date-filter,
+    .scheduled-work-order-date-range,
     .scheduled-work-order-filter-count { grid-column:1; grid-row:auto; }
+    .scheduled-work-order-date-range { grid-template-columns:minmax(0,1fr); gap:7px; }
     .scheduled-work-order-list-main { font-size:.9rem; }
   }
   @media (max-height: 500px) and (orientation: landscape) {

@@ -299,9 +299,15 @@ await send("Runtime.evaluate", {
     const taskModal = document.getElementById("taskModal");
     const listModal = document.getElementById("scheduledWorkOrderListModal");
     const list = document.getElementById("scheduledWorkOrderList");
+    const dateRange = document.getElementById("scheduledWorkOrderDateRangeFilter");
     taskModal.classList.add("hidden");
     listModal.style.removeProperty("display");
     listModal.classList.remove("hidden");
+    document.getElementById("scheduledWorkOrderTimeFilter").value = "range";
+    document.getElementById("scheduledWorkOrderDateFilterField").classList.add("hidden");
+    dateRange.classList.remove("hidden");
+    document.getElementById("scheduledWorkOrderDateFromFilter").value = "2026-09-01";
+    document.getElementById("scheduledWorkOrderDateToFilter").value = "2026-09-30";
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
       <article class="scheduled-work-order-list-item">
         <div class="scheduled-work-order-list-row">
@@ -335,38 +341,57 @@ for (const profile of profiles) {
       };
     const modal = document.getElementById("scheduledWorkOrderListModal");
     const cardElement = modal.querySelector(".scheduled-work-order-list-card");
+    const contentElement = modal.querySelector(".scheduled-work-order-list-content");
     const filterElement = modal.querySelector(".scheduled-work-order-list-filter");
-    const filterShellElement = modal.querySelector(".scheduled-work-order-filter-shell");
-    const filterSelectElement = document.getElementById("scheduledWorkOrderStatusFilter");
+    const filterShellElements = [...modal.querySelectorAll(".scheduled-work-order-filter-shell, .scheduled-work-order-date-shell")]
+      .filter((element) => !element.closest(".hidden"));
+    const filterControlElements = [...modal.querySelectorAll(".scheduled-work-order-filter-shell > select, .scheduled-work-order-date-shell > input")]
+      .filter((element) => !element.closest(".hidden"));
     const listElement = document.getElementById("scheduledWorkOrderList");
       const firstRowElement = listElement.querySelector(".scheduled-work-order-list-row");
       const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
     const card = box(cardElement);
+    const content = box(contentElement);
     const filter = box(filterElement);
-    const filterShell = box(filterShellElement);
-    const filterSelect = box(filterSelectElement);
+    const filterShells = filterShellElements.map(box);
+    const filterControls = filterControlElements.map(box);
     const list = box(listElement);
       const firstRow = box(firstRowElement);
       const firstDeleteButton = box(firstDeleteButtonElement);
       return {
         modalOverflowY: getComputedStyle(modal).overflowY,
         cardOverflowY: getComputedStyle(cardElement).overflowY,
-        listOverflowY: getComputedStyle(listElement).overflowY,
+        contentOverflowY: getComputedStyle(contentElement).overflowY,
         viewportWidth: document.documentElement.clientWidth,
         viewportHeight: document.documentElement.clientHeight,
         scrollWidth: document.documentElement.scrollWidth,
       card,
+      content,
       filter,
-      filterShell,
-      filterSelect,
+      filterShells,
+      filterControls,
       list,
         firstRow,
         firstDeleteButton,
-        listClientHeight: listElement.clientHeight,
-        listScrollHeight: listElement.scrollHeight,
-      listInsideCard: list.left >= card.left - 0.5 && list.right <= card.right + 0.5 && list.top >= card.top - 0.5 && list.bottom <= card.bottom + 0.5,
-      filterInsideCard: filter.left >= card.left - 0.5 && filter.right <= card.right + 0.5 && filter.top >= card.top - 0.5 && filter.bottom <= card.bottom + 0.5,
-      selectInsideShell: filterSelect.left >= filterShell.left - 0.5 && filterSelect.right <= filterShell.right + 0.5 && filterSelect.top >= filterShell.top - 0.5 && filterSelect.bottom <= filterShell.bottom + 0.5,
+        contentClientHeight: contentElement.clientHeight,
+        contentScrollHeight: contentElement.scrollHeight,
+      contentInsideCard: content.left >= card.left - 0.5 && content.right <= card.right + 0.5 && content.top >= card.top - 0.5 && content.bottom <= card.bottom + 0.5,
+      listInsideContentWidth: list.left >= content.left - 0.5 && list.right <= content.right + 0.5,
+      filterInsideContentWidth: filter.left >= content.left - 0.5 && filter.right <= content.right + 0.5,
+      controlsInsideShells: filterControls.every((control, index) => {
+        const shell = filterShells[index];
+        return shell
+          && control.left >= shell.left - 0.5
+          && control.right <= shell.right + 0.5
+          && control.top >= shell.top - 0.5
+          && control.bottom <= shell.bottom + 0.5;
+      }),
+      filterControlsDoNotOverlap: filterControls.every((left, leftIndex) => filterControls.every((right, rightIndex) => {
+        if (rightIndex <= leftIndex) return true;
+        const vertical = Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top);
+        const horizontal = Math.min(left.right, right.right) - Math.max(left.left, right.left);
+        return vertical <= 1 || horizontal <= 1;
+      })),
         deleteButtonInsideRow: firstDeleteButton.left >= firstRow.left - 0.5 && firstDeleteButton.right <= firstRow.right + 0.5 && firstDeleteButton.top >= firstRow.top - 0.5 && firstDeleteButton.bottom <= firstRow.bottom + 0.5,
         cardInsideViewport: card.left >= -0.5 && card.right <= document.documentElement.clientWidth + 0.5 && card.top >= -0.5 && card.bottom <= document.documentElement.clientHeight + 0.5,
         taskModalHidden: document.getElementById("taskModal").classList.contains("hidden"),
@@ -378,21 +403,26 @@ for (const profile of profiles) {
     && result.card.width > 0
     && result.card.height > 0
     && result.list.width > 0
-    && result.list.height > 0
+    && result.content.width > 0
+    && result.content.height > 0
     && result.filter.width > 0
-    && result.filterShell.width > 0
-    && result.filterSelect.width > 0
-    && result.listInsideCard
-    && result.filterInsideCard
-    && result.selectInsideShell
+    && result.filterShells.length === 4
+    && result.filterControls.length === 4
+    && result.filterShells.every((rect) => rect.width > 0)
+    && result.filterControls.every((rect) => rect.width > 0)
+    && result.contentInsideCard
+    && result.listInsideContentWidth
+    && result.filterInsideContentWidth
+    && result.controlsInsideShells
+    && result.filterControlsDoNotOverlap
     && result.deleteButtonInsideRow
     && result.cardInsideViewport
     && result.modalOverflowY === "hidden"
     && result.cardOverflowY === "hidden"
-    && ["auto", "scroll"].includes(result.listOverflowY)
-    && result.listScrollHeight > result.listClientHeight
+    && ["auto", "scroll"].includes(result.contentOverflowY)
+    && result.contentScrollHeight > result.contentClientHeight
     && result.scrollWidth <= profile.width;
-  console.log(`${passed ? "PASS" : "FAIL"} | Danh sách lịch ${profile.name} | list ${result.listClientHeight}/${result.listScrollHeight} | scroll ${result.scrollWidth}/${profile.width}`);
+  console.log(`${passed ? "PASS" : "FAIL"} | Danh sách lịch ${profile.name} | content ${result.contentClientHeight}/${result.contentScrollHeight} | scroll ${result.scrollWidth}/${profile.width}`);
   if (!passed) failures.push({ profile: `Danh sách lịch ${profile.name}`, result });
 }
 
