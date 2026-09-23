@@ -9963,7 +9963,10 @@ function returnToScheduledWorkOrderModal() {
   state.scheduledListReturnToTaskModal = false;
 }
 
-function scheduledWorkOrderStatusLabel(status) {
+function scheduledWorkOrderStatusLabel(status, waitingForAvailableEmployee = false) {
+  if (String(status || "") === "generated" && waitingForAvailableEmployee) {
+    return "Chờ nhân viên trống";
+  }
   return ({
     pending: "Đang chờ đến giờ",
     generated: "Đã tạo Phiếu chưa giao việc",
@@ -10051,7 +10054,10 @@ function renderScheduledWorkOrderList() {
         <div class="scheduled-work-order-list-meta">
           <span>${escapeHtml(repeatLabel)}</span>
           <span>Đếm ngược ${countdownMinutes} phút</span>
-          <span>${escapeHtml(scheduledWorkOrderStatusLabel(schedule.status))}</span>
+          <span>${escapeHtml(scheduledWorkOrderStatusLabel(
+            schedule.status,
+            schedule.assignmentCountdownWaitingForAvailableEmployee === true
+          ))}</span>
         </div>
       </article>
     `;
@@ -14002,6 +14008,10 @@ function renderTicketGroup(group, mode = "admin") {
     && workOrder?.scheduledGroupAssignmentPending === true
   );
   const scheduledAssignmentDeadlineMs = timestampToDate(workOrder?.scheduledAssignmentDeadlineAt)?.getTime() || 0;
+  const scheduledWaitingForAvailableEmployee = Boolean(
+    workOrder?.scheduledAssignmentWaitingForAvailableEmployee === true
+    || !scheduledAssignmentDeadlineMs
+  );
   const scheduledAssignmentCountdownMinutes = normalizeScheduledCountdownMinutes(
     workOrder?.scheduledAssignmentCountdownMinutes
   );
@@ -14048,9 +14058,13 @@ function renderTicketGroup(group, mode = "admin") {
             ${isScheduledGroupPending ? `
               <div class="scheduled-group-ticket-status">
                 <span>🗓 Nhóm: ${escapeHtml(workOrder?.scheduledEmployeeGroupName || "Nhân viên")}</span>
-                <span class="scheduled-group-countdown" data-scheduled-assignment-deadline-ms="${scheduledAssignmentDeadlineMs}" data-scheduled-assignment-countdown-minutes="${scheduledAssignmentCountdownMinutes}" data-scheduled-assignment-countdown>
-                  ${scheduledAssignmentDeadlineMs > Date.now() ? `Còn ${formatCountdown(scheduledAssignmentDeadlineMs - Date.now())}` : `Đã hết ${scheduledAssignmentCountdownMinutes} phút - chờ giao việc`}
-                </span>
+                ${scheduledWaitingForAvailableEmployee ? `
+                  <span class="scheduled-group-countdown is-waiting-availability">Đang chờ nhân viên trống trong nhóm</span>
+                ` : `
+                  <span class="scheduled-group-countdown" data-scheduled-assignment-deadline-ms="${scheduledAssignmentDeadlineMs}" data-scheduled-assignment-countdown-minutes="${scheduledAssignmentCountdownMinutes}" data-scheduled-assignment-countdown>
+                    ${scheduledAssignmentDeadlineMs > Date.now() ? `Còn ${formatCountdown(scheduledAssignmentDeadlineMs - Date.now())}` : `Đã hết ${scheduledAssignmentCountdownMinutes} phút - chờ giao việc`}
+                  </span>
+                `}
               </div>
             ` : ""}
           </div>
@@ -14466,6 +14480,16 @@ function employeeHasUnfinishedNonLunchTask(employeeUid, ignoredTaskId = "") {
     && isUnfinishedAssignedTask(task)
     && !(isLunchBreakTask(task) && task.status === "lunch_break")
   ));
+}
+
+function employeeHasBlockingTaskForScheduledAssignment(employeeUid, scheduledWorkOrderId = "") {
+  return state.tasks.some((task) => {
+    if (task.assignedToUid !== employeeUid || !isUnfinishedAssignedTask(task)) return false;
+    return !(
+      task.autoCreatedByScheduledGroupTimeout === true
+      && String(task.sourceScheduledWorkOrderId || "") === String(scheduledWorkOrderId || "")
+    );
+  });
 }
 
 function getAvailableReplacementEmployees(task) {
@@ -17850,7 +17874,7 @@ function getScheduledGroupAssignmentCandidates(workOrder) {
       employee.uid
       && employee.employeeGroupId === groupId
       && isEmployeeWorking(employee)
-      && !employeeHasUnfinishedNonLunchTask(employee.uid)
+      && !employeeHasBlockingTaskForScheduledAssignment(employee.uid, workOrder?.id)
     ))
     .sort((left, right) => (left.name || left.email || "").localeCompare(
       right.name || right.email || "",

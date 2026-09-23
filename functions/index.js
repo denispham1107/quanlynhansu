@@ -1,6 +1,10 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const {
+  SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES,
+  findAvailableScheduledEmployees
+} = require("./scheduled-availability");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth: getAdminAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
@@ -839,6 +843,9 @@ async function ensureNextDailyScheduledOccurrence(scheduleId, schedule = {}) {
         generatedAt: null,
         generatedWorkOrderId: "",
         assignmentDeadlineAt: null,
+        assignmentCountdownStartedAt: null,
+        assignmentCountdownWaitingForAvailableEmployee: false,
+        availableEmployeeCountAtCountdownStart: 0,
         timeoutProcessedAt: null,
         assignedAt: null,
         assignedToUid: "",
@@ -892,6 +899,42 @@ async function tryEnqueueScheduledMaterialization(scheduleId, scheduledAt) {
     await db.doc(`scheduledWorkOrders/${scheduleId}`).set({
       queueEnqueueError: String(error?.message || error).slice(0, 500),
       queueEnqueueFailedAt: Timestamp.now()
+    }, { merge: true });
+    return false;
+  }
+}
+
+function scheduledAssignmentAvailableEmployees(usersSnapshot, activeTasksSnapshot, groupId, ignoredWorkOrderId = "") {
+  const users = usersSnapshot.docs.map((userSnapshot) => ({
+    ...userSnapshot.data(),
+    uid: userSnapshot.id
+  }));
+  const tasks = activeTasksSnapshot.docs.map((taskSnapshot) => taskSnapshot.data() || {});
+  return findAvailableScheduledEmployees(users, tasks, groupId, ignoredWorkOrderId);
+}
+
+async function enqueueScheduledAssignmentTimeout(scheduleId, assignmentDeadlineAt) {
+  const deadline = firestoreTimestampOrNull(assignmentDeadlineAt);
+  if (!deadline) return false;
+
+  try {
+    await enqueueScheduledStage(
+      "processScheduledGroupAssignmentTimeout",
+      scheduleId,
+      deadline.toDate(),
+      "assignment-timeout"
+    );
+    await db.doc(`scheduledWorkOrders/${scheduleId}`).set({
+      timeoutEnqueuedAt: Timestamp.now(),
+      timeoutQueueError: FieldValue.delete()
+    }, { merge: true });
+    return true;
+  } catch (error) {
+    if (String(error?.code || "").includes("task-already-exists")) return true;
+    console.error("Could not enqueue scheduled assignment timeout", scheduleId, error);
+    await db.doc(`scheduledWorkOrders/${scheduleId}`).set({
+      timeoutQueueError: String(error?.message || error).slice(0, 500),
+      timeoutQueueFailedAt: Timestamp.now()
     }, { merge: true });
     return false;
   }
@@ -967,6 +1010,9 @@ exports.createScheduledWorkOrder = onCall({
     generatedAt: null,
     generatedWorkOrderId: "",
     assignmentDeadlineAt: null,
+    assignmentCountdownStartedAt: null,
+    assignmentCountdownWaitingForAvailableEmployee: false,
+    availableEmployeeCountAtCountdownStart: 0,
     timeoutProcessedAt: null,
     assignedAt: null,
     assignedToUid: "",
@@ -1016,6 +1062,9 @@ exports.listScheduledWorkOrders = onCall({
       seriesId: String(item.seriesId || item.id),
       occurrenceIndex: Math.max(0, Math.trunc(Number(item.occurrenceIndex || 0))),
       status: String(item.status || "pending"),
+      assignmentCountdownWaitingForAvailableEmployee: item.assignmentCountdownWaitingForAvailableEmployee === true,
+      assignmentCountdownStartedAtMs: firestoreTimestampOrNull(item.assignmentCountdownStartedAt)?.toMillis() || 0,
+      assignmentDeadlineAtMs: firestoreTimestampOrNull(item.assignmentDeadlineAt)?.toMillis() || 0,
       generatedWorkOrderId: String(item.generatedWorkOrderId || ""),
       createdAtMs: firestoreTimestampOrNull(item.createdAt)?.toMillis() || 0
     }));
@@ -1136,8 +1185,16 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
   let assignmentDeadlineAt = null;
   let firstTaskId = taskRefs[0]?.id || "";
   let alreadyGenerated = false;
+  let waitingForAvailableEmployee = false;
+  let materializationFailed = false;
 
   await db.runTransaction(async (transaction) => {
+    const usersSnapshot = await transaction.get(
+      db.collection("users").where("role", "==", "employee")
+    );
+    const activeTasksSnapshot = await transaction.get(
+      db.collection("tasks").where("status", "in", SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES)
+    );
     const snapshots = await transaction.getAll(scheduleRef, workOrderRef, groupRef, ...hotelBudgetRefs);
     const freshScheduleSnapshot = snapshots[0];
     const workOrderSnapshot = snapshots[1];
@@ -1150,10 +1207,13 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       assignmentDeadlineAt = firestoreTimestampOrNull(
         freshSchedule.assignmentDeadlineAt || workOrderSnapshot.data()?.scheduledAssignmentDeadlineAt
       );
+      waitingForAvailableEmployee = freshSchedule.assignmentCountdownWaitingForAvailableEmployee === true
+        || workOrderSnapshot.data()?.scheduledAssignmentWaitingForAvailableEmployee === true;
       firstTaskId = String(freshSchedule.firstTaskId || firstTaskId);
       return;
     }
     if (!groupSnapshot.exists) {
+      materializationFailed = true;
       transaction.update(scheduleRef, {
         status: "failed",
         failureReason: "Nhóm nhân viên không còn tồn tại.",
@@ -1166,9 +1226,16 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
     const assignmentCountdownMinutes = normalizeScheduledAssignmentCountdownMinutes(
       freshSchedule.assignmentCountdownMinutes
     );
-    assignmentDeadlineAt = Timestamp.fromMillis(
-      now.toMillis() + assignmentCountdownMinutes * 60 * 1000
+    const availableEmployees = scheduledAssignmentAvailableEmployees(
+      usersSnapshot,
+      activeTasksSnapshot,
+      freshSchedule.employeeGroupId,
+      workOrderId
     );
+    waitingForAvailableEmployee = availableEmployees.length === 0;
+    assignmentDeadlineAt = waitingForAvailableEmployee
+      ? null
+      : Timestamp.fromMillis(now.toMillis() + assignmentCountdownMinutes * 60 * 1000);
     const budgetByDate = new Map();
     hotelDateKeys.forEach((dateKey, index) => {
       const snapshot = snapshots[3 + index];
@@ -1192,6 +1259,9 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       scheduledEmployeeGroupName: String(freshSchedule.employeeGroupName || groupSnapshot.data()?.name || "Nhóm nhân viên"),
       scheduledGroupAssignmentPending: true,
       scheduledAssignmentDeadlineAt: assignmentDeadlineAt,
+      scheduledAssignmentCountdownStartedAt: waitingForAvailableEmployee ? null : now,
+      scheduledAssignmentWaitingForAvailableEmployee: waitingForAvailableEmployee,
+      scheduledAvailableEmployeeCountAtCountdownStart: availableEmployees.length,
       scheduledAssignmentCountdownMinutes: assignmentCountdownMinutes,
       scheduledRepeatMode: normalizeScheduledRepeatMode(freshSchedule.repeatMode),
       scheduledGroupTimeoutProcessed: false
@@ -1293,7 +1363,9 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       recipientUid: String(freshSchedule.createdByUid || ""),
       type: "scheduled_work_order_created",
       title: "Phiếu lên lịch đã được tạo",
-      message: `Phiếu “${String(freshSchedule.name || "Phiếu công việc")}” đã được tạo cho nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")}. Hãy giao trong ${assignmentCountdownMinutes} phút.`,
+      message: waitingForAvailableEmployee
+        ? `Phiếu “${String(freshSchedule.name || "Phiếu công việc")}” đã được tạo cho nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} và đang chờ xuất hiện nhân viên trống trước khi bắt đầu đếm ngược.`
+        : `Phiếu “${String(freshSchedule.name || "Phiếu công việc")}” đã được tạo cho nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")}. Hãy giao trong ${assignmentCountdownMinutes} phút.`,
       taskId: firstTaskId,
       taskTitle: String(freshSchedule.name || "Phiếu công việc"),
       actorUid: "system",
@@ -1308,32 +1380,21 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       generatedWorkOrderId: workOrderId,
       firstTaskId,
       assignmentDeadlineAt,
+      assignmentCountdownStartedAt: waitingForAvailableEmployee ? null : now,
+      assignmentCountdownWaitingForAvailableEmployee: waitingForAvailableEmployee,
+      availableEmployeeCountAtCountdownStart: availableEmployees.length,
       updatedAt: now,
       failureReason: FieldValue.delete()
     });
   });
 
-  if (!assignmentDeadlineAt) return null;
+  if (materializationFailed) return null;
   await ensureNextDailyScheduledOccurrence(scheduleId, schedule);
-  try {
-    await enqueueScheduledStage(
-      "processScheduledGroupAssignmentTimeout",
-      scheduleId,
-      assignmentDeadlineAt.toDate(),
-      "assignment-timeout"
-    );
-    await scheduleRef.set({ timeoutEnqueuedAt: Timestamp.now() }, { merge: true });
-  } catch (error) {
-    if (!String(error?.code || "").includes("task-already-exists")) {
-      console.error("Could not enqueue scheduled assignment timeout", scheduleId, error);
-      await scheduleRef.set({
-        timeoutQueueError: String(error?.message || error).slice(0, 500),
-        timeoutQueueFailedAt: Timestamp.now()
-      }, { merge: true });
-    }
+  if (assignmentDeadlineAt) {
+    await enqueueScheduledAssignmentTimeout(scheduleId, assignmentDeadlineAt);
   }
 
-  return { scheduleId, workOrderId, firstTaskId, alreadyGenerated };
+  return { scheduleId, workOrderId, firstTaskId, alreadyGenerated, waitingForAvailableEmployee };
 }
 
 exports.materializeScheduledWorkOrder = onTaskDispatched({
@@ -1345,6 +1406,112 @@ exports.materializeScheduledWorkOrder = onTaskDispatched({
 }, async (request) => {
   await materializeScheduledWorkOrderById(request.data?.scheduleId);
 });
+
+async function startScheduledAssignmentCountdownIfEligible(scheduleIdInput) {
+  const scheduleId = String(scheduleIdInput || "").trim();
+  if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) return null;
+
+  const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+  const scheduleSnapshot = await scheduleRef.get();
+  if (!scheduleSnapshot.exists) return null;
+  const schedule = scheduleSnapshot.data() || {};
+  if (
+    schedule.status !== "generated"
+    || schedule.timeoutProcessedAt
+    || firestoreTimestampOrNull(schedule.assignmentDeadlineAt)
+  ) return null;
+
+  const workOrderId = String(schedule.generatedWorkOrderId || `scheduled_${scheduleId}`);
+  const workOrderRef = db.doc(`workOrders/${workOrderId}`);
+  let assignmentDeadlineAt = null;
+
+  const result = await db.runTransaction(async (transaction) => {
+    const usersSnapshot = await transaction.get(
+      db.collection("users").where("role", "==", "employee")
+    );
+    const activeTasksSnapshot = await transaction.get(
+      db.collection("tasks").where("status", "in", SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES)
+    );
+    const [freshScheduleSnapshot, workOrderSnapshot] = await transaction.getAll(scheduleRef, workOrderRef);
+    const freshSchedule = freshScheduleSnapshot?.data() || {};
+    const workOrder = workOrderSnapshot?.data() || {};
+
+    if (
+      freshSchedule.status !== "generated"
+      || freshSchedule.timeoutProcessedAt
+      || firestoreTimestampOrNull(freshSchedule.assignmentDeadlineAt)
+    ) return { started: false, reason: "not_waiting" };
+
+    const now = Timestamp.now();
+    if (!workOrderSnapshot?.exists) {
+      transaction.update(scheduleRef, {
+        status: "cancelled",
+        cancelledAt: now,
+        cancellationReason: "Phiếu công việc đã bị xóa khi đang chờ nhân viên trống.",
+        assignmentCountdownWaitingForAvailableEmployee: false,
+        updatedAt: now
+      });
+      return { started: false, reason: "missing_work_order" };
+    }
+    if (
+      workOrder.scheduledGroupAssignmentPending !== true
+      || workOrder.status !== "draft"
+    ) return { started: false, reason: "work_order_not_pending" };
+
+    const availableEmployees = scheduledAssignmentAvailableEmployees(
+      usersSnapshot,
+      activeTasksSnapshot,
+      freshSchedule.employeeGroupId || workOrder.scheduledEmployeeGroupId,
+      workOrderId
+    );
+    if (!availableEmployees.length) return { started: false, reason: "no_available_employee" };
+
+    const assignmentCountdownMinutes = normalizeScheduledAssignmentCountdownMinutes(
+      freshSchedule.assignmentCountdownMinutes || workOrder.scheduledAssignmentCountdownMinutes
+    );
+    assignmentDeadlineAt = Timestamp.fromMillis(
+      now.toMillis() + assignmentCountdownMinutes * 60 * 1000
+    );
+
+    transaction.update(scheduleRef, {
+      assignmentDeadlineAt,
+      assignmentCountdownStartedAt: now,
+      assignmentCountdownWaitingForAvailableEmployee: false,
+      availableEmployeeCountAtCountdownStart: availableEmployees.length,
+      updatedAt: now,
+      timeoutQueueError: FieldValue.delete()
+    });
+    transaction.update(workOrderRef, {
+      scheduledAssignmentDeadlineAt: assignmentDeadlineAt,
+      scheduledAssignmentCountdownStartedAt: now,
+      scheduledAssignmentWaitingForAvailableEmployee: false,
+      scheduledAvailableEmployeeCountAtCountdownStart: availableEmployees.length,
+      updatedAt: now
+    });
+
+    const notificationRef = db.doc(`notifications/${`scheduledCountdownStarted_${scheduleId}`.slice(0, 180)}`);
+    transaction.set(notificationRef, {
+      id: notificationRef.id,
+      recipientUid: String(freshSchedule.createdByUid || ""),
+      type: "scheduled_group_countdown_started",
+      title: `Bắt đầu đếm ngược ${assignmentCountdownMinutes} phút`,
+      message: `Nhóm ${String(freshSchedule.employeeGroupName || workOrder.scheduledEmployeeGroupName || "Nhân viên")} đã có ${availableEmployees.length} nhân viên trống. Phiếu “${String(freshSchedule.name || workOrder.name || "Phiếu công việc")}” bắt đầu đếm ngược để giao việc.`,
+      taskId: String(freshSchedule.firstTaskId || ""),
+      taskTitle: String(freshSchedule.name || workOrder.name || "Phiếu công việc"),
+      actorUid: "system",
+      actorName: "Hệ thống Lên lịch",
+      createdAt: now,
+      readAt: null
+    }, { merge: false });
+
+    return { started: true, availableEmployeeCount: availableEmployees.length };
+  });
+
+  if (result?.started && assignmentDeadlineAt) {
+    await enqueueScheduledAssignmentTimeout(scheduleId, assignmentDeadlineAt);
+  }
+  return { scheduleId, ...result, assignmentDeadlineAt };
+}
 
 async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
   const scheduleId = String(scheduleIdInput || "").trim();
@@ -1359,6 +1526,7 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
   );
   if (schedule.status !== "generated" || schedule.timeoutProcessedAt) return null;
   const deadline = firestoreTimestampOrNull(schedule.assignmentDeadlineAt);
+  if (!deadline) return null;
   if (deadline && deadline.toMillis() > Date.now() + 1000) return null;
 
   const workOrderId = String(schedule.generatedWorkOrderId || `scheduled_${scheduleId}`);
@@ -1533,6 +1701,18 @@ exports.processScheduledGroupAssignmentTimeout = onTaskDispatched({
   await processScheduledGroupAssignmentTimeoutById(request.data?.scheduleId);
 });
 
+async function startWaitingScheduledAssignmentCountdowns() {
+  const snapshot = await db.collection("scheduledWorkOrders").where("status", "==", "generated").get();
+  let startedCount = 0;
+  for (const item of snapshot.docs) {
+    const schedule = item.data() || {};
+    if (schedule.timeoutProcessedAt || firestoreTimestampOrNull(schedule.assignmentDeadlineAt)) continue;
+    const result = await startScheduledAssignmentCountdownIfEligible(item.id);
+    if (result?.started) startedCount += 1;
+  }
+  return { startedCount };
+}
+
 exports.processScheduledWorkOrdersFallback = onSchedule({
   schedule: "every 1 minutes",
   region: REGION,
@@ -1555,7 +1735,11 @@ exports.processScheduledWorkOrdersFallback = onSchedule({
     }
 
     const deadlineMs = firestoreTimestampOrNull(schedule.assignmentDeadlineAt)?.toMillis() || 0;
-    if (schedule.status === "generated" && !schedule.timeoutProcessedAt && deadlineMs && deadlineMs <= nowMs) {
+    if (schedule.status === "generated" && !schedule.timeoutProcessedAt && !deadlineMs) {
+      await startScheduledAssignmentCountdownIfEligible(item.id);
+      continue;
+    }
+    if (schedule.status === "generated" && !schedule.timeoutProcessedAt && deadlineMs <= nowMs) {
       await processScheduledGroupAssignmentTimeoutById(item.id);
     }
   }
@@ -1607,8 +1791,11 @@ exports.assignScheduledWorkOrderToGroupEmployee = onCall({
   const blockingTask = activeTaskSnapshot.docs
     .map((item) => ({ id: item.id, ...item.data() }))
     .find((task) => (
-      task.isLunchBreak !== true
-      && ["doing", "hotel", "redo", "overdue"].includes(String(task.status || ""))
+      SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES.includes(String(task.status || ""))
+      && !(
+        task.autoCreatedByScheduledGroupTimeout === true
+        && String(task.sourceScheduledWorkOrderId || "") === workOrderId
+      )
     ));
   if (blockingTask) {
     throw new HttpsError("failed-precondition", `${String(employee.name || "Nhân viên")} đang có công việc chưa hoàn thành.`);
@@ -2514,7 +2701,10 @@ exports.monitorWorkSupervisionOnTaskChange = onDocumentWritten({
   const before = event.data?.before?.data() || {};
   const after = event.data?.after?.data() || {};
   if (supervisionTaskSignature(before) === supervisionTaskSignature(after)) return;
-  await evaluateWorkSupervision({ source: "task_change" });
+  await Promise.all([
+    evaluateWorkSupervision({ source: "task_change" }),
+    startWaitingScheduledAssignmentCountdowns()
+  ]);
 });
 
 exports.monitorWorkSupervisionOnWorkOrderChange = onDocumentWritten({
@@ -2539,10 +2729,13 @@ exports.monitorWorkSupervisionOnUserChange = onDocumentWritten({
 }, async (event) => {
   const before = event.data?.before?.data() || {};
   const after = event.data?.after?.data() || {};
-  const beforeSignature = `${String(before.role || "")}|${String(before.employmentStatus || "working")}`;
-  const afterSignature = `${String(after.role || "")}|${String(after.employmentStatus || "working")}`;
+  const beforeSignature = `${String(before.role || "")}|${String(before.employmentStatus || "working")}|${String(before.employeeGroupId || "")}`;
+  const afterSignature = `${String(after.role || "")}|${String(after.employmentStatus || "working")}|${String(after.employeeGroupId || "")}`;
   if (beforeSignature === afterSignature) return;
-  await evaluateWorkSupervision({ source: "user_change" });
+  await Promise.all([
+    evaluateWorkSupervision({ source: "user_change" }),
+    startWaitingScheduledAssignmentCountdowns()
+  ]);
 });
 
 function hotelTaskActualSeconds(task = {}) {
