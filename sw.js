@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260923-scheduled-task-date-fix-v88";
+const CACHE_NAME = "culao-task-shell-v20260923-scheduled-alert-sound-v89";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -8,7 +8,8 @@ const APP_SHELL = [
   "./icon-192.png",
   "./icon-512.png",
   "./notification-badge.png",
-  "./task-review-alert-max.wav"
+  "./task-review-alert-max.wav",
+  "./scheduled-work-order-alert-max.wav"
 ];
 
 self.addEventListener("install", (event) => {

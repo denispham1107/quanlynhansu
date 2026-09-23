@@ -313,6 +313,8 @@ const state = {
   chatConversationFallbackTimer: null,
   chatConversationListenerWarningShown: false,
   taskReviewAlertAudio: null,
+  taskReviewAlertAudioFile: "",
+  taskReviewAlertKind: "review",
   taskReviewAlertPendingCount: 0,
   taskReviewAlertUnlocked: false,
   taskReviewAlertEnableInFlight: false,
@@ -366,10 +368,11 @@ function isManagementProfile(profile = state.profile) {
 // Âm báo lặp khi có công việc chờ Admin xác nhận
 // =========================
 const TASK_REVIEW_ALERT_FILE = "./task-review-alert-max.wav";
+const SCHEDULED_WORK_ORDER_ALERT_FILE = "./scheduled-work-order-alert-max.wav";
 const TASK_REVIEW_ALERT_AUTO_PLAY_TIMEOUT_MS = 1800;
 
 
-function getPendingTaskReviewCount(excludedTaskId = "") {
+function getPendingTaskReviewCounts(excludedTaskId = "") {
   const excludedId = String(excludedTaskId || "").trim();
   const submittedTaskCount = state.tasks.filter((task) => (
     task?.status === "submitted"
@@ -381,7 +384,17 @@ function getPendingTaskReviewCount(excludedTaskId = "") {
     && workOrder?.scheduledGroupAssignmentPending === true
   )).length;
 
-  return submittedTaskCount + scheduledDraftCount;
+  return {
+    submitted: submittedTaskCount,
+    scheduled: scheduledDraftCount,
+    total: submittedTaskCount + scheduledDraftCount
+  };
+}
+
+function getTaskReviewAlertFile(kind = state.taskReviewAlertKind) {
+  return kind === "scheduled"
+    ? SCHEDULED_WORK_ORDER_ALERT_FILE
+    : TASK_REVIEW_ALERT_FILE;
 }
 
 function getTaskReviewAlertButtons() {
@@ -410,8 +423,25 @@ function updateTaskReviewAlertControls() {
   });
 }
 
-function ensureTaskReviewAlertAudio() {
-  if (state.taskReviewAlertAudio) return state.taskReviewAlertAudio;
+function ensureTaskReviewAlertAudio(kind = state.taskReviewAlertKind) {
+  const normalizedKind = kind === "scheduled" ? "scheduled" : "review";
+  const alertFile = getTaskReviewAlertFile(normalizedKind);
+
+  if (state.taskReviewAlertAudio) {
+    if (state.taskReviewAlertAudioFile !== alertFile) {
+      state.taskReviewAlertAudio.pause();
+      state.taskReviewAlertAudio.src = alertFile;
+      state.taskReviewAlertAudioFile = alertFile;
+      state.taskReviewAlertKind = normalizedKind;
+      try {
+        state.taskReviewAlertAudio.currentTime = 0;
+        state.taskReviewAlertAudio.load();
+      } catch (_) {
+        // Một số WebView tự tải nguồn mới ngay khi gán src.
+      }
+    }
+    return state.taskReviewAlertAudio;
+  }
 
   const audio = new Audio();
   audio.preload = "auto";
@@ -419,7 +449,7 @@ function ensureTaskReviewAlertAudio() {
   audio.volume = 1;
   audio.setAttribute("playsinline", "");
   audio.setAttribute("webkit-playsinline", "");
-  audio.src = TASK_REVIEW_ALERT_FILE;
+  audio.src = alertFile;
 
   // Nạp file âm báo càng sớm càng tốt. Trước đây audio chỉ bắt đầu tải đúng lúc
   // gọi play(), nên trên iOS/Android hoặc mạng chậm Promise play() có thể treo rất
@@ -431,6 +461,8 @@ function ensureTaskReviewAlertAudio() {
   }
 
   state.taskReviewAlertAudio = audio;
+  state.taskReviewAlertAudioFile = alertFile;
+  state.taskReviewAlertKind = normalizedKind;
   return audio;
 }
 
@@ -518,9 +550,17 @@ async function startTaskReviewAlertSound() {
 }
 
 function syncTaskReviewAlertSound() {
-  const pendingCount = state.user && isAdminProfile()
-    ? getPendingTaskReviewCount()
-    : 0;
+  const pendingCounts = state.user && isAdminProfile()
+    ? getPendingTaskReviewCounts()
+    : { submitted: 0, scheduled: 0, total: 0 };
+  const pendingCount = pendingCounts.total;
+  const nextAlertKind = pendingCounts.scheduled > 0 ? "scheduled" : "review";
+
+  if (state.taskReviewAlertKind !== nextAlertKind) {
+    stopTaskReviewAlertSound();
+    state.taskReviewAlertKind = nextAlertKind;
+    ensureTaskReviewAlertAudio(nextAlertKind);
+  }
   state.taskReviewAlertPendingCount = pendingCount;
 
   if (pendingCount <= 0) {
@@ -533,7 +573,9 @@ function syncTaskReviewAlertSound() {
     if (!state.taskReviewAlertNeedsGestureToastShown) {
       state.taskReviewAlertNeedsGestureToastShown = true;
       toast(
-        `Có ${pendingCount} Phiếu/công việc cần xử lý. Âm báo sẽ tự bật ngay khi Admin chạm vào trang.`,
+        pendingCounts.scheduled > 0
+          ? `Có ${pendingCounts.scheduled} Phiếu lên lịch cần giao. Chuông lên lịch sẽ tự bật ngay khi Admin chạm vào trang.`
+          : `Có ${pendingCount} Phiếu/công việc cần xử lý. Âm báo sẽ tự bật ngay khi Admin chạm vào trang.`,
         "info"
       );
     }
@@ -686,6 +728,8 @@ function resetTaskReviewAlertSound() {
     state.taskReviewAlertAudio.load();
   }
   state.taskReviewAlertAudio = null;
+  state.taskReviewAlertAudioFile = "";
+  state.taskReviewAlertKind = "review";
   state.taskReviewAlertPendingCount = 0;
   state.taskReviewAlertUnlocked = false;
   state.taskReviewAlertEnableInFlight = false;
