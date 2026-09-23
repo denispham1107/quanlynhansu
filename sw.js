@@ -1,5 +1,5 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260923-scheduled-date-filters-v87";
+const CACHE_NAME = "culao-task-shell-v20260923-scheduled-task-date-fix-v88";
 const APP_SHELL = [
   "./",
   "./index.html",

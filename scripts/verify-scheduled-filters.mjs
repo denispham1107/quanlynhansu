@@ -22,18 +22,21 @@ function extractFunction(name) {
 
 const buildHelpers = new Function(`
   const state = {
+    workOrders: [],
     scheduledWorkOrderDateFilter: "",
     scheduledWorkOrderDateFromFilter: "",
     scheduledWorkOrderDateToFilter: ""
   };
+  ${extractFunction("timestampToDate")}
   ${extractFunction("toLocalDateInputValue")}
+  ${extractFunction("getTaskDateValue")}
   ${extractFunction("todayInputValue")}
   ${extractFunction("yesterdayInputValue")}
   ${extractFunction("scheduledWorkOrderMatchesStatusFilter")}
   ${extractFunction("normalizeScheduledWorkOrderTimeFilter")}
   ${extractFunction("scheduledWorkOrderDateValue")}
   ${extractFunction("scheduledWorkOrderMatchesTimeFilter")}
-  return { state, todayInputValue, yesterdayInputValue, scheduledWorkOrderMatchesStatusFilter, scheduledWorkOrderMatchesTimeFilter };
+  return { state, todayInputValue, yesterdayInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, scheduledWorkOrderMatchesTimeFilter };
 `);
 
 const helpers = buildHelpers();
@@ -77,5 +80,22 @@ assert.deepEqual(filterIds("date", "unassigned"), ["older-unassigned"]);
 helpers.state.scheduledWorkOrderDateFromFilter = today;
 helpers.state.scheduledWorkOrderDateToFilter = yesterday;
 assert.deepEqual(filterIds("range", "assigned"), ["today-assigned", "yesterday-assigned"]);
+
+helpers.state.workOrders = [{
+  id: "scheduled-work-order",
+  scheduledWorkOrder: true,
+  scheduledAt: new Date(2026, 8, 23, 9, 0, 0)
+}];
+assert.equal(helpers.getTaskDateValue({
+  scheduledWorkOrder: true,
+  workOrderId: "scheduled-work-order",
+  taskDate: "2026-09-20"
+}), "2026-09-23");
+assert.equal(helpers.getTaskDateValue({
+  scheduledWorkOrder: true,
+  scheduledForDate: "2026-09-24",
+  workOrderId: "scheduled-work-order",
+  taskDate: "2026-09-20"
+}), "2026-09-24");
 
 console.log("PASS | Bộ lọc thời gian và trạng thái lịch được kết hợp chính xác.");

@@ -7,8 +7,8 @@
     "node": "22"
   },
   "scripts": {
-    "lint": "node --check index.js && node --check scheduled-availability.js && node --check scheduled-availability.test.js",
-    "test": "node scheduled-availability.test.js"
+    "lint": "node --check index.js && node --check scheduled-availability.js && node --check scheduled-availability.test.js && node --check scheduled-task-date.js && node --check scheduled-task-date.test.js",
+    "test": "node scheduled-availability.test.js && node scheduled-task-date.test.js"
   },
   "dependencies": {
     "firebase-admin": "^13.0.2",

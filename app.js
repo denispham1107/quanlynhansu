@@ -2151,8 +2151,17 @@ function getDateRangeByMode(mode) {
 }
 
 function getTaskDateValue(task) {
-  if (task.taskDate) return task.taskDate;
-  return toLocalDateInputValue(timestampToDate(task.createdAt));
+  if (task?.scheduledWorkOrder === true) {
+    if (task.scheduledForDate) return task.scheduledForDate;
+    const scheduledWorkOrder = state.workOrders.find((workOrder) => (
+      workOrder.id === task.workOrderId
+      && workOrder.scheduledWorkOrder === true
+    ));
+    const scheduledAt = timestampToDate(scheduledWorkOrder?.scheduledAt);
+    if (scheduledAt) return toLocalDateInputValue(scheduledAt);
+  }
+  if (task?.taskDate) return task.taskDate;
+  return toLocalDateInputValue(timestampToDate(task?.createdAt));
 }
 
 function formatMinutes(totalMinutes = 0) {
@@ -8511,6 +8520,11 @@ function addTaskRow({ focusTitle = false, scrollIntoView = false } = {}) {
       assignee.value = "";
       assignee.disabled = true;
     }
+    const dateInput = row.querySelector(".row-date");
+    if (dateInput) {
+      dateInput.value = els.scheduledWorkOrderDate?.value || todayInputValue();
+      dateInput.disabled = true;
+    }
   }
   updateTaskRowHeadings();
   activateTaskRow(row, { focusTitle, scrollIntoView });
@@ -8909,6 +8923,15 @@ els.taskRowsContainer.addEventListener("change", (event) => {
   }
 });
 
+function syncScheduledTaskRowDates() {
+  if (state.taskModalMode !== "schedule") return;
+  const scheduledDate = els.scheduledWorkOrderDate?.value || todayInputValue();
+  $$("#taskRowsContainer .row-date").forEach((dateInput) => {
+    dateInput.value = scheduledDate;
+    dateInput.disabled = true;
+  });
+}
+
 function setTaskModalMode(mode = "create") {
   const scheduleMode = mode === "schedule";
   state.taskModalMode = scheduleMode ? "schedule" : "create";
@@ -8923,6 +8946,10 @@ function setTaskModalMode(mode = "create") {
     if (scheduleMode) select.value = "";
     select.disabled = scheduleMode;
   });
+  $$("#taskRowsContainer .row-date").forEach((dateInput) => {
+    dateInput.disabled = scheduleMode;
+  });
+  if (scheduleMode) syncScheduledTaskRowDates();
 }
 
 function localDateTimeInputValues(date = new Date()) {
@@ -8996,6 +9023,7 @@ function openScheduledWorkOrderModal() {
   if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = "";
   if (els.scheduledWorkOrderCountdownMinutes) els.scheduledWorkOrderCountdownMinutes.value = "10";
   if (els.scheduledWorkOrderRepeatMode) els.scheduledWorkOrderRepeatMode.value = "none";
+  syncScheduledTaskRowDates();
   updateScheduledCountdownPreview();
   if (els.requiredPhotoCount) els.requiredPhotoCount.value = 1;
   setPhotoRequirementChecked(true);
@@ -9007,6 +9035,7 @@ function openScheduledWorkOrderModal() {
 
 els.openScheduledWorkOrderBtn?.addEventListener("click", openScheduledWorkOrderModal);
 els.scheduledWorkOrderCountdownMinutes?.addEventListener("input", updateScheduledCountdownPreview);
+els.scheduledWorkOrderDate?.addEventListener("change", syncScheduledTaskRowDates);
 
 function openEditWorkOrderModal(workOrderId) {
   if (!requirePermission("editWorkOrder", "Tài khoản của bạn chưa được cấp quyền sửa Phiếu chưa giao.")) return;
@@ -9907,7 +9936,7 @@ async function createScheduledWorkOrder(button) {
     const payloadRows = rows.map((row) => ({
       title: row.title,
       description: row.description,
-      taskDate: row.taskDate,
+      taskDate: dateValue,
       deadlineMinutes: Number(row.deadlineMinutes || 0),
       isLunchBreak: Boolean(row.isLunchBreak),
       isHotel: Boolean(row.isHotel),

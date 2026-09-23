@@ -5,6 +5,7 @@ const {
   SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES,
   findAvailableScheduledEmployees
 } = require("./scheduled-availability");
+const { scheduledTaskDateKey } = require("./scheduled-task-date");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth: getAdminAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
@@ -842,6 +843,7 @@ async function ensureNextDailyScheduledOccurrence(scheduleId, schedule = {}) {
         materializationEnqueuedAt: null,
         generatedAt: null,
         generatedWorkOrderId: "",
+        generatedTaskDateKey: "",
         assignmentDeadlineAt: null,
         assignmentCountdownStartedAt: null,
         assignmentCountdownWaitingForAvailableEmployee: false,
@@ -960,7 +962,11 @@ exports.createScheduledWorkOrder = onCall({
   const requiredPhotoCount = photoRequired
     ? Math.max(1, Math.min(100, Math.trunc(Number(request.data?.requiredPhotoCount || 1))))
     : 0;
-  const rows = normalizeScheduledWorkOrderRows(request.data?.rows);
+  const scheduledTaskDate = scheduledTaskDateKey(scheduledForMs, WORK_SUPERVISION_TIME_ZONE);
+  const rows = normalizeScheduledWorkOrderRows(request.data?.rows).map((row) => ({
+    ...row,
+    taskDate: scheduledTaskDate
+  }));
 
   if (!name) throw new HttpsError("invalid-argument", "Vui lòng nhập tên Phiếu công việc.");
   if (
@@ -1009,6 +1015,7 @@ exports.createScheduledWorkOrder = onCall({
     materializationEnqueuedAt: null,
     generatedAt: null,
     generatedWorkOrderId: "",
+    generatedTaskDateKey: "",
     assignmentDeadlineAt: null,
     assignmentCountdownStartedAt: null,
     assignmentCountdownWaitingForAvailableEmployee: false,
@@ -1178,8 +1185,14 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
   const workOrderRef = db.doc(`workOrders/${workOrderId}`);
   const rows = Array.isArray(schedule.rows) ? schedule.rows : [];
   if (!rows.length) return null;
+  const occurrenceTaskDate = scheduledTaskDateKey(
+    firestoreTimestampOrNull(schedule.scheduledAt)?.toDate(),
+    WORK_SUPERVISION_TIME_ZONE
+  ) || String(rows[0]?.taskDate || "");
   const taskRefs = rows.map((_, index) => db.doc(`tasks/${`${workOrderId}_${index + 1}`.slice(0, 180)}`));
-  const hotelDateKeys = [...new Set(rows.filter((row) => row.isHotel === true).map((row) => String(row.taskDate || "")))];
+  const hotelDateKeys = rows.some((row) => row.isHotel === true) && occurrenceTaskDate
+    ? [occurrenceTaskDate]
+    : [];
   const hotelBudgetRefs = hotelDateKeys.map((dateKey) => db.doc(`hotelDailyBudgets/${dateKey}`));
   const groupRef = db.doc(`employeeGroups/${String(schedule.employeeGroupId || "")}`);
   let assignmentDeadlineAt = null;
@@ -1254,6 +1267,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       scheduledWorkOrder: true,
       scheduleId,
       scheduledAt: freshSchedule.scheduledAt || now,
+      scheduledTaskDate: occurrenceTaskDate,
       scheduledGeneratedAt: now,
       scheduledEmployeeGroupId: String(freshSchedule.employeeGroupId || ""),
       scheduledEmployeeGroupName: String(freshSchedule.employeeGroupName || groupSnapshot.data()?.name || "Nhóm nhân viên"),
@@ -1271,7 +1285,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       const taskRef = taskRefs[index];
       const isHotel = row.isHotel === true;
       const petCount = isHotel ? Math.max(0, Math.trunc(Number(row.hotelPetCount || 0))) : 0;
-      const dateKey = String(row.taskDate || "");
+      const dateKey = occurrenceTaskDate || String(row.taskDate || "");
       const existingBudget = isHotel ? budgetByDate.get(dateKey) : null;
       const totalAllowedSeconds = petCount * HOTEL_SECONDS_PER_PET;
       const consumedSeconds = Math.max(0, Math.round(Number(existingBudget?.consumedSeconds || 0)));
@@ -1305,6 +1319,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
         title: String(row.title || "Công việc"),
         description: String(row.description || ""),
         taskDate: dateKey,
+        scheduledForDate: dateKey,
         assignedToUid: "",
         assignedToName: "",
         assignedByUid: String(freshSchedule.createdByUid || "system"),
@@ -1379,6 +1394,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       generatedAt: now,
       generatedWorkOrderId: workOrderId,
       firstTaskId,
+      generatedTaskDateKey: occurrenceTaskDate,
       assignmentDeadlineAt,
       assignmentCountdownStartedAt: waitingForAvailableEmployee ? null : now,
       assignmentCountdownWaitingForAvailableEmployee: waitingForAvailableEmployee,
@@ -1407,6 +1423,72 @@ exports.materializeScheduledWorkOrder = onTaskDispatched({
   await materializeScheduledWorkOrderById(request.data?.scheduleId);
 });
 
+async function repairScheduledGeneratedTaskDates(scheduleIdInput, scheduleInput = null) {
+  const scheduleId = String(scheduleIdInput || "").trim();
+  if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) return null;
+
+  const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+  let schedule = scheduleInput && typeof scheduleInput === "object" ? scheduleInput : null;
+  if (!schedule) {
+    const scheduleSnapshot = await scheduleRef.get();
+    if (!scheduleSnapshot.exists) return null;
+    schedule = scheduleSnapshot.data() || {};
+  }
+  if (String(schedule.status || "") !== "generated") return null;
+
+  const desiredTaskDate = scheduledTaskDateKey(
+    firestoreTimestampOrNull(schedule.scheduledAt)?.toDate(),
+    WORK_SUPERVISION_TIME_ZONE
+  );
+  if (!desiredTaskDate || String(schedule.generatedTaskDateKey || "") === desiredTaskDate) {
+    return { repairedTaskCount: 0, desiredTaskDate };
+  }
+
+  const rows = Array.isArray(schedule.rows) ? schedule.rows : [];
+  const workOrderId = String(schedule.generatedWorkOrderId || `scheduled_${scheduleId}`).slice(0, 180);
+  const workOrderRef = db.doc(`workOrders/${workOrderId}`);
+  const taskRefs = rows.map((_, index) => db.doc(`tasks/${`${workOrderId}_${index + 1}`.slice(0, 180)}`));
+  const snapshots = await db.getAll(workOrderRef, ...taskRefs);
+  const workOrderSnapshot = snapshots[0];
+  const now = Timestamp.now();
+  const batch = db.batch();
+  let repairedTaskCount = 0;
+
+  taskRefs.forEach((taskRef, index) => {
+    const taskSnapshot = snapshots[index + 1];
+    const task = taskSnapshot?.data() || {};
+    if (
+      !taskSnapshot?.exists
+      || task.scheduledWorkOrder !== true
+      || String(task.scheduleId || "") !== scheduleId
+      || String(task.status || "") !== "draft"
+    ) return;
+    if (
+      String(task.taskDate || "") === desiredTaskDate
+      && String(task.scheduledForDate || "") === desiredTaskDate
+    ) return;
+    batch.update(taskRef, {
+      taskDate: desiredTaskDate,
+      scheduledForDate: desiredTaskDate
+    });
+    repairedTaskCount += 1;
+  });
+
+  if (workOrderSnapshot?.exists) {
+    batch.update(workOrderRef, {
+      scheduledTaskDate: desiredTaskDate,
+      updatedAt: now
+    });
+  }
+  batch.update(scheduleRef, {
+    generatedTaskDateKey: desiredTaskDate,
+    generatedTaskDateRepairedAt: now,
+    updatedAt: now
+  });
+  await batch.commit();
+  return { repairedTaskCount, desiredTaskDate };
+}
+
 async function startScheduledAssignmentCountdownIfEligible(scheduleIdInput) {
   const scheduleId = String(scheduleIdInput || "").trim();
   if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) return null;
@@ -1420,6 +1502,8 @@ async function startScheduledAssignmentCountdownIfEligible(scheduleIdInput) {
     || schedule.timeoutProcessedAt
     || firestoreTimestampOrNull(schedule.assignmentDeadlineAt)
   ) return null;
+
+  await repairScheduledGeneratedTaskDates(scheduleId, schedule);
 
   const workOrderId = String(schedule.generatedWorkOrderId || `scheduled_${scheduleId}`);
   const workOrderRef = db.doc(`workOrders/${workOrderId}`);
@@ -1735,6 +1819,9 @@ exports.processScheduledWorkOrdersFallback = onSchedule({
     }
 
     const deadlineMs = firestoreTimestampOrNull(schedule.assignmentDeadlineAt)?.toMillis() || 0;
+    if (schedule.status === "generated") {
+      await repairScheduledGeneratedTaskDates(item.id, schedule);
+    }
     if (schedule.status === "generated" && !schedule.timeoutProcessedAt && !deadlineMs) {
       await startScheduledAssignmentCountdownIfEligible(item.id);
       continue;
@@ -5461,19 +5548,20 @@ exports.getEmployeeUnassignedTaskCount = onCall({
     throw new HttpsError("invalid-argument", "Ngày bắt đầu không được lớn hơn ngày kết thúc.");
   }
 
-  // Chỉ đọc các task còn ở trạng thái draft và chỉ lấy trường taskDate.
+  // Chỉ đọc các task còn ở trạng thái draft và chỉ lấy các trường ngày cần thiết.
   // Cách này cho kết quả giống ô Chưa giao việc của Admin nhưng không mở
   // quyền đọc nội dung task nháp cho tài khoản Nhân viên.
   const snapshot = await db.collection("tasks")
     .where("status", "==", "draft")
-    .select("taskDate")
+    .select("taskDate", "scheduledForDate")
     .get();
 
   let count = 0;
   snapshot.docs.forEach((item) => {
-    const taskDate = typeof item.data()?.taskDate === "string"
-      ? item.data().taskDate.trim()
-      : "";
+    const data = item.data() || {};
+    const taskDate = typeof data.scheduledForDate === "string" && data.scheduledForDate.trim()
+      ? data.scheduledForDate.trim()
+      : (typeof data.taskDate === "string" ? data.taskDate.trim() : "");
 
     // Giống isTaskInDateFilter ở giao diện Admin: khi không chọn giới hạn
     // ngày thì tính cả task thiếu taskDate; khi đã lọc ngày thì task thiếu
