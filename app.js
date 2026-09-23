@@ -138,6 +138,7 @@ const assignDraftTaskFromSupervisionLunchCallable = httpsCallable(
   "assignDraftTaskFromSupervisionLunch"
 );
 const createScheduledWorkOrderCallable = httpsCallable(functions, "createScheduledWorkOrder");
+const updateScheduledWorkOrderCallable = httpsCallable(functions, "updateScheduledWorkOrder");
 const listScheduledWorkOrdersCallable = httpsCallable(functions, "listScheduledWorkOrders");
 const deleteScheduledWorkOrderCallable = httpsCallable(functions, "deleteScheduledWorkOrder");
 const assignScheduledWorkOrderToGroupEmployeeCallable = httpsCallable(
@@ -194,6 +195,7 @@ const state = {
   photoShareCacheKey: "",
   unsubs: [],
   editingWorkOrderId: null,
+  editingScheduledWorkOrderId: "",
   taskModalMode: "create",
   scheduledAssignmentWorkOrderId: "",
   scheduledWorkOrders: [],
@@ -8976,6 +8978,20 @@ function syncScheduledTaskRowDates() {
   });
 }
 
+function updateScheduledWorkOrderEditorControls() {
+  const editingSchedule = Boolean(state.editingScheduledWorkOrderId);
+  if (els.scheduleWorkOrderBtn) {
+    els.scheduleWorkOrderBtn.textContent = editingSchedule
+      ? "💾 Lưu thay đổi lịch"
+      : "🗓 Xác nhận lên lịch";
+  }
+  if (els.viewScheduledWorkOrdersBtn) {
+    els.viewScheduledWorkOrdersBtn.textContent = editingSchedule
+      ? "← Quay lại danh sách"
+      : "📋 Xem lịch";
+  }
+}
+
 function setTaskModalMode(mode = "create") {
   const scheduleMode = mode === "schedule";
   state.taskModalMode = scheduleMode ? "schedule" : "create";
@@ -8994,6 +9010,7 @@ function setTaskModalMode(mode = "create") {
     dateInput.disabled = scheduleMode;
   });
   if (scheduleMode) syncScheduledTaskRowDates();
+  updateScheduledWorkOrderEditorControls();
 }
 
 function localDateTimeInputValues(date = new Date()) {
@@ -9018,6 +9035,7 @@ function updateScheduledCountdownPreview() {
 function closeTaskModal() {
   els.taskModal?.classList.add("hidden");
   state.editingWorkOrderId = null;
+  state.editingScheduledWorkOrderId = "";
   setTaskModalMode("create");
 }
 
@@ -9044,17 +9062,9 @@ function openCreateWorkOrderModal() {
 els.openTaskModalBtn?.addEventListener("click", openCreateWorkOrderModal);
 els.floatingCreateTaskBtn?.addEventListener("click", openCreateWorkOrderModal);
 
-function openScheduledWorkOrderModal() {
-  if (!isAdminProfile()) {
-    toast("Chỉ Admin được lên lịch Phiếu công việc.", "error");
-    return;
-  }
-  if (!state.employeeGroups.length) {
-    toast("Hãy tạo ít nhất một Nhóm nhân viên trước khi lên lịch.", "error");
-    return;
-  }
-
+function resetScheduledWorkOrderFormForCreate() {
   state.editingWorkOrderId = null;
+  state.editingScheduledWorkOrderId = "";
   els.workOrderName.value = "";
   resetTaskRows();
   resetPhotoRequirementControls();
@@ -9073,6 +9083,20 @@ function openScheduledWorkOrderModal() {
   setPhotoRequirementChecked(true);
 
   $("#taskModalTitle").textContent = "🗓 Lên lịch Phiếu công việc";
+  updateScheduledWorkOrderEditorControls();
+}
+
+function openScheduledWorkOrderModal() {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được lên lịch Phiếu công việc.", "error");
+    return;
+  }
+  if (!state.employeeGroups.length) {
+    toast("Hãy tạo ít nhất một Nhóm nhân viên trước khi lên lịch.", "error");
+    return;
+  }
+
+  resetScheduledWorkOrderFormForCreate();
   els.taskModal.classList.remove("hidden");
   setMobileTaskPanelMenuOpen(false);
 }
@@ -9080,6 +9104,91 @@ function openScheduledWorkOrderModal() {
 els.openScheduledWorkOrderBtn?.addEventListener("click", openScheduledWorkOrderModal);
 els.scheduledWorkOrderCountdownMinutes?.addEventListener("input", updateScheduledCountdownPreview);
 els.scheduledWorkOrderDate?.addEventListener("change", syncScheduledTaskRowDates);
+
+function canEditScheduledWorkOrder(schedule) {
+  return ["pending", "generated", "failed"].includes(String(schedule?.status || "pending"));
+}
+
+function openScheduledWorkOrderEditor(scheduleId) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được chỉnh sửa lịch Phiếu công việc.", "error");
+    return;
+  }
+
+  const schedule = state.scheduledWorkOrders.find((item) => item.id === scheduleId);
+  if (!schedule) {
+    toast("Lịch Phiếu công việc không còn tồn tại.", "error");
+    return;
+  }
+  if (!canEditScheduledWorkOrder(schedule)) {
+    toast(
+      schedule.status === "assigned"
+        ? "Lịch này đã giao việc nên không thể thay đổi dữ liệu công việc đã giao."
+        : "Lịch này không còn ở trạng thái có thể chỉnh sửa.",
+      "info"
+    );
+    return;
+  }
+
+  const scheduledMoment = new Date(Number(schedule.scheduledForMs || 0));
+  if (!Number.isFinite(scheduledMoment.getTime())) {
+    toast("Thời điểm của lịch không hợp lệ.", "error");
+    return;
+  }
+
+  state.editingWorkOrderId = null;
+  state.editingScheduledWorkOrderId = schedule.id;
+  els.workOrderName.value = schedule.name || "";
+  taskRowWorkPhotos.clear();
+  els.taskRowsContainer.innerHTML = "";
+
+  const scheduledInputs = localDateTimeInputValues(scheduledMoment);
+  if (els.scheduledWorkOrderDate) els.scheduledWorkOrderDate.value = scheduledInputs.date;
+  if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = scheduledInputs.time;
+  if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = schedule.employeeGroupId || "";
+  if (els.scheduledWorkOrderCountdownMinutes) {
+    els.scheduledWorkOrderCountdownMinutes.value = String(
+      normalizeScheduledCountdownMinutes(schedule.assignmentCountdownMinutes)
+    );
+  }
+  if (els.scheduledWorkOrderRepeatMode) {
+    els.scheduledWorkOrderRepeatMode.value = schedule.repeatMode === "daily" ? "daily" : "none";
+  }
+
+  const rows = Array.isArray(schedule.rows) ? schedule.rows : [];
+  rows.forEach((row) => {
+    const deadlineMinutes = Math.max(0, Number(row?.deadlineMinutes || 0));
+    els.taskRowsContainer.appendChild(createTaskRowElement({
+      title: row?.title || "",
+      description: row?.description || "",
+      taskDate: scheduledInputs.date,
+      assignedToUid: "",
+      isLunchBreak: row?.isLunchBreak === true,
+      isHotel: row?.isHotel === true,
+      isShip: row?.isShip === true,
+      hotelPetCount: Number(row?.hotelPetCount || 0),
+      workPhotos: Array.isArray(row?.workPhotos) ? row.workPhotos : [],
+      hours: Math.floor(deadlineMinutes / 60),
+      minutes: deadlineMinutes % 60
+    }));
+  });
+  if (!rows.length) addTaskRow();
+
+  updateTaskRowHeadings();
+  const firstTaskRow = els.taskRowsContainer.querySelector(".task-row");
+  if (firstTaskRow) activateTaskRow(firstTaskRow);
+  setPhotoRequirementControlsFromTask({
+    photoRequired: schedule.photoRequired === true,
+    requiredPhotoCount: Number(schedule.requiredPhotoCount || 0)
+  });
+  setTaskModalMode("schedule");
+  syncScheduledTaskRowDates();
+  updateScheduledCountdownPreview();
+  $("#taskModalTitle").textContent = "🗓 Chỉnh sửa lịch Phiếu công việc";
+
+  els.scheduledWorkOrderListModal?.classList.add("hidden");
+  els.taskModal?.classList.remove("hidden");
+}
 
 function openEditWorkOrderModal(workOrderId) {
   if (!requirePermission("editWorkOrder", "Tài khoản của bạn chưa được cấp quyền sửa Phiếu chưa giao.")) return;
@@ -9938,7 +10047,8 @@ async function createScheduledWorkOrder(button) {
     return;
   }
 
-  setButtonLoading(button, true, "Đang lên lịch...");
+  const editingScheduleId = String(state.editingScheduledWorkOrderId || "");
+  setButtonLoading(button, true, editingScheduleId ? "Đang lưu..." : "Đang lên lịch...");
 
   try {
     const name = els.workOrderName?.value?.trim() || "";
@@ -9960,7 +10070,13 @@ async function createScheduledWorkOrder(button) {
     if (!Number.isFinite(scheduledMoment.getTime())) {
       throw new Error("Ngày giờ lên lịch không hợp lệ.");
     }
-    if (scheduledMoment.getTime() < Date.now() + 5000) {
+    const editingSchedule = editingScheduleId
+      ? state.scheduledWorkOrders.find((item) => item.id === editingScheduleId)
+      : null;
+    if (
+      scheduledMoment.getTime() < Date.now() + 5000
+      && String(editingSchedule?.status || "") !== "generated"
+    ) {
       throw new Error("Thời điểm lên lịch phải sau thời điểm hiện tại ít nhất 5 giây.");
     }
 
@@ -9989,7 +10105,7 @@ async function createScheduledWorkOrder(button) {
       workPhotos: Array.isArray(row.workPhotos) ? row.workPhotos : []
     }));
 
-    const result = await createScheduledWorkOrderCallable({
+    const schedulePayload = {
       name,
       employeeGroupId,
       scheduledForMs: scheduledMoment.getTime(),
@@ -9998,7 +10114,33 @@ async function createScheduledWorkOrder(button) {
       photoRequired: photoOptions.photoRequired,
       requiredPhotoCount: photoOptions.requiredPhotoCount,
       rows: payloadRows
-    });
+    };
+    const result = editingScheduleId
+      ? await updateScheduledWorkOrderCallable({ scheduleId: editingScheduleId, ...schedulePayload })
+      : await createScheduledWorkOrderCallable(schedulePayload);
+
+    if (editingScheduleId) {
+      state.editingScheduledWorkOrderId = "";
+      els.taskModal?.classList.add("hidden");
+      resetScheduledWorkOrderFormForCreate();
+      els.scheduledWorkOrderListModal?.classList.remove("hidden");
+      if (els.scheduledWorkOrderList) {
+        els.scheduledWorkOrderList.innerHTML = '<div class="empty-state">Đang tải lại danh sách lịch...</div>';
+      }
+      const refreshed = await listScheduledWorkOrdersCallable({});
+      state.scheduledWorkOrders = Array.isArray(refreshed?.data?.schedules)
+        ? refreshed.data.schedules
+        : [];
+      renderScheduledWorkOrderList();
+      updateScheduledWorkOrderEditorControls();
+
+      const groupName = result?.data?.employeeGroupName || selectedGroup.name || "Nhóm nhân viên";
+      toast(
+        `Đã cập nhật lịch “${name}” cho ${groupName} lúc ${formatDateTime(scheduledMoment)}.`,
+        "success"
+      );
+      return;
+    }
 
     closeTaskModal();
     els.workOrderName.value = "";
@@ -10044,6 +10186,14 @@ function returnToScheduledWorkOrderModal() {
     els.taskModal?.classList.remove("hidden");
   }
   state.scheduledListReturnToTaskModal = false;
+}
+
+function returnToScheduledWorkOrderListFromEditor() {
+  state.editingScheduledWorkOrderId = "";
+  els.taskModal?.classList.add("hidden");
+  resetScheduledWorkOrderFormForCreate();
+  els.scheduledWorkOrderListModal?.classList.remove("hidden");
+  renderScheduledWorkOrderList();
 }
 
 function scheduledWorkOrderStatusLabel(status, waitingForAvailableEmployee = false) {
@@ -10202,7 +10352,13 @@ function renderScheduledWorkOrderList() {
     const repeatLabel = schedule.repeatMode === "daily" ? "Lặp lại hằng ngày" : "Không lặp lại";
     const countdownMinutes = normalizeScheduledCountdownMinutes(schedule.assignmentCountdownMinutes);
     return `
-      <article class="scheduled-work-order-list-item">
+      <article
+        class="scheduled-work-order-list-item${canEditScheduledWorkOrder(schedule) ? " is-editable" : ""}"
+        data-edit-scheduled-work-order="${escapeHtml(schedule.id)}"
+        role="button"
+        tabindex="0"
+        aria-label="${canEditScheduledWorkOrder(schedule) ? "Chỉnh sửa" : "Xem trạng thái"} lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"
+      >
         <div class="scheduled-work-order-list-row">
           <div class="scheduled-work-order-list-main">
             ${escapeHtml(formatScheduledListDateTime(schedule.scheduledForMs))},
@@ -10298,7 +10454,13 @@ async function deleteScheduledWorkOrder(scheduleId, button) {
   }
 }
 
-els.viewScheduledWorkOrdersBtn?.addEventListener("click", openScheduledWorkOrderListModal);
+els.viewScheduledWorkOrdersBtn?.addEventListener("click", () => {
+  if (state.editingScheduledWorkOrderId) {
+    returnToScheduledWorkOrderListFromEditor();
+    return;
+  }
+  openScheduledWorkOrderListModal();
+});
 els.scheduledWorkOrderStatusFilter?.addEventListener("change", () => {
   const nextFilter = els.scheduledWorkOrderStatusFilter?.value || "all";
   state.scheduledWorkOrderStatusFilter = ["unassigned", "assigned"].includes(nextFilter) ? nextFilter : "all";
@@ -10336,8 +10498,20 @@ $$('[data-back-scheduled-work-order-list]').forEach((button) => {
 });
 els.scheduledWorkOrderList?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-delete-scheduled-work-order]");
-  if (!button) return;
-  deleteScheduledWorkOrder(button.dataset.deleteScheduledWorkOrder || "", button);
+  if (button) {
+    deleteScheduledWorkOrder(button.dataset.deleteScheduledWorkOrder || "", button);
+    return;
+  }
+  const item = event.target.closest("[data-edit-scheduled-work-order]");
+  if (!item) return;
+  openScheduledWorkOrderEditor(item.dataset.editScheduledWorkOrder || "");
+});
+els.scheduledWorkOrderList?.addEventListener("keydown", (event) => {
+  if (!["Enter", " "].includes(event.key) || event.target.closest("button")) return;
+  const item = event.target.closest("[data-edit-scheduled-work-order]");
+  if (!item) return;
+  event.preventDefault();
+  openScheduledWorkOrderEditor(item.dataset.editScheduledWorkOrder || "");
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" || els.scheduledWorkOrderListModal?.classList.contains("hidden")) return;

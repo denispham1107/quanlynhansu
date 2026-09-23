@@ -11894,7 +11894,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260923-scheduled-alert-sound-v89"></script>
+  <script type="module" src="app.js?v=20260923-schedule-editor-v90"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12654,6 +12654,10 @@
     display:grid; gap:8px; min-width:0; padding:13px 14px;
     border:1px solid #ddd6fe; border-radius:16px; background:linear-gradient(135deg,#faf5ff,#f8fafc);
   }
+  .scheduled-work-order-list-item[data-edit-scheduled-work-order] { min-width:0; }
+  .scheduled-work-order-list-item.is-editable { cursor:pointer; transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+  .scheduled-work-order-list-item.is-editable:hover { border-color:#8b5cf6; box-shadow:0 8px 20px rgba(124,58,237,.12); transform:translateY(-1px); }
+  .scheduled-work-order-list-item.is-editable:focus-visible { outline:3px solid rgba(124,58,237,.25); outline-offset:2px; border-color:#7c3aed; }
   .scheduled-work-order-list-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:10px; min-width:0; }
   .scheduled-work-order-delete-btn {
     width:38px; height:38px; min-width:38px; padding:0!important; border-radius:12px!important;

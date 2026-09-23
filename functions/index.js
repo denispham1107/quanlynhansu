@@ -699,13 +699,15 @@ function scheduledQueue(functionName) {
 function normalizeScheduledWorkPhoto(photo = {}, index = 0) {
   const url = String(photo?.url || "").trim().slice(0, 4000);
   if (!url) return null;
+  const uploadedAtMs = Number(photo?.uploadedAtMs || 0);
   return {
     id: String(photo?.id || `scheduled-photo-${index + 1}`).trim().slice(0, 180),
     url,
     storagePath: String(photo?.storagePath || photo?.fullPath || photo?.path || "").trim().slice(0, 1000),
     name: String(photo?.name || `Ảnh công việc ${index + 1}`).trim().slice(0, 220),
     contentType: String(photo?.contentType || "image/jpeg").trim().slice(0, 120),
-    uploadedAt: firestoreTimestampOrNull(photo?.uploadedAt) || Timestamp.now()
+    uploadedAt: firestoreTimestampOrNull(photo?.uploadedAt)
+      || (Number.isFinite(uploadedAtMs) && uploadedAtMs > 0 ? Timestamp.fromMillis(uploadedAtMs) : Timestamp.now())
   };
 }
 
@@ -763,6 +765,28 @@ function normalizeScheduledWorkOrderRows(rawRows) {
     throw new HttpsError("invalid-argument", "Mỗi Phiếu lên lịch chỉ được có tối đa 1 công việc Hotel.");
   }
   return rows;
+}
+
+function scheduledWorkOrderRowForClient(row = {}, index = 0) {
+  return {
+    index: Math.max(0, Math.trunc(Number(row.index ?? index))),
+    title: String(row.title || ""),
+    description: String(row.description || ""),
+    taskDate: String(row.taskDate || ""),
+    deadlineMinutes: Math.max(0, Number(row.deadlineMinutes || 0)),
+    isLunchBreak: row.isLunchBreak === true,
+    isHotel: row.isHotel === true,
+    isShip: row.isShip === true,
+    hotelPetCount: Math.max(0, Math.trunc(Number(row.hotelPetCount || 0))),
+    workPhotos: (Array.isArray(row.workPhotos) ? row.workPhotos : []).slice(0, 100).map((photo, photoIndex) => ({
+      id: String(photo?.id || `scheduled-photo-${photoIndex + 1}`),
+      url: String(photo?.url || ""),
+      storagePath: String(photo?.storagePath || ""),
+      name: String(photo?.name || `Ảnh công việc ${photoIndex + 1}`),
+      contentType: String(photo?.contentType || "image/jpeg"),
+      uploadedAtMs: firestoreTimestampOrNull(photo?.uploadedAt)?.toMillis() || 0
+    })).filter((photo) => photo.url)
+  };
 }
 
 function normalizeScheduledAssignmentCountdownMinutes(value) {
@@ -1039,6 +1063,208 @@ exports.createScheduledWorkOrder = onCall({
   };
 });
 
+exports.updateScheduledWorkOrder = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  await assertAdmin(adminUid);
+  const scheduleId = String(request.data?.scheduleId || "").trim();
+  const name = String(request.data?.name || "").trim().slice(0, 180);
+  const employeeGroupId = String(request.data?.employeeGroupId || "").trim();
+  const scheduledForMs = Number(request.data?.scheduledForMs || 0);
+  const requestedAssignmentCountdownMinutes = Number(request.data?.assignmentCountdownMinutes);
+  const assignmentCountdownMinutes = normalizeScheduledAssignmentCountdownMinutes(
+    requestedAssignmentCountdownMinutes
+  );
+  const repeatMode = normalizeScheduledRepeatMode(request.data?.repeatMode);
+  const photoRequired = request.data?.photoRequired === true;
+  const requiredPhotoCount = photoRequired
+    ? Math.max(1, Math.min(100, Math.trunc(Number(request.data?.requiredPhotoCount || 1))))
+    : 0;
+  const scheduledTaskDate = scheduledTaskDateKey(scheduledForMs, WORK_SUPERVISION_TIME_ZONE);
+  const rows = normalizeScheduledWorkOrderRows(request.data?.rows).map((row) => ({
+    ...row,
+    taskDate: scheduledTaskDate
+  }));
+
+  if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) {
+    throw new HttpsError("invalid-argument", "Lịch Phiếu công việc không hợp lệ.");
+  }
+  if (!name) throw new HttpsError("invalid-argument", "Vui lòng nhập tên Phiếu công việc.");
+  if (
+    !Number.isInteger(requestedAssignmentCountdownMinutes)
+    || requestedAssignmentCountdownMinutes < SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MIN_MINUTES
+    || requestedAssignmentCountdownMinutes > SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MAX_MINUTES
+  ) {
+    throw new HttpsError("invalid-argument", "Thời gian đếm ngược phải từ 1 đến 1440 phút.");
+  }
+  if (!employeeGroupId || employeeGroupId.includes("/") || employeeGroupId.length > 180) {
+    throw new HttpsError("invalid-argument", "Vui lòng chọn Nhóm nhân viên hợp lệ.");
+  }
+  if (!Number.isFinite(scheduledForMs)) {
+    throw new HttpsError("invalid-argument", "Thời điểm lên lịch không hợp lệ.");
+  }
+
+  const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+  const groupRef = db.doc(`employeeGroups/${employeeGroupId}`);
+  const scheduledAt = Timestamp.fromMillis(Math.trunc(scheduledForMs));
+  let employeeGroupName = "Nhóm nhân viên";
+  let previousStatus = "pending";
+  let generatedWorkOrderId = "";
+  let existingNextScheduleId = "";
+
+  await db.runTransaction(async (transaction) => {
+    const [scheduleSnapshot, groupSnapshot] = await transaction.getAll(scheduleRef, groupRef);
+    if (!scheduleSnapshot.exists) {
+      throw new HttpsError("not-found", "Lịch Phiếu công việc không còn tồn tại.");
+    }
+    const currentSchedule = scheduleSnapshot.data() || {};
+    if (String(currentSchedule.createdByUid || "") !== adminUid) {
+      throw new HttpsError("permission-denied", "Bạn không có quyền chỉnh sửa lịch này.");
+    }
+    previousStatus = String(currentSchedule.status || "pending");
+    if (!["pending", "generated", "failed"].includes(previousStatus)) {
+      throw new HttpsError(
+        "failed-precondition",
+        previousStatus === "assigned"
+          ? "Lịch này đã giao việc nên không thể thay đổi dữ liệu công việc đã giao."
+          : "Lịch này không còn ở trạng thái có thể chỉnh sửa."
+      );
+    }
+    if (previousStatus !== "generated" && scheduledForMs < Date.now() + 5000) {
+      throw new HttpsError("invalid-argument", "Thời điểm lên lịch phải sau thời điểm hiện tại ít nhất 5 giây.");
+    }
+    if (!groupSnapshot.exists) {
+      throw new HttpsError("failed-precondition", "Nhóm nhân viên đã chọn không còn tồn tại.");
+    }
+
+    employeeGroupName = String(groupSnapshot.data()?.name || "Nhóm nhân viên").trim().slice(0, 80);
+    generatedWorkOrderId = String(
+      currentSchedule.generatedWorkOrderId || `scheduled_${scheduleId}`
+    ).slice(0, 180);
+    existingNextScheduleId = String(currentSchedule.nextScheduleId || "").slice(0, 180);
+    const nextScheduleData = {
+      name,
+      employeeGroupId,
+      employeeGroupName,
+      scheduledAt,
+      rows,
+      photoRequired,
+      requiredPhotoCount,
+      assignmentCountdownMinutes,
+      repeatMode,
+      updatedAt: Timestamp.now(),
+      materializationEnqueuedAt: null,
+      queueEnqueueError: FieldValue.delete(),
+      queueEnqueueFailedAt: FieldValue.delete(),
+      failureReason: FieldValue.delete()
+    };
+
+    if (previousStatus === "generated") {
+      transaction.update(scheduleRef, {
+        ...nextScheduleData,
+        status: "updating"
+      });
+      return;
+    }
+    transaction.update(scheduleRef, {
+      ...nextScheduleData,
+      status: "pending"
+    });
+  });
+
+  if (previousStatus === "generated") {
+    const [taskSnapshot, lunchTaskSnapshot] = await Promise.all([
+      db.collection("tasks").where("workOrderId", "==", generatedWorkOrderId).get(),
+      db.collection("tasks").where("sourceScheduledWorkOrderId", "==", generatedWorkOrderId).get()
+    ]);
+    const oldHotelDates = Array.from(new Set(taskSnapshot.docs
+      .filter((item) => item.data()?.isHotel === true)
+      .map((item) => String(item.data()?.taskDate || "").trim())
+      .filter((dateKey) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))));
+    const refsToDelete = new Map([
+      [db.doc(`workOrders/${generatedWorkOrderId}`).path, db.doc(`workOrders/${generatedWorkOrderId}`)]
+    ]);
+    taskSnapshot.docs.forEach((item) => refsToDelete.set(item.ref.path, item.ref));
+    lunchTaskSnapshot.docs.forEach((item) => {
+      refsToDelete.set(item.ref.path, item.ref);
+      const lunchWorkOrderId = String(item.data()?.workOrderId || "").trim();
+      if (lunchWorkOrderId && !lunchWorkOrderId.includes("/")) {
+        const lunchWorkOrderRef = db.doc(`workOrders/${lunchWorkOrderId}`);
+        refsToDelete.set(lunchWorkOrderRef.path, lunchWorkOrderRef);
+      }
+    });
+    const refs = [...refsToDelete.values()];
+    for (let offset = 0; offset < refs.length; offset += 450) {
+      const batch = db.batch();
+      refs.slice(offset, offset + 450).forEach((ref) => batch.delete(ref));
+      await batch.commit();
+    }
+    await Promise.all(oldHotelDates.map((dateKey) => cleanupHotelDailyDataIfNoTasks(dateKey)));
+
+    await db.runTransaction(async (transaction) => {
+      const scheduleSnapshot = await transaction.get(scheduleRef);
+      if (!scheduleSnapshot.exists || String(scheduleSnapshot.data()?.status || "") !== "updating") {
+        throw new HttpsError("aborted", "Lịch đã thay đổi trong lúc cập nhật. Vui lòng thử lại.");
+      }
+      transaction.update(scheduleRef, {
+        status: "pending",
+        generatedAt: null,
+        generatedWorkOrderId: "",
+        generatedTaskDateKey: "",
+        firstTaskId: "",
+        assignmentDeadlineAt: null,
+        assignmentCountdownStartedAt: null,
+        assignmentCountdownWaitingForAvailableEmployee: false,
+        availableEmployeeCountAtCountdownStart: 0,
+        timeoutProcessedAt: null,
+        assignedAt: null,
+        assignedToUid: "",
+        assignedToName: "",
+        nextScheduleId: FieldValue.delete(),
+        nextScheduledAt: FieldValue.delete(),
+        updatedAt: Timestamp.now()
+      });
+    });
+
+    if (existingNextScheduleId) {
+      const nextScheduleRef = db.doc(`scheduledWorkOrders/${existingNextScheduleId}`);
+      const nextScheduleSnapshot = await nextScheduleRef.get();
+      const nextSchedule = nextScheduleSnapshot.data() || {};
+      const canUpdateNext = nextScheduleSnapshot.exists
+        && String(nextSchedule.previousScheduleId || "") === scheduleId
+        && String(nextSchedule.createdByUid || "") === adminUid
+        && String(nextSchedule.status || "") === "pending";
+      if (canUpdateNext) {
+        // Xóa lần kế tiếp cũ để khi lịch hiện tại được tạo lại, hệ thống sinh
+        // đúng occurrence mới theo ngày/giờ và nội dung vừa chỉnh sửa.
+        await nextScheduleRef.delete();
+      }
+    }
+  }
+
+  let enqueued = false;
+  if (scheduledAt.toMillis() <= Date.now() + 1000) {
+    await materializeScheduledWorkOrderById(scheduleId);
+    enqueued = true;
+  } else {
+    enqueued = await tryEnqueueScheduledMaterialization(scheduleId, scheduledAt);
+  }
+  return {
+    updated: true,
+    scheduleId,
+    scheduledForMs: scheduledAt.toMillis(),
+    employeeGroupId,
+    employeeGroupName,
+    assignmentCountdownMinutes,
+    repeatMode,
+    enqueued
+  };
+});
+
 exports.listScheduledWorkOrders = onCall({
   region: REGION,
   timeoutSeconds: 60,
@@ -1061,6 +1287,9 @@ exports.listScheduledWorkOrders = onCall({
       scheduledForMs: firestoreTimestampOrNull(item.scheduledAt)?.toMillis() || 0,
       employeeGroupId: String(item.employeeGroupId || ""),
       employeeGroupName: String(item.employeeGroupName || "Nhóm nhân viên"),
+      rows: (Array.isArray(item.rows) ? item.rows : []).map(scheduledWorkOrderRowForClient),
+      photoRequired: item.photoRequired === true,
+      requiredPhotoCount: Math.max(0, Math.min(100, Math.trunc(Number(item.requiredPhotoCount || 0)))),
       taskNames: (Array.isArray(item.rows) ? item.rows : [])
         .map((row) => String(row?.title || "").trim())
         .filter(Boolean),
@@ -1179,7 +1408,14 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
   const scheduleSnapshot = await scheduleRef.get();
   if (!scheduleSnapshot.exists) return null;
   const schedule = scheduleSnapshot.data() || {};
-  if (["assigned", "cancelled", "deleting"].includes(String(schedule.status || ""))) return null;
+  if (["assigned", "cancelled", "deleting", "updating"].includes(String(schedule.status || ""))) return null;
+  const scheduledAt = firestoreTimestampOrNull(schedule.scheduledAt);
+  // Một Cloud Task cũ có thể vẫn thức dậy sau khi Admin đổi giờ của lịch.
+  // Luôn đọc lại thời điểm mới và không tạo Phiếu sớm; bộ quét mỗi phút sẽ
+  // tạo đúng lúc nếu task cũ không thể được xếp lịch lại với cùng định danh.
+  if (scheduledAt && scheduledAt.toMillis() > Date.now() + 1000) {
+    return { scheduleId, waitingUntilMs: scheduledAt.toMillis() };
+  }
 
   const workOrderId = `scheduled_${scheduleId}`.slice(0, 180);
   const workOrderRef = db.doc(`workOrders/${workOrderId}`);
