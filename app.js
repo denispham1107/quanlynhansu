@@ -132,6 +132,10 @@ const editCompletedHotelActualTimeCallable = httpsCallable(
   functions,
   "editCompletedHotelActualTime"
 );
+const editCompletedLunchActualTimeCallable = httpsCallable(
+  functions,
+  "editCompletedLunchActualTime"
+);
 const updateEmployeeProfileCallable = httpsCallable(functions, "updateEmployeeProfile");
 const assignDraftTaskFromSupervisionLunchCallable = httpsCallable(
   functions,
@@ -15305,9 +15309,9 @@ function renderAssigneeHistoryBox(task) {
 }
 
 function getLunchBreakActualMinutes(task) {
-  const storedMinutes = Number(task.actualMinutes || 0);
-
-  if (storedMinutes > 0) return storedMinutes;
+  const storedMinutes = Number(task.actualMinutes);
+  if (Number.isFinite(storedMinutes) && storedMinutes >= 0
+    && (storedMinutes > 0 || task.actualMinutesManuallyEdited === true)) return storedMinutes;
 
   const completedAt = timestampToDate(task.approvedAt) || timestampToDate(task.submittedAt);
 
@@ -15340,17 +15344,23 @@ function renderLunchBreakHistoryBox(task) {
   const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
   const actualMinutes = getLunchBreakActualMinutes(task);
   const finishedAt = formatFullDateTime(task.approvedAt || task.submittedAt);
+  const editAction = canEditCompletedTaskActualTime(task)
+    ? `<button class="btn primary small completed-actual-time-edit-btn" type="button" data-action="edit-completed-actual-time" data-task-id="${escapeHtml(task.id)}">Sửa thời gian thực tế</button>`
+    : "";
 
   return `
     <div class="extension-box lunch-break-history-box">
       <div class="extension-box-head">
         <strong>Lịch sử nghỉ trưa</strong>
         <span>${escapeHtml(finishedAt)}</span>
+        ${editAction}
       </div>
       <ul class="extension-list">
         <li>
           <strong>${escapeHtml(employeeName)} đã nghỉ trưa được ${escapeHtml(formatMinutes(actualMinutes))}</strong>
-          <span>${task.autoCreatedByShipOvertime === true
+          <span>${task.actualMinutesManuallyEdited === true
+            ? `Thời gian thực tế đã được Admin chỉnh sửa${task.actualMinutesEditedByName ? ` bởi ${escapeHtml(task.actualMinutesEditedByName)}` : ""}. Thời điểm hoàn thành được giữ nguyên.`
+            : task.autoCreatedByShipOvertime === true
             ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Ship quá quy định."
             : task.autoCreatedByHotelOvertime === true
               ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Hotel quá quy định."
@@ -15681,7 +15691,7 @@ function renderRedoRequestHistoryBox(task) {
 }
 
 function canEditCompletedTaskActualTime(task) {
-  if (!isAdminProfile() || task?.status !== "completed" || isLunchBreakTask(task)) return false;
+  if (!isAdminProfile() || task?.status !== "completed") return false;
   if (isHotelTask(task)) return isAdminHotelTimeEditingAllowed();
   return isCompletedTaskActualTimeEditAllowed();
 }
@@ -19418,7 +19428,8 @@ function getCompletedActualTimeEditInputMinutes() {
   const hours = Number(els.actualTimeEditHours?.value || 0);
   const minutes = Number(els.actualTimeEditMinutes?.value || 0);
   const task = state.tasks.find((item) => item.id === state.editingCompletedTaskActualTimeId);
-  const seconds = isHotelTask(task) ? Number(els.actualTimeEditSeconds?.value || 0) : 0;
+  const seconds = isHotelTask(task) || isLunchBreakTask(task)
+    ? Number(els.actualTimeEditSeconds?.value || 0) : 0;
   if (!Number.isInteger(hours) || hours < 0 || hours > 168) return null;
   if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) return null;
   if (!Number.isInteger(seconds) || seconds < 0 || seconds > 59) return null;
@@ -19448,6 +19459,12 @@ function updateCompletedActualTimeEditPreview() {
       return;
     }
 
+    if (isLunchBreakTask(task)) {
+      els.actualTimeEditPreview.textContent = `Thời gian nghỉ trưa thực tế mới: ${formatMinutes(totalMinutes)}. Thời điểm báo hoàn thành và Admin duyệt sẽ không đổi.`;
+      els.actualTimeEditPreview.classList.remove("is-error");
+      return;
+    }
+
     const result = calculateResultFromActualMinutes(task, totalMinutes);
     const resultText = taskResultShortText(result);
     els.actualTimeEditPreview.textContent = `Kết quả mới dự kiến: ${resultText}. Thời gian thực tế ${formatMinutes(totalMinutes)} / quy định ${formatMinutes(task.deadlineMinutes)}.`;
@@ -19468,10 +19485,6 @@ function openCompletedActualTimeEditModal(taskId) {
     toast("Chỉ có thể sửa công việc đã hoàn thành.", "error");
     return;
   }
-  if (isLunchBreakTask(task)) {
-    toast("Phiếu Nghỉ trưa đang dùng logic kết quả riêng nên không sửa bằng chức năng này.", "error");
-    return;
-  }
   if (isHotelTask(task) && !isAdminHotelTimeEditingAllowed()) {
     toast("Hãy bật “Admin có quyền chỉnh/thêm giờ cho phiếu Hotel” trong Cài đặt Phiếu công việc trước.", "error");
     return;
@@ -19488,7 +19501,9 @@ function openCompletedActualTimeEditModal(taskId) {
         ? storedHotelSeconds
         : Number(task.actualMinutes || 0) * 60
     ))
-    : Math.max(0, Math.trunc(Number(task.actualMinutes || 0))) * 60;
+    : isLunchBreakTask(task)
+      ? Math.max(0, Math.round(getLunchBreakActualMinutes(task) * 60))
+      : Math.max(0, Math.trunc(Number(task.actualMinutes || 0))) * 60;
   const currentActualMinutes = currentActualSeconds / 60;
   state.editingCompletedTaskActualTimeId = task.id;
   if (els.actualTimeEditTaskTitle) els.actualTimeEditTaskTitle.textContent = task.title || "Công việc";
@@ -19506,7 +19521,7 @@ function openCompletedActualTimeEditModal(taskId) {
   if (els.actualTimeEditHours) els.actualTimeEditHours.value = String(Math.floor(currentActualSeconds / 3600));
   if (els.actualTimeEditMinutes) els.actualTimeEditMinutes.value = String(Math.floor((currentActualSeconds % 3600) / 60));
   if (els.actualTimeEditSeconds) els.actualTimeEditSeconds.value = String(currentActualSeconds % 60);
-  els.actualTimeEditSecondsField?.classList.toggle("hidden", !isHotelTask(task));
+  els.actualTimeEditSecondsField?.classList.toggle("hidden", !(isHotelTask(task) || isLunchBreakTask(task)));
   updateCompletedActualTimeEditPreview();
 
   els.actualTimeEditModal?.classList.remove("hidden");
@@ -19537,7 +19552,14 @@ async function saveCompletedActualTimeEdit(event) {
 
     if (task.status !== "completed") throw new Error("Công việc này không còn ở trạng thái Đã hoàn thành.");
     if (isLunchBreakTask(task)) {
-      throw new Error("Phiếu Nghỉ trưa đang dùng logic kết quả riêng nên không sửa bằng chức năng này.");
+      if (!isCompletedTaskActualTimeEditAllowed()) {
+        throw new Error("Chế độ sửa Phiếu công việc đã hoàn thành đang tắt.");
+      }
+      const actualSeconds = Math.round(totalMinutes * 60);
+      await editCompletedLunchActualTimeCallable({ taskId, actualSeconds });
+      closeCompletedActualTimeEditModal();
+      toast(`Đã sửa thời gian nghỉ trưa thực tế thành ${formatMinutes(actualSeconds / 60)}.`, "success");
+      return;
     }
     if (isHotelTask(task)) {
       if (!isAdminHotelTimeEditingAllowed()) {

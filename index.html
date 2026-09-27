@@ -10246,8 +10246,53 @@
         flex: 0 0 auto;
       }
 
+      .lunch-break-history-box .extension-box-head {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .lunch-break-history-box .completed-actual-time-edit-btn {
+        margin-left: auto;
+        min-width: 0;
+      }
+
       body.completed-actual-time-edit-open {
         overflow: hidden;
+      }
+
+      #actualTimeEditModal:not(.hidden) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+
+      #actualTimeEditModal .modal-card {
+        display: flex;
+        flex-direction: column;
+        max-height: 100% !important;
+        min-height: 0;
+        margin: 0 !important;
+        overflow: hidden !important;
+        box-sizing: border-box;
+      }
+
+      #actualTimeEditModal .modal-header {
+        flex: 0 0 auto;
+        min-width: 0;
+      }
+
+      #actualTimeEditModal .modal-header > div {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      #actualTimeEditForm {
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
       }
 
       .actual-time-edit-summary {
@@ -10258,6 +10303,7 @@
 
       .actual-time-edit-summary-item {
         display: grid;
+        min-width: 0;
         gap: 4px;
         padding: 12px 14px;
         border: 1px solid #dbeafe;
@@ -10280,6 +10326,11 @@
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
+      }
+
+      .actual-time-edit-input-grid > label,
+      .actual-time-edit-input-shell {
+        min-width: 0;
       }
 
       .actual-time-edit-input-shell {
@@ -10327,6 +10378,10 @@
 
         .completed-actual-time-edit-btn {
           width: 100%;
+        }
+
+        .lunch-break-history-box .completed-actual-time-edit-btn {
+          margin-left: 0;
         }
       }
     </style>
@@ -11671,11 +11726,11 @@
           <label class="work-order-setting-toggle-row" for="allowEditCompletedTaskActualTime">
             <span class="work-order-setting-toggle-copy">
               <strong>Sửa phiếu công việc đã hoàn thành</strong>
-              <span>Khi bật, Admin có thể chỉnh lại “Thời gian thực tế” của công việc đã hoàn thành. Hệ thống sẽ tự tính lại kết quả nhanh hơn, chậm hơn hoặc đúng thời gian dựa trên thời gian quy định hiện tại của công việc.</span>
+              <span>Khi bật, Admin có thể chỉnh lại “Thời gian thực tế” của công việc và phiếu nghỉ trưa đã hoàn thành, kể cả phiếu nghỉ trưa được tạo tự động.</span>
             </span>
             <input id="allowEditCompletedTaskActualTime" type="checkbox" />
           </label>
-          <p class="work-order-setting-help">Áp dụng cho công việc hoàn thành thông thường và Ship (CV khác). Hotel được điều khiển bằng lựa chọn riêng ngay bên dưới; Nghỉ trưa tiếp tục dùng logic riêng.</p>
+          <p class="work-order-setting-help">Áp dụng cho công việc thông thường, Ship (CV khác) và mọi phiếu nghỉ trưa đã hoàn thành. Hotel được điều khiển bằng lựa chọn riêng ngay bên dưới.</p>
         </section>
 
         <section class="work-order-setting-section is-time-setting">
@@ -11819,7 +11874,7 @@
         </div>
 
         <p id="actualTimeEditPreview" class="actual-time-edit-preview" aria-live="polite">Kết quả mới dự kiến</p>
-        <p class="small-note">Thời điểm “Báo hoàn thành” và “Admin duyệt” vẫn được giữ nguyên. Riêng Hotel, hệ thống đồng thời tính lại thời gian còn lại trong ngày và Phiếu nghỉ trưa bù nếu có.</p>
+        <p class="small-note">Thời điểm “Báo hoàn thành” và “Admin duyệt” vẫn được giữ nguyên. Phiếu nghỉ trưa chỉ đổi thời gian thực tế, không đổi thời gian của công việc nguồn. Riêng Hotel, hệ thống đồng thời tính lại thời gian còn lại trong ngày và Phiếu nghỉ trưa bù nếu có.</p>
 
         <div class="modal-footer-actions">
           <button class="btn ghost" type="button" data-close-actual-time-edit>Hủy</button>
@@ -11894,7 +11949,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260923-schedule-editor-v90"></script>
+  <script type="module" src="app.js?v=20260928-lunch-actual-time-v91"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

@@ -3290,7 +3290,8 @@ async function reconcileHotelDailyPhotoRequirement(dateKeyInput) {
     requiredPhotoCount: 0,
     photos: [],
     photoCount: 0,
-    lastPhotoUploadedAt: null
+    lastPhotoUploadedAt: null,
+    ...preservedManualLunchActualTime(autoTaskSnapshot, lunchMinutes)
   }, { merge: false });
   batch.set(employeeNotificationRef, {
     id: employeeNotificationRef.id,
@@ -3650,6 +3651,110 @@ exports.editCompletedHotelActualTime = onCall({
   return { updated: true, task: result };
 });
 
+exports.editCompletedLunchActualTime = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 10
+}, async (request) => {
+  const uid = assertAuthenticated(request);
+  const adminProfile = await assertAdmin(uid);
+  const taskId = String(request.data?.taskId || "").trim();
+  const actualSeconds = request.data?.actualSeconds;
+  if (!taskId || taskId.length > 256) {
+    throw new HttpsError("invalid-argument", "Phiếu nghỉ trưa không hợp lệ.");
+  }
+  if (typeof actualSeconds !== "number" || !Number.isInteger(actualSeconds)
+    || actualSeconds < 0 || actualSeconds > 168 * 3600) {
+    throw new HttpsError("invalid-argument", "Thời gian thực tế phải từ 0 đến 168 giờ.");
+  }
+
+  const taskRef = db.doc(`tasks/${taskId}`);
+  const settingsRef = db.doc("appSettings/workOrderControls");
+  let result = null;
+  await db.runTransaction(async (transaction) => {
+    const [settingsSnapshot, taskSnapshot] = await Promise.all([
+      transaction.get(settingsRef),
+      transaction.get(taskRef)
+    ]);
+    const settings = settingsSnapshot.data() || {};
+    const task = taskSnapshot.data() || {};
+    if (settings.allowEditCompletedTaskActualTime !== true) {
+      throw new HttpsError("failed-precondition", "Chế độ sửa Phiếu công việc đã hoàn thành đang tắt.");
+    }
+    if (!taskSnapshot.exists || task.isLunchBreak !== true || task.status !== "completed") {
+      throw new HttpsError("failed-precondition", "Chỉ sửa được Phiếu nghỉ trưa đã hoàn thành.");
+    }
+
+    const oldActualMinutes = Number.isFinite(Number(task.actualMinutes))
+      ? Math.max(0, Number(task.actualMinutes))
+      : 0;
+    const deadlineSeconds = Math.max(0, Math.round(Number(task.deadlineMinutes || 0) * 60));
+    const differenceSeconds = Math.abs(actualSeconds - deadlineSeconds);
+    const resultType = actualSeconds < deadlineSeconds ? "faster"
+      : actualSeconds > deadlineSeconds ? "slower" : "on_time";
+    const differencePercent = deadlineSeconds > 0
+      ? Number(((differenceSeconds / deadlineSeconds) * 100).toFixed(2)) : 0;
+    const now = Timestamp.now();
+    const editedByName = String(adminProfile?.name || request.auth.token?.email || "Admin").slice(0, 120);
+    const oldHistory = Array.isArray(task.actualMinutesEditHistory)
+      ? task.actualMinutesEditHistory.slice(-199) : [];
+    const historyRecord = {
+      editedAt: now,
+      editedByUid: uid,
+      editedByName,
+      fromMinutes: oldActualMinutes,
+      toMinutes: actualSeconds / 60,
+      fromSeconds: Math.round(oldActualMinutes * 60),
+      toSeconds: actualSeconds,
+      resultType,
+      differenceMinutes: differenceSeconds / 60,
+      differencePercent
+    };
+    const taskUpdate = {
+      actualMinutes: actualSeconds / 60,
+      resultType,
+      differenceMinutes: differenceSeconds / 60,
+      differencePercent,
+      actualMinutesManuallyEdited: true,
+      actualMinutesEditedAt: now,
+      actualMinutesEditedByUid: uid,
+      actualMinutesEditedByName: editedByName,
+      actualMinutesEditCount: Math.max(0, Math.trunc(Number(task.actualMinutesEditCount || 0))) + 1,
+      actualMinutesEditHistory: [...oldHistory, historyRecord]
+    };
+    if (!Number.isFinite(Number(task.actualMinutesOriginal))) {
+      taskUpdate.actualMinutesOriginal = oldActualMinutes;
+    }
+    transaction.update(taskRef, taskUpdate);
+    result = { taskId, actualSeconds };
+  });
+  return { updated: true, task: result };
+});
+
+function preservedManualLunchActualTime(snapshot, deadlineMinutes) {
+  const task = snapshot.data() || {};
+  if (!snapshot.exists || task.actualMinutesManuallyEdited !== true) return {};
+  const actualSeconds = Math.max(0, Math.round(Number(task.actualMinutes || 0) * 60));
+  const deadlineSeconds = Math.max(0, Math.round(Number(deadlineMinutes || 0) * 60));
+  const differenceSeconds = Math.abs(actualSeconds - deadlineSeconds);
+  return {
+    actualMinutes: task.actualMinutes,
+    resultType: actualSeconds < deadlineSeconds ? "faster"
+      : actualSeconds > deadlineSeconds ? "slower" : "on_time",
+    differenceMinutes: differenceSeconds / 60,
+    differencePercent: deadlineSeconds > 0
+      ? Number(((differenceSeconds / deadlineSeconds) * 100).toFixed(2)) : 0,
+    actualMinutesManuallyEdited: true,
+    actualMinutesOriginal: task.actualMinutesOriginal,
+    actualMinutesEditedAt: task.actualMinutesEditedAt,
+    actualMinutesEditedByUid: task.actualMinutesEditedByUid,
+    actualMinutesEditedByName: task.actualMinutesEditedByName,
+    actualMinutesEditCount: task.actualMinutesEditCount,
+    actualMinutesEditHistory: task.actualMinutesEditHistory
+  };
+}
+
 async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
   const sourceTask = afterTask || beforeTask;
   if (!sourceTask || sourceTask.isHotel !== true) return;
@@ -3812,7 +3917,8 @@ async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
       requiredPhotoCount: 0,
       photos: [],
       photoCount: 0,
-      lastPhotoUploadedAt: null
+      lastPhotoUploadedAt: null,
+      ...preservedManualLunchActualTime(autoTaskSnapshot, overtimeMinutes)
     }, { merge: false });
 
     transaction.set(db.doc(`notifications/${employeeNotificationId}`), {
@@ -3965,7 +4071,8 @@ async function syncShipOvertimeLunch(taskId, beforeTask, afterTask) {
       requiredPhotoCount: 0,
       photos: [],
       photoCount: 0,
-      lastPhotoUploadedAt: null
+      lastPhotoUploadedAt: null,
+      ...preservedManualLunchActualTime(autoTaskSnapshot, overtimeMinutes)
     }, { merge: false });
 
     transaction.set(db.doc(`notifications/${employeeNotificationId}`), {
