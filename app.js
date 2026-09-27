@@ -15347,6 +15347,15 @@ function renderLunchBreakHistoryBox(task) {
   const editAction = canEditCompletedTaskActualTime(task)
     ? `<button class="btn primary small completed-actual-time-edit-btn" type="button" data-action="edit-completed-actual-time" data-task-id="${escapeHtml(task.id)}">Sửa thời gian thực tế</button>`
     : "";
+  const historyNote = task.actualMinutesManuallyEdited === true
+    ? ""
+    : task.autoCreatedByShipOvertime === true
+      ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Ship quá quy định."
+      : task.autoCreatedByHotelOvertime === true
+        ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Hotel quá quy định."
+        : task.autoCreatedByHotelMissingPhotos === true
+          ? "Phiếu được hệ thống tự tạo và hoàn thành bằng tổng thời gian thực tế của các Phiếu Hotel vì chưa đăng đủ ảnh bắt buộc trong ngày."
+          : "Thời gian tính từ lúc bắt đầu nghỉ trưa đến khi hoàn thành.";
 
   return `
     <div class="extension-box lunch-break-history-box">
@@ -15358,15 +15367,7 @@ function renderLunchBreakHistoryBox(task) {
       <ul class="extension-list">
         <li>
           <strong>${escapeHtml(employeeName)} đã nghỉ trưa được ${escapeHtml(formatMinutes(actualMinutes))}</strong>
-          <span>${task.actualMinutesManuallyEdited === true
-            ? `Thời gian thực tế đã được Admin chỉnh sửa${task.actualMinutesEditedByName ? ` bởi ${escapeHtml(task.actualMinutesEditedByName)}` : ""}. Thời điểm hoàn thành được giữ nguyên.`
-            : task.autoCreatedByShipOvertime === true
-            ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Ship quá quy định."
-            : task.autoCreatedByHotelOvertime === true
-              ? "Phiếu được hệ thống tự tạo và hoàn thành đúng bằng thời gian làm Hotel quá quy định."
-            : task.autoCreatedByHotelMissingPhotos === true
-              ? "Phiếu được hệ thống tự tạo và hoàn thành bằng tổng thời gian thực tế của các Phiếu Hotel vì chưa đăng đủ ảnh bắt buộc trong ngày."
-              : "Thời gian tính từ lúc bắt đầu nghỉ trưa đến khi hoàn thành."}</span>
+          ${historyNote ? `<span>${escapeHtml(historyNote)}</span>` : ""}
         </li>
       </ul>
     </div>
