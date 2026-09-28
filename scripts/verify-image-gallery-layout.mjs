@@ -106,6 +106,13 @@ try {
   const mobileMenuPassed = mobileMenu.visible && mobileMenu.order && mobileMenu.inside && mobileMenu.pageWidth <= 390;
   console.log(`${mobileMenuPassed ? "PASS" : "FAIL"} | Mobile Nạp lịch → Hình ảnh → Cài đặt | ${JSON.stringify(mobileMenu)}`);
   if (!mobileMenuPassed) process.exitCode = 1;
+  const defaultDateMode = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: 'document.getElementById("imageGalleryDateMode").value'
+  });
+  const defaultDatePassed = defaultDateMode.result.value === "today";
+  console.log(`${defaultDatePassed ? "PASS" : "FAIL"} | Mở Hình ảnh mặc định Hôm nay`);
+  if (!defaultDatePassed) process.exitCode = 1;
   await send("Runtime.evaluate", { returnByValue: true, expression: `(() => {
     document.getElementById("appView").classList.remove("hidden");
     document.getElementById("adminView").classList.add("hidden");
@@ -151,7 +158,7 @@ try {
       };
     })()` });
     const result = measured.result.value;
-    const pass = result.scrollWidth <= width && result.shells.length === 3
+    const pass = result.scrollWidth <= width && result.shells.length === 5
       && result.controlsInside && result.shellsInside && !result.overlap
       && result.cardsInside && result.selectionsInside && result.actionsInside;
     console.log(`${pass ? "PASS" : "FAIL"} | ${width}x${height} | scroll ${result.scrollWidth}/${width}`);

@@ -10416,7 +10416,7 @@
     .image-gallery-hero > div { min-width:0; }
     .image-gallery-hero h2 { margin:8px 0; }
     .image-gallery-panel { min-width:0; overflow:hidden; }
-    .image-gallery-controls { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+    .image-gallery-controls { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
     .image-gallery-filter-field { display:grid; align-content:start; gap:7px; min-width:0; color:#334155; font-weight:800; }
     .image-gallery-filter-field.hidden { display:none!important; }
     .image-gallery-native-shell { display:block; width:100%; min-width:0; overflow:hidden; border:1px solid #cbd5e1; border-radius:13px; background:#fff; box-sizing:border-box; }
@@ -11600,10 +11600,24 @@
             <span>Thời gian đăng ảnh</span>
             <span class="image-gallery-native-shell"><select id="imageGalleryDateMode" aria-label="Lọc thời gian đăng ảnh">
               <option value="all">Tất cả thời gian</option>
-              <option value="today">Hôm nay</option>
+              <option value="today" selected>Hôm nay</option>
               <option value="yesterday">Hôm qua</option>
+              <option value="current_month">Tháng này</option>
+              <option value="previous_month">Tháng trước</option>
               <option value="single">Chọn 1 ngày</option>
               <option value="range">Khoảng ngày tùy chỉnh</option>
+            </select></span>
+          </label>
+          <label class="image-gallery-filter-field">
+            <span>Người đăng</span>
+            <span class="image-gallery-native-shell"><select id="imageGalleryUploaderFilter" aria-label="Lọc người đăng">
+              <option value="all">Tất cả người đăng</option>
+            </select></span>
+          </label>
+          <label class="image-gallery-filter-field">
+            <span>Phiếu công việc</span>
+            <span class="image-gallery-native-shell"><select id="imageGalleryWorkOrderFilter" aria-label="Lọc phiếu công việc">
+              <option value="all">Tất cả Phiếu công việc</option>
             </select></span>
           </label>
           <label id="imageGallerySingleDateField" class="image-gallery-filter-field hidden">
@@ -12041,7 +12055,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260929-image-gallery-v93"></script>
+  <script type="module" src="app.js?v=20260929-image-gallery-filters-v94"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

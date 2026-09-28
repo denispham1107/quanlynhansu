@@ -259,7 +259,9 @@ const state = {
   photoViewerPhotos: [],
   photoViewerIndex: -1,
   photoReportSelectedKeys: new Set(),
-  imageGalleryDateFilter: { mode: "all", single: "", from: "", to: "" },
+  imageGalleryDateFilter: { mode: "today", single: "", from: "", to: "" },
+  imageGalleryUploaderFilter: "all",
+  imageGalleryWorkOrderFilter: "all",
   imageGallerySelectedKeys: new Set(),
   imageGalleryTasks: null,
   imageGalleryUnsub: null,
@@ -1249,6 +1251,8 @@ const els = {
   imageGalleryView: $("#imageGalleryView"),
   backFromImageGalleryBtn: $("#backFromImageGalleryBtn"),
   imageGalleryDateMode: $("#imageGalleryDateMode"),
+  imageGalleryUploaderFilter: $("#imageGalleryUploaderFilter"),
+  imageGalleryWorkOrderFilter: $("#imageGalleryWorkOrderFilter"),
   imageGallerySingleDateField: $("#imageGallerySingleDateField"),
   imageGallerySingleDate: $("#imageGallerySingleDate"),
   imageGalleryDateFromField: $("#imageGalleryDateFromField"),
@@ -16465,15 +16469,24 @@ function getSortedTaskPhotos(task) {
 }
 
 function getImageGalleryEntries() {
+  const workOrderNames = new Map(state.workOrders.map((workOrder) => [workOrder.id, workOrder.name]));
   return (state.imageGalleryTasks || state.tasks).flatMap((task) => [
     ...getTaskPhotos(task).map((photo, index) => ({ task, photo, kind: "report", photoKey: getPhotoStableKey(photo, index) })),
     ...getTaskWorkPhotos(task).map((photo, index) => ({ task, photo, kind: "work", photoKey: getPhotoStableKey(photo, index) }))
-  ]).map((entry) => ({
-    ...entry,
-    key: JSON.stringify([entry.task.id, entry.kind, entry.photoKey]),
-    uploadedAt: timestampToDate(entry.photo.uploadedAt),
-    dateKey: toLocalDateInputValue(timestampToDate(entry.photo.uploadedAt))
-  })).sort((left, right) => (right.uploadedAt?.getTime() || 0) - (left.uploadedAt?.getTime() || 0));
+  ]).map((entry) => {
+    const uploadedAt = timestampToDate(entry.photo.uploadedAt);
+    const workOrderName = getImageGalleryWorkOrderName(entry.task, workOrderNames);
+    return {
+      ...entry,
+      key: JSON.stringify([entry.task.id, entry.kind, entry.photoKey]),
+      uploadedAt,
+      dateKey: toLocalDateInputValue(uploadedAt),
+      uploaderName: getImageGalleryUploader(entry.photo),
+      uploaderKey: getImageGalleryUploaderKey(entry.photo),
+      workOrderName,
+      workOrderKey: normalizeImageGalleryFilterName(workOrderName)
+    };
+  }).sort((left, right) => (right.uploadedAt?.getTime() || 0) - (left.uploadedAt?.getTime() || 0));
 }
 
 function getImageGalleryUploader(photo) {
@@ -16485,15 +16498,60 @@ function getImageGalleryUploader(photo) {
   return account?.name || account?.email || uid;
 }
 
+function normalizeImageGalleryFilterName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("vi-VN");
+}
+
+function getImageGalleryUploaderKey(photo) {
+  const uid = String(photo?.uploadedByUid || "").trim();
+  return uid ? `uid:${uid}` : `name:${normalizeImageGalleryFilterName(getImageGalleryUploader(photo))}`;
+}
+
+function getImageGalleryWorkOrderName(task, workOrderNames) {
+  return String(workOrderNames.get(task?.workOrderId) || task?.workOrderName || "Phiếu công việc").trim()
+    || "Phiếu công việc";
+}
+
+function syncImageGalleryFilterOptions(select, defaultLabel, options, selectedValue) {
+  if (!select) return;
+  const previousLabel = [...select.options].find((option) => option.value === selectedValue)?.textContent;
+  const optionMap = new Map();
+  for (const { key, label } of options) {
+    if (!optionMap.has(key)) optionMap.set(key, label);
+  }
+  if (selectedValue !== "all" && !optionMap.has(selectedValue)) {
+    optionMap.set(selectedValue, previousLabel || selectedValue);
+  }
+  const sorted = [...optionMap].sort((left, right) => left[1].localeCompare(right[1], "vi"));
+  const html = `<option value="all">${escapeHtml(defaultLabel)}</option>`
+    + sorted.map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join("");
+  if (select.innerHTML !== html) select.innerHTML = html;
+  select.value = selectedValue;
+}
+
 function isImageGalleryEntryInDateFilter(entry) {
   const { mode, single, from, to } = state.imageGalleryDateFilter;
   if (mode === "all") return true;
   if (!entry.dateKey) return false;
   if (mode === "today") return entry.dateKey === todayInputValue();
   if (mode === "yesterday") return entry.dateKey === yesterdayInputValue();
+  if (mode === "current_month") {
+    const { from, to } = getMonthDateRange(0);
+    return entry.dateKey >= from && entry.dateKey <= to;
+  }
+  if (mode === "previous_month") {
+    const { from, to } = getMonthDateRange(-1);
+    return entry.dateKey >= from && entry.dateKey <= to;
+  }
   if (mode === "single") return Boolean(single) && entry.dateKey === single;
   if (mode === "range") return (!from || entry.dateKey >= from) && (!to || entry.dateKey <= to);
   return true;
+}
+
+function isImageGalleryEntryInCombinedFilter(entry) {
+  return isImageGalleryEntryInDateFilter(entry)
+    && (state.imageGalleryUploaderFilter === "all" || entry.uploaderKey === state.imageGalleryUploaderFilter)
+    && (state.imageGalleryWorkOrderFilter === "all" || entry.workOrderKey === state.imageGalleryWorkOrderFilter);
 }
 
 function syncImageGalleryDateControls() {
@@ -16507,6 +16565,16 @@ function renderImageGallery() {
   if (!els.imageGalleryGrid || !isAdminProfile()) return;
   syncImageGalleryDateControls();
   const allEntries = getImageGalleryEntries();
+  syncImageGalleryFilterOptions(
+    els.imageGalleryUploaderFilter, "Tất cả người đăng",
+    allEntries.map((entry) => ({ key: entry.uploaderKey, label: entry.uploaderName })),
+    state.imageGalleryUploaderFilter
+  );
+  syncImageGalleryFilterOptions(
+    els.imageGalleryWorkOrderFilter, "Tất cả Phiếu công việc",
+    allEntries.map((entry) => ({ key: entry.workOrderKey, label: entry.workOrderName })),
+    state.imageGalleryWorkOrderFilter
+  );
   const validKeys = new Set(allEntries.map((entry) => entry.key));
   for (const key of state.imageGallerySelectedKeys) {
     if (!validKeys.has(key)) state.imageGallerySelectedKeys.delete(key);
@@ -16516,7 +16584,7 @@ function renderImageGallery() {
     && state.imageGalleryDateFilter.from > state.imageGalleryDateFilter.to;
   const waitingForSingleDate = state.imageGalleryDateFilter.mode === "single"
     && !state.imageGalleryDateFilter.single;
-  const entries = invalidRange ? [] : allEntries.filter(isImageGalleryEntryInDateFilter);
+  const entries = invalidRange ? [] : allEntries.filter(isImageGalleryEntryInCombinedFilter);
   state.imageGalleryEntries = entries;
 
   if (els.imageGallerySummary) {
@@ -16543,15 +16611,15 @@ function renderImageGallery() {
       const { task, photo, kind, key } = entry;
       const selected = state.imageGallerySelectedKeys.has(key);
       const kindLabel = kind === "report" ? "Ảnh báo cáo" : "Ảnh công việc";
-      const uploader = getImageGalleryUploader(photo);
+      const uploader = entry.uploaderName;
       return `<article class="image-gallery-card ${selected ? "is-selected" : ""}" data-gallery-key="${escapeHtml(key)}">
-        <button class="image-gallery-card-open" type="button" data-gallery-index="${index}" aria-label="Xem ${escapeHtml(kindLabel)} của ${escapeHtml(uploader)} trong Phiếu ${escapeHtml(task.workOrderName || "Phiếu công việc")}">
+        <button class="image-gallery-card-open" type="button" data-gallery-index="${index}" aria-label="Xem ${escapeHtml(kindLabel)} của ${escapeHtml(uploader)} trong Phiếu ${escapeHtml(entry.workOrderName)}">
           <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(kindLabel)}: ${escapeHtml(photo.name || task.title || "Hình ảnh")}" loading="lazy" />
           <span class="image-gallery-card-info">
             <strong>${escapeHtml(kindLabel)} · ${escapeHtml(photo.name || `Ảnh ${index + 1}`)}</strong>
             <span>Người đăng: ${escapeHtml(uploader)}</span>
             <span>Công việc: ${escapeHtml(task.title || "Không tên")}</span>
-            <span>Phiếu: ${escapeHtml(task.workOrderName || "Phiếu công việc")}</span>
+            <span>Phiếu: ${escapeHtml(entry.workOrderName)}</span>
             <span>Đăng lúc: ${escapeHtml(entry.uploadedAt ? formatFullDateTime(photo.uploadedAt) : "Không rõ")}</span>
           </span>
         </button>
@@ -16580,10 +16648,14 @@ function openImageGalleryPage() {
   }
   setMobileTaskPanelMenuOpen(false);
   state.imageGalleryReturnScrollY = window.scrollY || 0;
-  state.imageGalleryDateFilter = { mode: "all", single: "", from: "", to: "" };
+  state.imageGalleryDateFilter = { mode: "today", single: "", from: "", to: "" };
+  state.imageGalleryUploaderFilter = "all";
+  state.imageGalleryWorkOrderFilter = "all";
   state.imageGallerySelectedKeys.clear();
   stopImageGalleryListener();
-  if (els.imageGalleryDateMode) els.imageGalleryDateMode.value = "all";
+  if (els.imageGalleryDateMode) els.imageGalleryDateMode.value = "today";
+  if (els.imageGalleryUploaderFilter) els.imageGalleryUploaderFilter.value = "all";
+  if (els.imageGalleryWorkOrderFilter) els.imageGalleryWorkOrderFilter.value = "all";
   if (els.imageGallerySingleDate) els.imageGallerySingleDate.value = "";
   if (els.imageGalleryDateFrom) els.imageGalleryDateFrom.value = "";
   if (els.imageGalleryDateTo) els.imageGalleryDateTo.value = "";
@@ -16670,6 +16742,14 @@ els.imageGalleryDateMode?.addEventListener("change", (event) => {
   state.imageGalleryDateFilter.mode = event.target.value;
   renderImageGallery();
 });
+els.imageGalleryUploaderFilter?.addEventListener("change", (event) => {
+  state.imageGalleryUploaderFilter = event.target.value;
+  renderImageGallery();
+});
+els.imageGalleryWorkOrderFilter?.addEventListener("change", (event) => {
+  state.imageGalleryWorkOrderFilter = event.target.value;
+  renderImageGallery();
+});
 [
   ["imageGallerySingleDate", "single"],
   ["imageGalleryDateFrom", "from"],
@@ -16705,8 +16785,8 @@ els.imageGalleryGrid?.addEventListener("click", (event) => {
     ...entry.photo,
     galleryKind: entry.kind === "report" ? "Ảnh báo cáo" : "Ảnh công việc",
     galleryTaskTitle: entry.task.title || "Không tên",
-    galleryWorkOrderName: entry.task.workOrderName || "Phiếu công việc",
-    uploadedByName: getImageGalleryUploader(entry.photo)
+    galleryWorkOrderName: entry.workOrderName,
+    uploadedByName: entry.uploaderName
   }));
   openPhotoViewer(Number(button.dataset.galleryIndex));
 });
