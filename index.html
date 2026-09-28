@@ -10408,6 +10408,49 @@
       }
     }
   </style>
+  <style id="image-gallery-style">
+    .image-gallery-action-btn { background:linear-gradient(135deg,#0891b2,#2563eb)!important; color:#fff!important; border-color:transparent!important; }
+    .image-gallery-action-btn:hover { filter:brightness(.96); }
+    .image-gallery-page, .image-gallery-page * { box-sizing:border-box; }
+    .image-gallery-hero { align-items:center; gap:18px; }
+    .image-gallery-hero > div { min-width:0; }
+    .image-gallery-hero h2 { margin:8px 0; }
+    .image-gallery-panel { min-width:0; overflow:hidden; }
+    .image-gallery-controls { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+    .image-gallery-filter-field { display:grid; align-content:start; gap:7px; min-width:0; color:#334155; font-weight:800; }
+    .image-gallery-filter-field.hidden { display:none!important; }
+    .image-gallery-native-shell { display:block; width:100%; min-width:0; overflow:hidden; border:1px solid #cbd5e1; border-radius:13px; background:#fff; box-sizing:border-box; }
+    .image-gallery-native-shell:focus-within { border-color:#2563eb; box-shadow:0 0 0 3px #dbeafe; }
+    .image-gallery-native-shell select, .image-gallery-native-shell input { display:block; width:100%; min-width:0; max-width:100%; height:48px; padding:0 12px; border:0; outline:0; background:transparent; box-sizing:border-box; font:inherit; font-size:16px; color:#0f172a; }
+    .image-gallery-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; min-width:0; margin-bottom:16px; padding:12px; border:1px solid #bfdbfe; border-radius:15px; background:#f8fbff; }
+    .image-gallery-toolbar > strong { min-width:0; overflow-wrap:anywhere; }
+    .image-gallery-actions { display:flex; flex-wrap:wrap; gap:8px; min-width:0; }
+    .image-gallery-actions .btn { min-width:0; white-space:normal; }
+    .image-gallery-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; min-width:0; }
+    .image-gallery-grid.empty-box { display:block; }
+    .image-gallery-card { position:relative; min-width:0; overflow:hidden; border:1px solid #dbe7f7; border-radius:16px; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,.05); }
+    .image-gallery-card.is-selected { border-color:#2563eb; box-shadow:0 0 0 3px #bfdbfe; }
+    .image-gallery-card-open { display:block; width:100%; min-width:0; padding:0; border:0; background:transparent; color:inherit; cursor:pointer; text-align:left; }
+    .image-gallery-card-open img { display:block; width:100%; height:auto; aspect-ratio:4/3; object-fit:cover; background:#e2e8f0; }
+    .image-gallery-card-info { display:grid; gap:5px; min-width:0; padding:12px; }
+    .image-gallery-card-info strong, .image-gallery-card-info span { min-width:0; overflow-wrap:anywhere; }
+    .image-gallery-card-info span { color:#64748b; font-size:12px; line-height:1.4; }
+    .image-gallery-card-select { position:absolute; top:10px; right:10px; z-index:2; display:flex; align-items:center; gap:6px; min-height:40px; padding:6px 9px; border:1px solid #bfdbfe; border-radius:11px; background:rgba(255,255,255,.96); color:#1e3a8a; font-size:12px; font-weight:850; box-shadow:0 5px 16px rgba(15,23,42,.16); cursor:pointer; }
+    .image-gallery-card-select input { width:20px; height:20px; margin:0; accent-color:#2563eb; }
+    #photoViewer.is-gallery-photo .photo-viewer-footer { min-height:0; max-height:30dvh; overflow-y:auto; }
+    #photoViewer.is-gallery-photo .photo-viewer-meta { display:block; white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; }
+    @media(max-width:1024px) {
+      .image-gallery-controls { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    }
+    @media(max-width:640px) {
+      .image-gallery-hero { align-items:stretch; }
+      .image-gallery-hero .btn { width:100%; }
+      .image-gallery-controls { grid-template-columns:minmax(0,1fr); }
+      .image-gallery-actions { width:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .image-gallery-actions .btn:last-child { grid-column:1 / -1; }
+      .image-gallery-grid { grid-template-columns:minmax(0,1fr); }
+    }
+  </style>
 </head>
 <body>
   <div id="toastHost" class="toast-host"></div>
@@ -10694,10 +10737,11 @@
                 <span>Lên lịch</span>
               </button>
               <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn calendar-import-header-btn small calendar-import-desktop-only hidden" type="button">📅 Nạp lịch</button>
+              <button id="openGoogleCalendarImportMobileBtn" class="btn calendar-import-btn small calendar-import-mobile-only hidden" type="button">📅 Nạp lịch</button>
+              <button id="openImageGalleryBtn" class="btn image-gallery-action-btn small hidden" type="button">🖼 Hình ảnh</button>
               <button id="openWorkOrderSettingsBtn" class="btn settings-action-btn small hidden" type="button" aria-haspopup="dialog" aria-controls="workOrderSettingsModal">
                 <span aria-hidden="true">⚙</span> Cài đặt
               </button>
-              <button id="openGoogleCalendarImportMobileBtn" class="btn calendar-import-btn small calendar-import-mobile-only hidden" type="button">📅 Nạp lịch</button>
             </div>
           </div>
           <div id="adminEmployeeStatusSummary" class="employee-status-summary hidden"></div>
@@ -11539,6 +11583,54 @@
       </section>
     </main>
 
+    <!-- ADMIN IMAGE GALLERY PAGE -->
+    <main id="imageGalleryView" class="page image-gallery-page hidden">
+      <section class="hero-panel image-gallery-hero">
+        <div>
+          <p class="eyebrow">Thư viện Admin</p>
+          <h2>Hình ảnh</h2>
+          <p class="muted">Tất cả ảnh báo cáo và ảnh công việc đã lưu trong các Phiếu công việc.</p>
+        </div>
+        <button id="backFromImageGalleryBtn" class="btn ghost large" type="button">← Quay lại</button>
+      </section>
+
+      <section class="panel image-gallery-panel">
+        <div class="image-gallery-controls">
+          <label class="image-gallery-filter-field">
+            <span>Thời gian đăng ảnh</span>
+            <span class="image-gallery-native-shell"><select id="imageGalleryDateMode" aria-label="Lọc thời gian đăng ảnh">
+              <option value="all">Tất cả thời gian</option>
+              <option value="today">Hôm nay</option>
+              <option value="yesterday">Hôm qua</option>
+              <option value="single">Chọn 1 ngày</option>
+              <option value="range">Khoảng ngày tùy chỉnh</option>
+            </select></span>
+          </label>
+          <label id="imageGallerySingleDateField" class="image-gallery-filter-field hidden">
+            <span>Ngày đăng ảnh</span>
+            <span class="image-gallery-native-shell"><input id="imageGallerySingleDate" type="date" /></span>
+          </label>
+          <label id="imageGalleryDateFromField" class="image-gallery-filter-field hidden">
+            <span>Từ ngày</span>
+            <span class="image-gallery-native-shell"><input id="imageGalleryDateFrom" type="date" /></span>
+          </label>
+          <label id="imageGalleryDateToField" class="image-gallery-filter-field hidden">
+            <span>Đến ngày</span>
+            <span class="image-gallery-native-shell"><input id="imageGalleryDateTo" type="date" /></span>
+          </label>
+        </div>
+        <div class="image-gallery-toolbar">
+          <strong id="imageGallerySummary" aria-live="polite">Đang tải hình ảnh...</strong>
+          <div class="image-gallery-actions">
+            <button id="imageGallerySelectAllBtn" class="btn ghost small" type="button">Chọn tất cả ảnh đang hiển thị</button>
+            <button id="imageGalleryClearBtn" class="btn ghost small" type="button" disabled>Bỏ chọn</button>
+            <button id="imageGalleryDeleteBtn" class="btn danger small" type="button" disabled>🗑 Xóa ảnh đã chọn</button>
+          </div>
+        </div>
+        <div id="imageGalleryGrid" class="image-gallery-grid" aria-live="polite"></div>
+      </section>
+    </main>
+
   <!-- SUPERVISOR PERMISSION MODAL -->
   <div id="supervisorPermissionModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="supervisorPermissionModalTitle">
     <div class="modal-backdrop" data-close-supervisor-permission-modal></div>
@@ -11949,7 +12041,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260928-lunch-history-v92"></script>
+  <script type="module" src="app.js?v=20260929-image-gallery-v93"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

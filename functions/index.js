@@ -2,6 +2,11 @@
 
 const crypto = require("node:crypto");
 const {
+  storagePathFromGalleryPhoto,
+  galleryPhotoKey,
+  isAllowedGalleryPhotoPath
+} = require("./gallery-photo-delete");
+const {
   SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES,
   findAvailableScheduledEmployees
 } = require("./scheduled-availability");
@@ -3754,6 +3759,144 @@ function preservedManualLunchActualTime(snapshot, deadlineMinutes) {
     actualMinutesEditHistory: task.actualMinutesEditHistory
   };
 }
+
+exports.deleteGalleryPhotos = onCall({
+  region: REGION,
+  timeoutSeconds: 300,
+  memory: "256MiB",
+  maxInstances: 10
+}, async (request) => {
+  const uid = assertAuthenticated(request);
+  await assertAdmin(uid);
+  const rawItems = request.data?.items;
+  if (!Array.isArray(rawItems) || !rawItems.length || rawItems.length > 40) {
+    throw new HttpsError("invalid-argument", "Mỗi lượt xóa phải có từ 1 đến 40 ảnh.");
+  }
+
+  const groups = new Map();
+  const seen = new Set();
+  for (const raw of rawItems) {
+    const taskId = String(raw?.taskId || "").trim();
+    const kind = String(raw?.kind || "");
+    const photoKey = String(raw?.photoKey || "");
+    if (!taskId || taskId.length > 256 || taskId.includes("/")
+      || !["report", "work"].includes(kind)
+      || !photoKey || photoKey.length > 2000) {
+      throw new HttpsError("invalid-argument", "Thông tin ảnh cần xóa không hợp lệ.");
+    }
+    const key = JSON.stringify([taskId, kind, photoKey]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const groupKey = JSON.stringify([taskId, kind]);
+    if (!groups.has(groupKey)) groups.set(groupKey, { taskId, kind, entries: [] });
+    groups.get(groupKey).entries.push({ taskId, kind, photoKey, key });
+  }
+
+  const bucket = getAdminStorage().bucket();
+  const deletedKeys = [];
+  const missingKeys = [];
+  const failedKeys = [];
+  const targetsByPath = new Map();
+  for (const group of groups.values()) {
+    const snapshot = await db.doc(`tasks/${group.taskId}`).get();
+    if (!snapshot.exists) {
+      missingKeys.push(...group.entries.map((item) => item.key));
+      continue;
+    }
+    const field = group.kind === "report" ? "photos" : "workPhotos";
+    const photos = Array.isArray(snapshot.data()?.[field]) ? snapshot.data()[field] : [];
+    for (const entry of group.entries) {
+      const photo = photos.find((item) => galleryPhotoKey(item, bucket.name) === entry.photoKey);
+      if (!photo) {
+        missingKeys.push(entry.key);
+        continue;
+      }
+      const path = storagePathFromGalleryPhoto(photo, bucket.name);
+      if (!isAllowedGalleryPhotoPath(path, group.taskId, group.kind)) {
+        failedKeys.push(entry.key);
+        continue;
+      }
+      if (!targetsByPath.has(path)) targetsByPath.set(path, { kind: group.kind, anchorTaskId: group.taskId, keys: [] });
+      targetsByPath.get(path).keys.push(entry.key);
+    }
+  }
+
+  if (targetsByPath.size) {
+    // Ảnh CV trong lịch lặp lại có thể dùng chung một tệp cho nhiều Phiếu.
+    // Dọn mọi tham chiếu cùng tệp, kể cả hàng mẫu của lịch, để Phiếu sau không tạo lại ảnh đã xóa.
+    const [taskSnapshot, scheduleSnapshot] = await Promise.all([
+      db.collection("tasks").get(),
+      [...targetsByPath.values()].some((target) => target.kind === "work")
+        ? db.collection("scheduledWorkOrders").get()
+        : Promise.resolve(null)
+    ]);
+    for (const [path, target] of targetsByPath) {
+      try {
+        if (target.kind === "work" && scheduleSnapshot) {
+          for (const schedule of scheduleSnapshot.docs) {
+            const rows = Array.isArray(schedule.data()?.rows) ? schedule.data().rows : [];
+            if (!rows.some((row) => (Array.isArray(row.workPhotos) ? row.workPhotos : [])
+              .some((photo) => storagePathFromGalleryPhoto(photo, bucket.name) === path))) continue;
+            await db.runTransaction(async (transaction) => {
+              const fresh = await transaction.get(schedule.ref);
+              if (!fresh.exists) return;
+              const currentRows = Array.isArray(fresh.data()?.rows) ? fresh.data().rows : [];
+              const nextRows = currentRows.map((row) => ({
+                ...row,
+                workPhotos: (Array.isArray(row.workPhotos) ? row.workPhotos : [])
+                  .filter((photo) => storagePathFromGalleryPhoto(photo, bucket.name) !== path)
+              }));
+              if (!currentRows.some((row, index) =>
+                (Array.isArray(row.workPhotos) ? row.workPhotos.length : 0) !== nextRows[index].workPhotos.length
+              )) return;
+              transaction.update(schedule.ref, { rows: nextRows, updatedAt: Timestamp.now() });
+            });
+          }
+        }
+
+        await bucket.file(path).delete({ ignoreNotFound: true });
+        const field = target.kind === "report" ? "photos" : "workPhotos";
+        const references = taskSnapshot.docs.filter((task) =>
+          (Array.isArray(task.data()?.[field]) ? task.data()[field] : [])
+            .some((photo) => storagePathFromGalleryPhoto(photo, bucket.name) === path)
+        );
+        // Giữ Phiếu mà Admin chọn đến cuối. Nếu một cập nhật khác lỗi, Phiếu này vẫn còn
+        // tham chiếu để Admin bấm thử lại; Storage ignoreNotFound khiến lần thử lại an toàn.
+        references.sort((left, right) => Number(left.id === target.anchorTaskId) - Number(right.id === target.anchorTaskId));
+        for (const task of references) {
+          await db.runTransaction(async (transaction) => {
+            const fresh = await transaction.get(task.ref);
+            if (!fresh.exists) return;
+            const photos = Array.isArray(fresh.data()?.[field]) ? fresh.data()[field] : [];
+            const remaining = photos.filter((photo) => storagePathFromGalleryPhoto(photo, bucket.name) !== path);
+            if (remaining.length === photos.length) return;
+            const latestUploadedAt = remaining.reduce((latest, photo) => {
+              const currentTime = firestoreTimestampOrNull(photo?.uploadedAt);
+              return currentTime && (!latest || currentTime.toMillis() > latest.toMillis())
+                ? currentTime : latest;
+            }, null);
+            transaction.update(task.ref, {
+              [field]: remaining,
+              [target.kind === "report" ? "photoCount" : "workPhotoCount"]: remaining.length,
+              [target.kind === "report" ? "lastPhotoUploadedAt" : "lastWorkPhotoUploadedAt"]: latestUploadedAt
+            });
+          });
+        }
+        deletedKeys.push(...target.keys);
+      } catch (error) {
+        console.error("Không xóa sạch được ảnh trong thư viện:", path, error);
+        failedKeys.push(...target.keys);
+      }
+    }
+  }
+  return {
+    deletedCount: deletedKeys.length,
+    failedCount: failedKeys.length,
+    deletedKeys,
+    missingKeys,
+    failedKeys
+  };
+});
 
 async function syncHotelBudgetAndOvertimeLunch(taskId, beforeTask, afterTask) {
   const sourceTask = afterTask || beforeTask;

@@ -136,6 +136,7 @@ const editCompletedLunchActualTimeCallable = httpsCallable(
   functions,
   "editCompletedLunchActualTime"
 );
+const deleteGalleryPhotosCallable = httpsCallable(functions, "deleteGalleryPhotos");
 const updateEmployeeProfileCallable = httpsCallable(functions, "updateEmployeeProfile");
 const assignDraftTaskFromSupervisionLunchCallable = httpsCallable(
   functions,
@@ -258,6 +259,12 @@ const state = {
   photoViewerPhotos: [],
   photoViewerIndex: -1,
   photoReportSelectedKeys: new Set(),
+  imageGalleryDateFilter: { mode: "all", single: "", from: "", to: "" },
+  imageGallerySelectedKeys: new Set(),
+  imageGalleryTasks: null,
+  imageGalleryUnsub: null,
+  imageGalleryReturnScrollY: 0,
+  imageGalleryDeleting: false,
   workPhotoManagerRowId: null,
   workPhotoManagerTaskId: null,
   workPhotoManagerSelectedKeys: new Set(),
@@ -984,6 +991,7 @@ const els = {
   importDataInput: $("#importDataInput"),
   openGoogleCalendarImportBtn: $("#openGoogleCalendarImportBtn"),
   openGoogleCalendarImportMobileBtn: $("#openGoogleCalendarImportMobileBtn"),
+  openImageGalleryBtn: $("#openImageGalleryBtn"),
   googleCalendarImportModal: $("#googleCalendarImportModal"),
   googleCalendarImportCloseBtn: $("#googleCalendarImportCloseBtn"),
   googleCalendarImportForm: $("#googleCalendarImportForm"),
@@ -1238,6 +1246,20 @@ const els = {
   hotelRequiredPhotoCount: $("#hotelRequiredPhotoCount"),
   hotelPhotoRequirementNote: $("#hotelPhotoRequirementNote"),
   photoReportView: $("#photoReportView"),
+  imageGalleryView: $("#imageGalleryView"),
+  backFromImageGalleryBtn: $("#backFromImageGalleryBtn"),
+  imageGalleryDateMode: $("#imageGalleryDateMode"),
+  imageGallerySingleDateField: $("#imageGallerySingleDateField"),
+  imageGallerySingleDate: $("#imageGallerySingleDate"),
+  imageGalleryDateFromField: $("#imageGalleryDateFromField"),
+  imageGalleryDateFrom: $("#imageGalleryDateFrom"),
+  imageGalleryDateToField: $("#imageGalleryDateToField"),
+  imageGalleryDateTo: $("#imageGalleryDateTo"),
+  imageGallerySummary: $("#imageGallerySummary"),
+  imageGallerySelectAllBtn: $("#imageGallerySelectAllBtn"),
+  imageGalleryClearBtn: $("#imageGalleryClearBtn"),
+  imageGalleryDeleteBtn: $("#imageGalleryDeleteBtn"),
+  imageGalleryGrid: $("#imageGalleryGrid"),
   backFromPhotoReportBtn: $("#backFromPhotoReportBtn"),
   photoReportModal: $("#photoReportModal"),
   photoReportTaskTitle: $("#photoReportTaskTitle"),
@@ -5554,12 +5576,14 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 function showLogin() {
+  stopImageGalleryListener();
   els.loginView.classList.remove("hidden");
   els.appView.classList.add("hidden");
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
   els.photoReportView?.classList.add("hidden");
+  els.imageGalleryView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
   els.notificationPanel?.classList.add("hidden");
   closeChatDirectory();
@@ -5690,8 +5714,15 @@ function applyManagementPermissionUI() {
   els.openGoogleCalendarImportBtn?.classList.toggle("hidden", !isAdmin);
   els.openGoogleCalendarImportMobileBtn?.classList.toggle("hidden", !isAdmin);
   els.openScheduledWorkOrderBtn?.classList.toggle("hidden", !isAdmin);
+  els.openImageGalleryBtn?.classList.toggle("hidden", !isAdmin);
   els.openEmployeeStatusHistoryBtn?.classList.toggle("hidden", !isAdmin);
   if (!isAdmin) closeEmployeeStatusHistoryModal();
+  if (!isAdmin && els.imageGalleryView && !els.imageGalleryView.classList.contains("hidden")) {
+    stopImageGalleryListener();
+    els.imageGalleryView.classList.add("hidden");
+    els.adminView?.classList.remove("hidden");
+    state.imageGallerySelectedKeys.clear();
+  }
 
   const deletionLocked = isWorkOrderDeletionLocked();
   els.deleteAllWorkOrdersBtn?.classList.toggle(
@@ -5750,6 +5781,7 @@ function applyManagementPermissionUI() {
   renderWorkTemplateList();
   renderAdminTasks();
   refreshPhotoReportPageIfOpen();
+  renderImageGalleryIfOpen();
 }
 
 function closeSupervisorPermissionModal() {
@@ -5831,6 +5863,7 @@ function setupAdminDashboard() {
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
   els.photoReportView?.classList.add("hidden");
+  els.imageGalleryView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
   applyManagementPermissionUI();
 
@@ -5908,6 +5941,7 @@ function setupAdminDashboard() {
 
       state.tasks = nextTasks;
       renderAdminTasks();
+      renderImageGalleryIfOpen();
       syncTaskReviewAlertSound();
       requestAutomaticLunchHistoryBackfillOnce();
       requestInvalidTaskHistoryBackfillOnce();
@@ -7538,6 +7572,7 @@ function openWorkTemplatePage() {
   els.adminView.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
   els.photoReportView?.classList.add("hidden");
+  els.imageGalleryView?.classList.add("hidden");
   els.workTemplateView?.classList.remove("hidden");
   renderWorkTemplateList();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -7549,6 +7584,7 @@ function openEmployeeManagerPage() {
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.photoReportView?.classList.add("hidden");
+  els.imageGalleryView?.classList.add("hidden");
   els.employeeManagerView?.classList.remove("hidden");
   renderEmployees();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -7558,6 +7594,7 @@ function backToAdminDashboard() {
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
   els.photoReportView?.classList.add("hidden");
+  els.imageGalleryView?.classList.add("hidden");
   els.adminView.classList.remove("hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -16427,6 +16464,253 @@ function getSortedTaskPhotos(task) {
     .sort((a, b) => (timestampToDate(b.uploadedAt)?.getTime() || 0) - (timestampToDate(a.uploadedAt)?.getTime() || 0));
 }
 
+function getImageGalleryEntries() {
+  return (state.imageGalleryTasks || state.tasks).flatMap((task) => [
+    ...getTaskPhotos(task).map((photo, index) => ({ task, photo, kind: "report", photoKey: getPhotoStableKey(photo, index) })),
+    ...getTaskWorkPhotos(task).map((photo, index) => ({ task, photo, kind: "work", photoKey: getPhotoStableKey(photo, index) }))
+  ]).map((entry) => ({
+    ...entry,
+    key: JSON.stringify([entry.task.id, entry.kind, entry.photoKey]),
+    uploadedAt: timestampToDate(entry.photo.uploadedAt),
+    dateKey: toLocalDateInputValue(timestampToDate(entry.photo.uploadedAt))
+  })).sort((left, right) => (right.uploadedAt?.getTime() || 0) - (left.uploadedAt?.getTime() || 0));
+}
+
+function getImageGalleryUploader(photo) {
+  if (photo?.uploadedByName) return String(photo.uploadedByName);
+  const uid = String(photo?.uploadedByUid || "");
+  if (!uid) return "Không rõ người đăng";
+  if (uid === state.user?.uid) return state.profile?.name || state.user?.email || uid;
+  const account = [...state.employees, ...state.supervisors].find((item) => item.uid === uid || item.id === uid);
+  return account?.name || account?.email || uid;
+}
+
+function isImageGalleryEntryInDateFilter(entry) {
+  const { mode, single, from, to } = state.imageGalleryDateFilter;
+  if (mode === "all") return true;
+  if (!entry.dateKey) return false;
+  if (mode === "today") return entry.dateKey === todayInputValue();
+  if (mode === "yesterday") return entry.dateKey === yesterdayInputValue();
+  if (mode === "single") return Boolean(single) && entry.dateKey === single;
+  if (mode === "range") return (!from || entry.dateKey >= from) && (!to || entry.dateKey <= to);
+  return true;
+}
+
+function syncImageGalleryDateControls() {
+  const mode = state.imageGalleryDateFilter.mode;
+  els.imageGallerySingleDateField?.classList.toggle("hidden", mode !== "single");
+  els.imageGalleryDateFromField?.classList.toggle("hidden", mode !== "range");
+  els.imageGalleryDateToField?.classList.toggle("hidden", mode !== "range");
+}
+
+function renderImageGallery() {
+  if (!els.imageGalleryGrid || !isAdminProfile()) return;
+  syncImageGalleryDateControls();
+  const allEntries = getImageGalleryEntries();
+  const validKeys = new Set(allEntries.map((entry) => entry.key));
+  for (const key of state.imageGallerySelectedKeys) {
+    if (!validKeys.has(key)) state.imageGallerySelectedKeys.delete(key);
+  }
+  const invalidRange = state.imageGalleryDateFilter.mode === "range"
+    && state.imageGalleryDateFilter.from && state.imageGalleryDateFilter.to
+    && state.imageGalleryDateFilter.from > state.imageGalleryDateFilter.to;
+  const waitingForSingleDate = state.imageGalleryDateFilter.mode === "single"
+    && !state.imageGalleryDateFilter.single;
+  const entries = invalidRange ? [] : allEntries.filter(isImageGalleryEntryInDateFilter);
+  state.imageGalleryEntries = entries;
+
+  if (els.imageGallerySummary) {
+    els.imageGallerySummary.textContent = invalidRange
+      ? "Khoảng ngày không hợp lệ: ngày bắt đầu phải trước hoặc bằng ngày kết thúc."
+      : waitingForSingleDate
+        ? "Vui lòng chọn ngày để xem hình ảnh."
+        : `${entries.length} ảnh đang hiển thị • ${state.imageGallerySelectedKeys.size} ảnh đã chọn (gồm cả bộ lọc khác)`;
+  }
+  if (els.imageGallerySelectAllBtn) {
+    els.imageGallerySelectAllBtn.disabled = state.imageGalleryDeleting || !entries.length
+      || entries.every((entry) => state.imageGallerySelectedKeys.has(entry.key));
+  }
+  if (els.imageGalleryClearBtn) {
+    els.imageGalleryClearBtn.disabled = state.imageGalleryDeleting || !state.imageGallerySelectedKeys.size;
+  }
+  if (els.imageGalleryDeleteBtn) {
+    els.imageGalleryDeleteBtn.disabled = state.imageGalleryDeleting || !state.imageGallerySelectedKeys.size;
+  }
+
+  els.imageGalleryGrid.classList.toggle("empty-box", !entries.length);
+  els.imageGalleryGrid.innerHTML = entries.length
+    ? entries.map((entry, index) => {
+      const { task, photo, kind, key } = entry;
+      const selected = state.imageGallerySelectedKeys.has(key);
+      const kindLabel = kind === "report" ? "Ảnh báo cáo" : "Ảnh công việc";
+      const uploader = getImageGalleryUploader(photo);
+      return `<article class="image-gallery-card ${selected ? "is-selected" : ""}" data-gallery-key="${escapeHtml(key)}">
+        <button class="image-gallery-card-open" type="button" data-gallery-index="${index}" aria-label="Xem ${escapeHtml(kindLabel)} của ${escapeHtml(uploader)} trong Phiếu ${escapeHtml(task.workOrderName || "Phiếu công việc")}">
+          <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(kindLabel)}: ${escapeHtml(photo.name || task.title || "Hình ảnh")}" loading="lazy" />
+          <span class="image-gallery-card-info">
+            <strong>${escapeHtml(kindLabel)} · ${escapeHtml(photo.name || `Ảnh ${index + 1}`)}</strong>
+            <span>Người đăng: ${escapeHtml(uploader)}</span>
+            <span>Công việc: ${escapeHtml(task.title || "Không tên")}</span>
+            <span>Phiếu: ${escapeHtml(task.workOrderName || "Phiếu công việc")}</span>
+            <span>Đăng lúc: ${escapeHtml(entry.uploadedAt ? formatFullDateTime(photo.uploadedAt) : "Không rõ")}</span>
+          </span>
+        </button>
+        <label class="image-gallery-card-select"><input type="checkbox" data-gallery-select-key="${escapeHtml(key)}" ${selected ? "checked" : ""} aria-label="Chọn ${escapeHtml(kindLabel)} ${escapeHtml(photo.name || String(index + 1))}" /><span>Chọn</span></label>
+      </article>`;
+    }).join("")
+    : (invalidRange ? "Vui lòng chọn lại khoảng ngày hợp lệ."
+      : waitingForSingleDate ? "Chọn một ngày để lọc hình ảnh."
+        : "Không có hình ảnh trong thời gian đã chọn.");
+}
+
+function renderImageGalleryIfOpen() {
+  if (els.imageGalleryView && !els.imageGalleryView.classList.contains("hidden")) renderImageGallery();
+}
+
+function stopImageGalleryListener() {
+  state.imageGalleryUnsub?.();
+  state.imageGalleryUnsub = null;
+  state.imageGalleryTasks = null;
+}
+
+function openImageGalleryPage() {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được mở trang Hình ảnh.", "error");
+    return;
+  }
+  setMobileTaskPanelMenuOpen(false);
+  state.imageGalleryReturnScrollY = window.scrollY || 0;
+  state.imageGalleryDateFilter = { mode: "all", single: "", from: "", to: "" };
+  state.imageGallerySelectedKeys.clear();
+  stopImageGalleryListener();
+  if (els.imageGalleryDateMode) els.imageGalleryDateMode.value = "all";
+  if (els.imageGallerySingleDate) els.imageGallerySingleDate.value = "";
+  if (els.imageGalleryDateFrom) els.imageGalleryDateFrom.value = "";
+  if (els.imageGalleryDateTo) els.imageGalleryDateTo.value = "";
+  els.adminView?.classList.add("hidden");
+  els.workTemplateView?.classList.add("hidden");
+  els.employeeManagerView?.classList.add("hidden");
+  els.photoReportView?.classList.add("hidden");
+  els.imageGalleryView?.classList.remove("hidden");
+  renderImageGallery();
+  // Query không orderBy để cả Phiếu cũ chưa có createdAt vẫn được đưa vào thư viện.
+  state.imageGalleryUnsub = onSnapshot(collection(db, "tasks"), (snapshot) => {
+    state.imageGalleryTasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    renderImageGalleryIfOpen();
+  }, (error) => {
+    console.error("Không tải được toàn bộ ảnh trong thư viện:", error);
+    toast("Không tải được toàn bộ Phiếu công việc để hiển thị hình ảnh.", "error");
+  });
+  window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+function backFromImageGalleryPage() {
+  closePhotoViewer({ restoreFocus: false });
+  stopImageGalleryListener();
+  els.imageGalleryView?.classList.add("hidden");
+  els.adminView?.classList.remove("hidden");
+  state.imageGallerySelectedKeys.clear();
+  state.imageGalleryEntries = [];
+  window.scrollTo({ top: state.imageGalleryReturnScrollY || 0, behavior: "auto" });
+}
+
+async function deleteSelectedImageGalleryPhotos() {
+  if (!isAdminProfile() || state.imageGalleryDeleting) return;
+  const selected = getImageGalleryEntries()
+    .filter((entry) => state.imageGallerySelectedKeys.has(entry.key));
+  if (!selected.length) {
+    toast("Vui lòng chọn ít nhất một ảnh còn tồn tại.", "error");
+    return;
+  }
+  const confirmed = window.confirm(
+    `Xóa vĩnh viễn ${selected.length} hình ảnh đã chọn?\n\n`
+    + "Hình sẽ bị xóa khỏi Firebase Firestore và Firebase Storage. Nếu cùng một tệp ảnh công việc được dùng ở nhiều Phiếu hoặc lịch lặp lại, tất cả bản tham chiếu đến tệp đó cũng bị xóa. Không thể hoàn tác."
+  );
+  if (!confirmed) return;
+
+  state.imageGalleryDeleting = true;
+  setButtonLoading(els.imageGalleryDeleteBtn, true, "Đang xóa...");
+  let deleted = 0;
+  let failed = 0;
+  try {
+    // Không giới hạn số ảnh được chọn. Chia nhỏ lệnh gửi lên máy chủ để tránh giới hạn payload và timeout.
+    for (let offset = 0; offset < selected.length; offset += 40) {
+      const chunk = selected.slice(offset, offset + 40);
+      if (els.imageGalleryDeleteBtn) {
+        els.imageGalleryDeleteBtn.textContent = `Đang xóa ${offset + 1}-${Math.min(offset + chunk.length, selected.length)}/${selected.length}...`;
+      }
+      const response = await deleteGalleryPhotosCallable({ items: chunk.map((entry) => ({
+        taskId: entry.task.id,
+        kind: entry.kind,
+        photoKey: entry.photoKey
+      })) });
+      const result = response.data || {};
+      for (const key of [...(result.deletedKeys || []), ...(result.missingKeys || [])]) {
+        state.imageGallerySelectedKeys.delete(key);
+      }
+      deleted += Number(result.deletedCount || 0);
+      failed += Number(result.failedCount || 0);
+    }
+    toast(failed
+      ? `Đã xóa ${deleted} ảnh. ${failed} ảnh chưa xóa được; hãy chọn và thử lại.`
+      : `Đã xóa vĩnh viễn ${deleted} ảnh khỏi Phiếu và Firebase Storage.`, failed ? "warning" : "success");
+  } catch (error) {
+    console.error("Không xóa được ảnh trong thư viện:", error);
+    toast(`${deleted} ảnh đã xóa. ${error.message || "Có lỗi khi xóa các ảnh còn lại."}`, "error");
+  } finally {
+    state.imageGalleryDeleting = false;
+    setButtonLoading(els.imageGalleryDeleteBtn, false);
+    renderImageGalleryIfOpen();
+  }
+}
+
+els.openImageGalleryBtn?.addEventListener("click", openImageGalleryPage);
+els.backFromImageGalleryBtn?.addEventListener("click", backFromImageGalleryPage);
+els.imageGalleryDateMode?.addEventListener("change", (event) => {
+  state.imageGalleryDateFilter.mode = event.target.value;
+  renderImageGallery();
+});
+[
+  ["imageGallerySingleDate", "single"],
+  ["imageGalleryDateFrom", "from"],
+  ["imageGalleryDateTo", "to"]
+].forEach(([elementKey, filterKey]) => {
+  els[elementKey]?.addEventListener("change", (event) => {
+    state.imageGalleryDateFilter[filterKey] = event.target.value;
+    renderImageGallery();
+  });
+});
+els.imageGallerySelectAllBtn?.addEventListener("click", () => {
+  for (const entry of state.imageGalleryEntries || []) state.imageGallerySelectedKeys.add(entry.key);
+  renderImageGallery();
+});
+els.imageGalleryClearBtn?.addEventListener("click", () => {
+  state.imageGallerySelectedKeys.clear();
+  renderImageGallery();
+});
+els.imageGalleryDeleteBtn?.addEventListener("click", deleteSelectedImageGalleryPhotos);
+els.imageGalleryGrid?.addEventListener("change", (event) => {
+  const checkbox = event.target instanceof HTMLInputElement
+    ? event.target.closest("[data-gallery-select-key]") : null;
+  if (!checkbox || state.imageGalleryDeleting) return;
+  if (checkbox.checked) state.imageGallerySelectedKeys.add(checkbox.dataset.gallerySelectKey);
+  else state.imageGallerySelectedKeys.delete(checkbox.dataset.gallerySelectKey);
+  renderImageGallery();
+});
+els.imageGalleryGrid?.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-gallery-index]") : null;
+  if (!button) return;
+  const entries = state.imageGalleryEntries || [];
+  state.photoViewerPhotos = entries.map((entry) => ({
+    ...entry.photo,
+    galleryKind: entry.kind === "report" ? "Ảnh báo cáo" : "Ảnh công việc",
+    galleryTaskTitle: entry.task.title || "Không tên",
+    galleryWorkOrderName: entry.task.workOrderName || "Phiếu công việc",
+    uploadedByName: getImageGalleryUploader(entry.photo)
+  }));
+  openPhotoViewer(Number(button.dataset.galleryIndex));
+});
+
 function syncPhotoReportSelection(photos = []) {
   const validKeys = new Set(photos.map((photo, index) => getPhotoStableKey(photo, index)));
 
@@ -16792,6 +17076,7 @@ function updatePhotoViewerContent(options = {}) {
   const uploader = photo.uploadedByName || "Nhân viên";
   const uploadedAt = formatFullDateTime(photo.uploadedAt);
   const sizeText = formatFileSize(photo.size);
+  els.photoViewer?.classList.toggle("is-gallery-photo", Boolean(photo.galleryKind));
 
   if (els.photoViewerCounter) {
     els.photoViewerCounter.textContent = `Ảnh ${state.photoViewerIndex + 1} / ${total}`;
@@ -16806,7 +17091,9 @@ function updatePhotoViewerContent(options = {}) {
 
   if (els.photoViewerMeta) {
     const captureText = capturedAtText ? ` • Chụp lúc ${capturedAtText}` : "";
-    els.photoViewerMeta.textContent = `${uploader} • ${uploadedAt} • ${sizeText}${captureText}`;
+    els.photoViewerMeta.textContent = photo.galleryKind
+      ? `Người đăng: ${uploader} • Mục: ${photo.galleryKind} • Công việc: ${photo.galleryTaskTitle} • Phiếu: ${photo.galleryWorkOrderName} • Đăng lúc: ${uploadedAt} • ${sizeText}${captureText}`
+      : `${uploader} • ${uploadedAt} • ${sizeText}${captureText}`;
   }
 
   els.photoViewerStage?.classList.toggle("is-pre-assignment-photo", invalidPhoto);
@@ -16888,6 +17175,7 @@ function closePhotoViewer(options = {}) {
 
   const wasOpen = isPhotoViewerOpen();
   els.photoViewer.classList.add("hidden");
+  els.photoViewer.classList.remove("is-gallery-photo");
   els.photoViewer.setAttribute("aria-hidden", "true");
   document.documentElement.classList.remove("photo-viewer-open");
   document.body.classList.remove("photo-viewer-open");
