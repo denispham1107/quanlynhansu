@@ -86,6 +86,46 @@ try {
   const menuPassed = menu.order && menu.sameRow && menu.separated && menu.inside;
   console.log(`${menuPassed ? "PASS" : "FAIL"} | Desktop Hình ảnh giữa Nạp lịch và Cài đặt | ${JSON.stringify(menu)}`);
   if (!menuPassed) process.exitCode = 1;
+  await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
+  const filterColorsCheck = await send("Runtime.evaluate", { returnByValue: true, expression: `(() => {
+    const select = document.getElementById("adminDateMode");
+    const option = select.querySelector("option");
+    return {
+      scheme: getComputedStyle(select).colorScheme,
+      background: getComputedStyle(option).backgroundColor,
+      foreground: getComputedStyle(option).color
+    };
+  })()` });
+  const filterColors = filterColorsCheck.result.value;
+  const filterColorsPassed = filterColors.scheme.includes("light")
+    && filterColors.background === "rgb(255, 255, 255)"
+    && filterColors.foreground === "rgb(15, 23, 42)";
+  console.log(`${filterColorsPassed ? "PASS" : "FAIL"} | Menu lọc sáng trong chế độ tối | ${JSON.stringify(filterColors)}`);
+  if (!filterColorsPassed) process.exitCode = 1;
+  for (const [width, height] of profiles) {
+    await send("Emulation.setDeviceMetricsOverride", {
+      width, height, deviceScaleFactor: width < 1025 ? 3 : 1,
+      mobile: width < 1025, screenWidth: width, screenHeight: height
+    });
+    const adminFilterCheck = await send("Runtime.evaluate", { returnByValue: true, expression: `(() => {
+      const root = document.getElementById("adminMobileFilterModalRoot");
+      const sheet = document.getElementById("adminMobileFilterSheet");
+      root.classList.toggle("is-open", innerWidth <= 768);
+      sheet.classList.toggle("is-open", innerWidth <= 768);
+      const parent = sheet.getBoundingClientRect();
+      const ids = ["adminStatusFilter", "adminEmployeeFilter", "adminDateMode"];
+      const boxes = ids.map((id) => document.getElementById(id).getBoundingClientRect());
+      const inside = boxes.every((box) => box.left >= parent.left - 1 && box.right <= parent.right + 1);
+      const overlap = boxes.some((a, i) => boxes.some((b, j) => j > i
+        && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+        && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1));
+      return { inside, overlap, scrollWidth: document.documentElement.scrollWidth };
+    })()` });
+    const result = adminFilterCheck.result.value;
+    const passed = result.inside && !result.overlap && result.scrollWidth <= width;
+    console.log(`${passed ? "PASS" : "FAIL"} | Bộ lọc công việc ${width}x${height} | ${JSON.stringify(result)}`);
+    if (!passed) process.exitCode = 1;
+  }
   await send("Emulation.setDeviceMetricsOverride", {
     width: 390, height: 844, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 844
   });

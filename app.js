@@ -111,14 +111,6 @@ const deleteAllWorkAssignmentHistoryCallable = httpsCallable(
   functions,
   "deleteAllWorkAssignmentHistory"
 );
-const backfillAutomaticLunchBreakAssignmentHistoryCallable = httpsCallable(
-  functions,
-  "backfillAutomaticLunchBreakAssignmentHistory"
-);
-const backfillInvalidTaskHistoryCallable = httpsCallable(
-  functions,
-  "backfillInvalidTaskHistory"
-);
 const convertInvalidTaskHistoryToLunchBreakCallable = httpsCallable(
   functions,
   "convertInvalidTaskHistoryToLunchBreak"
@@ -180,12 +172,11 @@ const state = {
   employeeGroups: [],
   tasks: [],
   workOrders: [],
+  workOrderById: new Map(),
   workAssignmentHistory: [],
   workAssignmentHistoryExpanded: false,
-  automaticLunchHistoryBackfillRequested: false,
   invalidTaskHistory: [],
   invalidTaskHistoryExpanded: false,
-  invalidTaskHistoryBackfillRequested: false,
   timeExtensionReasons: [],
   workTemplates: [],
   hotelDailyReports: [],
@@ -337,9 +328,12 @@ const state = {
   taskReviewAlertAutoEnablePending: false,
   taskReviewAlertAutoEnableAttempted: false,
   adminTaskSnapshotReady: false,
+  adminTaskServerReady: false,
+  adminHotelDailyBudgetsServerReady: false,
   adminAutoScrollSubmittedTaskId: "",
   adminAutoScrollSubmittedTaskTimer: null
 };
+let adminTasksRenderFrame = 0;
 
 
 // =========================
@@ -1137,6 +1131,7 @@ const els = {
   adminDateTo: $("#adminDateTo"),
   adminClearDateFilter: $("#adminClearDateFilter"),
   adminDateSummary: $("#adminDateSummary"),
+  adminTasksSyncStatus: $("#adminTasksSyncStatus"),
   adminWorkOrderSearch: $("#adminWorkOrderSearch"),
   adminClearWorkOrderSearch: $("#adminClearWorkOrderSearch"),
   adminWorkOrderSuggestions: $("#adminWorkOrderSuggestions"),
@@ -2229,12 +2224,9 @@ function getDateRangeByMode(mode) {
 function getTaskDateValue(task) {
   if (task?.scheduledWorkOrder === true) {
     if (task.scheduledForDate) return task.scheduledForDate;
-    const scheduledWorkOrder = state.workOrders.find((workOrder) => (
-      workOrder.id === task.workOrderId
-      && workOrder.scheduledWorkOrder === true
-    ));
+    const scheduledWorkOrder = getWorkOrderMeta(task.workOrderId);
     const scheduledAt = timestampToDate(scheduledWorkOrder?.scheduledAt);
-    if (scheduledAt) return toLocalDateInputValue(scheduledAt);
+    if (scheduledWorkOrder?.scheduledWorkOrder === true && scheduledAt) return toLocalDateInputValue(scheduledAt);
   }
   if (task?.taskDate) return task.taskDate;
   return toLocalDateInputValue(timestampToDate(task?.createdAt));
@@ -3665,23 +3657,25 @@ function startChatConversationFallbackPolling() {
 async function setupChatConversationListener() {
   if (!state.user) return;
 
-  // Cloud Function dùng Admin SDK để sửa/tạo chỉ mục Chat riêng của tài khoản.
-  // Cách này tương thích với cả các cuộc trò chuyện đã tạo trước bản cập nhật.
-  try {
-    await refreshChatConversationsViaCallable({ repairIndex: true, silent: true });
-  } catch (error) {
-    console.warn("Chưa đồng bộ được chỉ mục Chat ban đầu:", error);
-  }
-
-  const conversationsQuery = isAdminProfile()
+  const isAdminChat = isAdminProfile();
+  let repairAttempted = false;
+  const conversationsQuery = isAdminChat
     ? collection(db, "chatConversations")
     : collection(db, "chatUserConversations", state.user.uid, "conversations");
 
   const unsubscribe = onSnapshot(
     conversationsQuery,
+    { includeMetadataChanges: true },
     (snapshot) => {
       stopChatConversationFallbackPolling();
       applyChatConversationList(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+      // Chỉ sửa chỉ mục Chat cũ khi máy chủ xác nhận nó trống. Chỉ mục đã có
+      // dữ liệu không cần bị quét và ghi lại vào mỗi lần đăng nhập.
+      if (!isAdminChat && !snapshot.metadata.fromCache && snapshot.empty && !repairAttempted) {
+        repairAttempted = true;
+        void syncChatConversationIndexCallable({ includeAll: false, repairIndex: true })
+          .catch((error) => console.warn("Chưa đồng bộ được chỉ mục Chat cũ:", error));
+      }
     },
     (error) => {
       console.error("Không đồng bộ được danh sách cuộc trò chuyện realtime:", error);
@@ -5485,12 +5479,13 @@ onAuthStateChanged(auth, async (user) => {
   state.editingEmployeeUid = null;
   state.tasks = [];
   state.workOrders = [];
+  state.workOrderById = new Map();
   state.workAssignmentHistory = [];
   state.workAssignmentHistoryExpanded = false;
-  state.automaticLunchHistoryBackfillRequested = false;
   state.invalidTaskHistory = [];
   state.invalidTaskHistoryExpanded = false;
-  state.invalidTaskHistoryBackfillRequested = false;
+  state.adminTaskServerReady = false;
+  state.adminHotelDailyBudgetsServerReady = false;
   state.employeeUnassignedTaskCountCache = new Map();
   state.employeeUnassignedTaskCountPendingKey = "";
   state.employeeUnassignedTaskCountRequestSerial += 1;
@@ -5552,13 +5547,9 @@ onAuthStateChanged(auth, async (user) => {
     state.profile = profileSnap.data();
 
     showApp();
-    setupNotificationListener();
-    setupChatFeature();
-
-    // Ưu tiên khởi tạo toàn bộ giao diện và event handler trước. Trước đây app
-    // chờ đồng bộ FCM/Web Push xong rồi mới setup dashboard; nếu getToken hoặc
-    // Callable chậm 1-2 phút thì màn hình đã hiện nhưng các nút/ô thống kê chưa
-    // có listener, tạo cảm giác toàn bộ app bị một lớp vô hình chặn.
+    // Dashboard và dữ liệu công việc phải được đăng ký trước các luồng phụ
+    // (Thông báo, Chat, FCM) để truy vấn lớn của luồng phụ không tranh lượt tải
+    // với màn hình chính ngay khi người dùng vừa vào ứng dụng.
     if (isManagementProfile()) {
       setupAdminDashboard();
     } else {
@@ -5567,9 +5558,11 @@ onAuthStateChanged(auth, async (user) => {
 
     if (state.pendingPushTaskId) queuePushTaskOpen(state.pendingPushTaskId);
 
-    // Đồng bộ thông báo nền là tác vụ phụ, chạy nền và tuyệt đối không được chặn
-    // khả năng tương tác với giao diện chính. Hàm tự catch lỗi và cập nhật nút.
+    const bootUid = user.uid;
     window.setTimeout(() => {
+      if (state.user?.uid !== bootUid) return;
+      setupNotificationListener();
+      void setupChatFeature();
       void syncPushSubscriptionIfAllowed();
     }, 0);
   } catch (error) {
@@ -5609,6 +5602,10 @@ function showApp() {
 function cleanupSubscriptions() {
   state.unsubs.forEach((unsubscribe) => unsubscribe());
   state.unsubs = [];
+  if (adminTasksRenderFrame) {
+    window.cancelAnimationFrame(adminTasksRenderFrame);
+    adminTasksRenderFrame = 0;
+  }
 }
 
 // =========================
@@ -5783,7 +5780,7 @@ function applyManagementPermissionUI() {
   updateCreateAccountRoleUI();
   renderEmployees();
   renderWorkTemplateList();
-  renderAdminTasks();
+  scheduleAdminTasksRender();
   refreshPhotoReportPageIfOpen();
   renderImageGalleryIfOpen();
 }
@@ -5862,6 +5859,21 @@ bindSupervisorPermissionUI();
 // =========================
 // Admin / Giám sát dashboard
 // =========================
+
+function scheduleAdminTasksRender() {
+  if (adminTasksRenderFrame) return;
+  adminTasksRenderFrame = window.requestAnimationFrame(() => {
+    adminTasksRenderFrame = 0;
+    if (isManagementProfile()) renderAdminTasks();
+  });
+}
+
+function setAdminTasksSyncStatus(message) {
+  if (!els.adminTasksSyncStatus) return;
+  els.adminTasksSyncStatus.textContent = message;
+  els.adminTasksSyncStatus.classList.toggle("hidden", !message);
+}
+
 function setupAdminDashboard() {
   els.adminView.classList.remove("hidden");
   els.workTemplateView?.classList.add("hidden");
@@ -5869,6 +5881,7 @@ function setupAdminDashboard() {
   els.photoReportView?.classList.add("hidden");
   els.imageGalleryView?.classList.add("hidden");
   els.employeeView.classList.add("hidden");
+  setAdminTasksSyncStatus("Đang đồng bộ công việc từ Firebase...");
   applyManagementPermissionUI();
 
   const unsubUsers = onSnapshot(
@@ -5920,6 +5933,8 @@ function setupAdminDashboard() {
   const tasksQuery = query(collection(db, "tasks"), orderBy("createdAt", "desc"));
 
   state.adminTaskSnapshotReady = false;
+  state.adminTaskServerReady = false;
+  state.adminHotelDailyBudgetsServerReady = false;
   state.adminAutoScrollSubmittedTaskId = "";
   if (state.adminAutoScrollSubmittedTaskTimer) {
     window.clearTimeout(state.adminAutoScrollSubmittedTaskTimer);
@@ -5928,12 +5943,20 @@ function setupAdminDashboard() {
 
   const unsubTasks = onSnapshot(
     tasksQuery,
+    { includeMetadataChanges: true },
     async (snapshot) => {
+      const wasServerReady = state.adminTaskServerReady;
+      if (!snapshot.metadata.fromCache) {
+        state.adminTaskServerReady = true;
+        setAdminTasksSyncStatus("");
+      } else if (snapshot.docs.length) {
+        setAdminTasksSyncStatus("Đang hiển thị dữ liệu lưu tạm; chờ đồng bộ Firebase...");
+      }
       const previousStatusById = new Map(
         state.tasks.map((task) => [task.id, task.status])
       );
       const nextTasks = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-      const newlySubmittedTasks = state.adminTaskSnapshotReady && isAdminProfile()
+      const newlySubmittedTasks = wasServerReady && isAdminProfile()
         ? snapshot.docChanges()
           .filter((change) => ["added", "modified"].includes(change.type))
           .map((change) => ({ id: change.doc.id, ...change.doc.data() }))
@@ -5944,11 +5967,11 @@ function setupAdminDashboard() {
         : [];
 
       state.tasks = nextTasks;
-      renderAdminTasks();
+      scheduleAdminTasksRender();
       renderImageGalleryIfOpen();
       syncTaskReviewAlertSound();
-      requestAutomaticLunchHistoryBackfillOnce();
-      requestInvalidTaskHistoryBackfillOnce();
+      // Không chạy các callable backfill lịch sử ở mỗi lần đăng nhập/snapshot:
+      // chúng quét và ghi lại dữ liệu cũ, cạnh tranh với việc tải Phiếu hiện tại.
 
       if (!state.adminTaskSnapshotReady) {
         // Không tự cuộn khi Admin vừa đăng nhập và snapshot đầu tiên chứa các
@@ -5962,9 +5985,12 @@ function setupAdminDashboard() {
 
       // Chỉ tài khoản Admin tự đồng bộ trạng thái quá hạn vào database.
       // Giám sát vẫn nhìn thấy trạng thái tính toán realtime nhưng không tự ghi dữ liệu nếu không phải Admin.
-      if (isAdminProfile()) await syncOverdueTasksByAdmin();
+      if (isAdminProfile() && state.adminTaskServerReady) await syncOverdueTasksByAdmin();
     },
-    handleSnapshotError
+    (error) => {
+      setAdminTasksSyncStatus("Không đồng bộ được công việc. Kiểm tra kết nối Firebase rồi tải lại trang.");
+      handleSnapshotError(error);
+    }
   );
 
   // Theo dõi riêng collection workOrders để những phiếu nháp CHƯA có công việc nào
@@ -5975,7 +6001,8 @@ function setupAdminDashboard() {
     workOrdersQuery,
     (snapshot) => {
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-      renderAdminTasks();
+      state.workOrderById = new Map(state.workOrders.map((workOrder) => [workOrder.id, workOrder]));
+      scheduleAdminTasksRender();
       renderWorkSupervisionCountdown();
       syncTaskReviewAlertSound();
     },
@@ -5993,7 +6020,7 @@ function setupAdminDashboard() {
     assignmentHistoryQuery,
     (snapshot) => {
       state.workAssignmentHistory = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-      renderAdminTasks();
+      scheduleAdminTasksRender();
     },
     (error) => {
       console.error(error);
@@ -6012,7 +6039,7 @@ function setupAdminDashboard() {
     invalidTaskHistoryQuery,
     (snapshot) => {
       state.invalidTaskHistory = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-      renderAdminTasks();
+      scheduleAdminTasksRender();
     },
     (error) => {
       console.error(error);
@@ -6055,7 +6082,7 @@ function setupAdminDashboard() {
     collection(db, "hotelDailyReports"),
     (snapshot) => {
       state.hotelDailyReports = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-      renderAdminTasks();
+      scheduleAdminTasksRender();
     },
     (error) => {
       console.error(error);
@@ -6065,10 +6092,12 @@ function setupAdminDashboard() {
 
   const unsubHotelDailyBudgets = onSnapshot(
     collection(db, "hotelDailyBudgets"),
+    { includeMetadataChanges: true },
     (snapshot) => {
+      if (!snapshot.metadata.fromCache) state.adminHotelDailyBudgetsServerReady = true;
       state.hotelDailyBudgets = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       syncAllHotelTaskRows();
-      renderAdminTasks();
+      scheduleAdminTasksRender();
       cleanupKnownOrphanHotelDailyBudgets();
     },
     (error) => {
@@ -6086,7 +6115,7 @@ function setupAdminDashboard() {
       );
       state.workOrderControlSettingsReady = true;
       applyManagementPermissionUI();
-      renderAdminTasks();
+      scheduleAdminTasksRender();
       updateExtendTimeLimitUI();
     },
     (error) => {
@@ -8258,7 +8287,7 @@ function getHotelDailyBudget(dateKey) {
 
 async function requestOrphanHotelDailyBudgetCleanup(dateKeyInput) {
   const dateKey = String(dateKeyInput || "").trim();
-  if (!isAdminProfile() || !state.adminTaskSnapshotReady || !getHotelDailyBudget(dateKey)) return;
+  if (!isAdminProfile() || !state.adminTaskServerReady || !state.adminHotelDailyBudgetsServerReady || !getHotelDailyBudget(dateKey)) return;
   if (state.hotelBudgetCleanupPendingDates.has(dateKey)) return;
 
   const hasHotelTask = state.tasks.some((task) => (
@@ -8287,7 +8316,7 @@ async function requestOrphanHotelDailyBudgetCleanup(dateKeyInput) {
 }
 
 function cleanupKnownOrphanHotelDailyBudgets() {
-  if (!isAdminProfile() || !state.adminTaskSnapshotReady) return;
+  if (!isAdminProfile() || !state.adminTaskServerReady || !state.adminHotelDailyBudgetsServerReady) return;
 
   state.hotelDailyBudgets.forEach((budget) => {
     const dateKey = String(budget.date || budget.id || "").trim();
@@ -9243,7 +9272,7 @@ function openEditWorkOrderModal(workOrderId) {
   const tasksInGroup = state.tasks
     .filter((task) => (task.workOrderId || "legacy") === workOrderId)
     .sort((a, b) => Number(a.rowIndex ?? 0) - Number(b.rowIndex ?? 0));
-  const workOrder = state.workOrders.find((wo) => wo.id === workOrderId);
+  const workOrder = getWorkOrderMeta(workOrderId);
 
   if (!tasksInGroup.length && !workOrder) {
     toast("Không tìm thấy phiếu này.", "error");
@@ -9888,7 +9917,7 @@ async function persistWorkOrder(dispatch, button) {
     // đúng giờ tạo Phiếu, không bị đổi thành giờ giao việc sau khi sửa rồi giao.
     const previousWorkOrderId = state.editingWorkOrderId;
     const previousWorkOrder = previousWorkOrderId
-      ? state.workOrders.find((item) => item.id === previousWorkOrderId)
+      ? getWorkOrderMeta(previousWorkOrderId)
       : null;
     const oldTasks = previousWorkOrderId
       ? state.tasks.filter((task) => (task.workOrderId || "legacy") === previousWorkOrderId)
@@ -10962,7 +10991,7 @@ async function deleteWorkOrder(workOrderId, button) {
 
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
-  const workOrder = state.workOrders.find((item) => item.id === workOrderId);
+  const workOrder = getWorkOrderMeta(workOrderId);
   const workOrderName = String(workOrder?.name || tasksInGroup[0]?.workOrderName || "Phiếu công việc này").trim();
   const confirmed = await requestDestructiveConfirmation({
     title: "Xóa Phiếu công việc?",
@@ -12895,6 +12924,7 @@ function setupEmployeeDashboard() {
     employeeWorkOrdersQuery,
     (snapshot) => {
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      state.workOrderById = new Map(state.workOrders.map((workOrder) => [workOrder.id, workOrder]));
       // Bất kỳ thay đổi nào ở Phiếu công việc (tạo mới, giao việc hoặc xoá phiếu)
       // đều có thể làm số lượng "Chưa giao việc" thay đổi. Xoá cache để lần
       // render kế tiếp lấy lại con số chính xác từ máy chủ theo bộ lọc ngày.
@@ -13806,31 +13836,6 @@ function getFilteredInvalidTaskHistory(searchQuery = state.adminWorkOrderSearch)
     ));
 }
 
-async function requestAutomaticLunchHistoryBackfillOnce() {
-  if (!isAdminProfile() || state.automaticLunchHistoryBackfillRequested) return;
-  state.automaticLunchHistoryBackfillRequested = true;
-
-  try {
-    await backfillAutomaticLunchBreakAssignmentHistoryCallable();
-  } catch (error) {
-    // Không chặn giao diện nếu Function mới chưa được deploy. Các Phiếu nghỉ trưa
-    // tự động tạo sau khi deploy trigger vẫn sẽ được ghi lịch sử realtime.
-    console.warn("Không backfill được Lịch sử Phiếu nghỉ trưa tự động:", error);
-  }
-}
-
-async function requestInvalidTaskHistoryBackfillOnce() {
-  if (!isAdminProfile() || state.invalidTaskHistoryBackfillRequested) return;
-  state.invalidTaskHistoryBackfillRequested = true;
-
-  try {
-    await backfillInvalidTaskHistoryCallable();
-  } catch (error) {
-    // Không chặn giao diện nếu Function mới chưa được deploy; listener realtime vẫn hoạt động.
-    console.warn("Không backfill được Lịch sử công việc không hợp lệ:", error);
-  }
-}
-
 function renderInvalidTaskHistory(historyItems = []) {
   if (!historyItems.length) return "";
 
@@ -14260,7 +14265,9 @@ function renderAdminTasks() {
 
     if (!resultCount) {
       updateAdminMobileResultSummary(0);
-      els.adminTaskList.innerHTML = `Không tìm thấy Phiếu công việc hoặc Lịch sử giao việc có tên gần giống “${escapeHtml(searchQuery)}” theo ${escapeHtml(getAdminWorkOrderSearchScopeLabel())}.`;
+      els.adminTaskList.innerHTML = !state.adminTaskServerReady
+        ? "Đang đồng bộ công việc từ Firebase..."
+        : `Không tìm thấy Phiếu công việc hoặc Lịch sử giao việc có tên gần giống “${escapeHtml(searchQuery)}” theo ${escapeHtml(getAdminWorkOrderSearchScopeLabel())}.`;
       els.adminTaskList.classList.add("empty");
       return;
     }
@@ -14294,9 +14301,11 @@ function renderAdminTasks() {
 
   if (!totalVisibleItems) {
     updateAdminMobileResultSummary(0);
-    els.adminTaskList.innerHTML = state.adminStatusFilter === "assignment_history"
-      ? "Không có Lịch sử giao việc phù hợp bộ lọc."
-      : "Không có công việc phù hợp bộ lọc.";
+    els.adminTaskList.innerHTML = !state.adminTaskServerReady
+      ? "Đang đồng bộ công việc từ Firebase..."
+      : state.adminStatusFilter === "assignment_history"
+        ? "Không có Lịch sử giao việc phù hợp bộ lọc."
+        : "Không có công việc phù hợp bộ lọc.";
     els.adminTaskList.classList.add("empty");
     return;
   }
@@ -14316,7 +14325,7 @@ function renderAdminTasks() {
 
 function getWorkOrderMeta(workOrderId) {
   if (!workOrderId || workOrderId === "legacy") return null;
-  return state.workOrders.find((workOrder) => workOrder.id === workOrderId) || null;
+  return state.workOrderById.get(workOrderId) || null;
 }
 
 function getWorkOrderTotalTaskCount(workOrderId, tasksInGroup) {
@@ -14737,8 +14746,8 @@ function getDraftTasksForSupervisionLunchAssignment() {
   return state.tasks
     .filter((task) => task.status === "draft" && draftWorkOrderIds.has(task.workOrderId))
     .sort((left, right) => {
-      const leftWorkOrder = state.workOrders.find((item) => item.id === left.workOrderId);
-      const rightWorkOrder = state.workOrders.find((item) => item.id === right.workOrderId);
+      const leftWorkOrder = getWorkOrderMeta(left.workOrderId);
+      const rightWorkOrder = getWorkOrderMeta(right.workOrderId);
       const createdDifference = (timestampToDate(leftWorkOrder?.createdAt)?.getTime() || 0)
         - (timestampToDate(rightWorkOrder?.createdAt)?.getTime() || 0);
       return createdDifference || Number(left.rowIndex || 0) - Number(right.rowIndex || 0);
@@ -14752,7 +14761,7 @@ function renderSupervisionLunchDraftTaskPicker(task, mode) {
   const draftTasks = getDraftTasksForSupervisionLunchAssignment();
   const employeeName = getEmployeeDisplayNameByUid(task.assignedToUid, task.assignedToName);
   const rows = draftTasks.map((draftTask) => {
-    const workOrder = state.workOrders.find((item) => item.id === draftTask.workOrderId);
+    const workOrder = getWorkOrderMeta(draftTask.workOrderId);
     const isReady = Boolean(
       String(draftTask.title || "").trim()
       && getTaskDateValue(draftTask)

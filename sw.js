@@ -1,9 +1,14 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260929-image-gallery-filters-v94";
+const CACHE_NAME = "culao-task-shell-v20260929-startup-v95";
+const APP_SHELL_NETWORK_TIMEOUT_MS = 1800;
+const APP_SHELL_BACKGROUND_TIMEOUT_MS = 15000;
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./app.js",
+  "./app.js?v=20260929-startup-v95",
+  "./styles.css"
+];
+const OPTIONAL_SHELL = [
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
@@ -15,7 +20,12 @@ const APP_SHELL = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL).catch(() => undefined))
+      .then(async (cache) => {
+        // Không kích hoạt phiên bản mới nếu HTML/JS/CSS cốt lõi chưa cache xong.
+        // Ảnh/chuông là tùy chọn để một tệp lỗi không làm chậm cả bản cập nhật.
+        await cache.addAll(APP_SHELL);
+        await Promise.allSettled(OPTIONAL_SHELL.map((path) => cache.add(path)));
+      })
       .then(() => self.skipWaiting())
   );
 });
@@ -33,17 +43,49 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Luôn ưu tiên mạng cho HTML/JS để bản cập nhật GitHub Pages được nhận sớm.
-  if (event.request.mode === "navigate" || /\.(?:js|html)$/.test(url.pathname)) {
-    event.respondWith(
-      fetch(event.request)
+  // Ưu tiên bản mới, nhưng không để mạng treo giữ trang trắng nhiều phút.
+  // Khi có cache, giới hạn thời gian chờ và cập nhật cache ở nền.
+  if (event.request.mode === "navigate" || /\.(?:js|html|css)$/.test(url.pathname)) {
+    let backgroundUpdate = Promise.resolve();
+    const responsePromise = (async () => {
+      const cached = await caches.match(event.request)
+        || (event.request.mode === "navigate" ? await caches.match("./index.html") : null);
+      const controller = cached ? new AbortController() : null;
+      const backgroundTimeoutId = controller
+        ? setTimeout(() => controller.abort(), APP_SHELL_BACKGROUND_TIMEOUT_MS)
+        : null;
+      const network = fetch(event.request, controller ? { signal: controller.signal } : undefined)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => undefined);
-          return response;
+          const copy = response.ok ? response.clone() : null;
+          const cacheUpdate = copy
+            ? caches.open(CACHE_NAME)
+              .then((cache) => cache.put(event.request, copy))
+              .catch(() => undefined)
+            : Promise.resolve();
+          return { response, cacheUpdate };
         })
-        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("./index.html")))
-    );
+        .catch(() => ({ response: null, cacheUpdate: Promise.resolve() }))
+        .finally(() => {
+          if (backgroundTimeoutId) clearTimeout(backgroundTimeoutId);
+        });
+      backgroundUpdate = network
+        .then(({ cacheUpdate }) => cacheUpdate)
+        .catch(() => undefined);
+      if (!cached) return (await network).response || Response.error();
+
+      let timeoutId;
+      const first = await Promise.race([
+        network,
+        new Promise((resolve) => {
+          timeoutId = setTimeout(() => resolve(null), APP_SHELL_NETWORK_TIMEOUT_MS);
+        })
+      ]);
+      clearTimeout(timeoutId);
+      if (first?.response?.ok) return first.response;
+      return cached;
+    })();
+    event.waitUntil(responsePromise.then(() => backgroundUpdate).catch(() => undefined));
+    event.respondWith(responsePromise);
     return;
   }
 
