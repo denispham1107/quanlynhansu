@@ -4,7 +4,9 @@ const crypto = require("node:crypto");
 const {
   storagePathFromGalleryPhoto,
   galleryPhotoKey,
-  isAllowedGalleryPhotoPath
+  isAllowedGalleryPhotoPath,
+  isPhotoMetadataOnlyUpdate,
+  taskPhotoUpdateAction
 } = require("./gallery-photo-delete");
 const {
   SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES,
@@ -3152,7 +3154,7 @@ function hotelTaskValidPhotoCount(task = {}) {
   return photos.filter((photo) => photo?.url && !hotelPhotoIsInvalid(photo)).length;
 }
 
-async function reconcileHotelDailyPhotoRequirement(dateKeyInput) {
+async function reconcileHotelDailyPhotoRequirement(dateKeyInput, { updatePhotoCountOnly = false } = {}) {
   const dateKey = String(dateKeyInput || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
 
@@ -3184,6 +3186,16 @@ async function reconcileHotelDailyPhotoRequirement(dateKeyInput) {
     (sum, task) => sum + hotelTaskValidPhotoCount(task),
     0
   );
+  if (updatePhotoCountOnly) {
+    // Admin xóa ảnh khỏi thư viện là thao tác dọn dữ liệu, không phải một lần
+    // nhân viên hoàn thành Hotel mới. Chỉ đồng bộ số ảnh, không tạo/xóa Phiếu nghỉ bù.
+    await budgetRef.set({
+      uploadedPhotoCount,
+      hotelPhotoUpdatedAt: Timestamp.now(),
+      updatedAt: Timestamp.now()
+    }, { merge: true });
+    return;
+  }
   const endedHotelTasks = hotelTasks
     .map((task) => ({ ...task, endedSeconds: hotelTaskEndedSeconds(task) }))
     .filter((task) => task.endedSeconds > 0);
@@ -4357,6 +4369,19 @@ exports.syncHotelBudgetAndOvertimeLunch = onDocumentWritten({
   const afterSnapshot = event.data?.after;
   const beforeTask = beforeSnapshot?.exists ? beforeSnapshot.data() : null;
   const afterTask = afterSnapshot?.exists ? afterSnapshot.data() : null;
+
+  const photoUpdateAction = taskPhotoUpdateAction(beforeTask, afterTask);
+  if (photoUpdateAction !== "normal") {
+    if (photoUpdateAction === "reconcile_photos") {
+      // Ảnh mới vẫn được tính vào điều kiện ảnh Hotel như trước.
+      await reconcileHotelDailyPhotoRequirement(afterTask.taskDate);
+    } else if (photoUpdateAction === "count_only") {
+      // Xóa ảnh sau khi Phiếu đã hoàn thành không được tạo lại Phiếu nghỉ bù
+      // hoặc ghi Lịch sử giao việc mới cho nhân viên đã Đang off.
+      await reconcileHotelDailyPhotoRequirement(afterTask.taskDate, { updatePhotoCountOnly: true });
+    }
+    return;
+  }
 
   await enforceSingleActiveHotelTask(event.params.taskId, afterTask);
   await syncHotelBudgetAndOvertimeLunch(
@@ -5682,6 +5707,9 @@ exports.ensureInvalidTaskHistoryOnCompletion = onDocumentWritten({
 
   const after = afterSnapshot.data() || {};
   if (String(after.status || "") !== "completed") return;
+
+  const before = event.data?.before?.exists ? event.data.before.data() : null;
+  if (isPhotoMetadataOnlyUpdate(before, after)) return;
 
   // Đồng bộ ở mọi lần ghi khi task đã hoàn thành, không chỉ lúc chuyển trạng thái.
   // Nhờ vậy khi Admin sửa “Thời gian thực tế”, Lịch sử công việc không hợp lệ
