@@ -11359,9 +11359,16 @@
               </span>
             </label>
             <div class="scheduled-work-order-time-field" id="scheduledWorkOrderTimeField">
-              <label for="scheduledWorkOrderTime">Giờ phút giây (24 giờ)</label>
+              <label id="scheduledWorkOrderTimeLabel">Giờ phút giây (24 giờ)</label>
+              <input id="scheduledWorkOrderTime" type="hidden" />
               <span class="scheduled-control-shell scheduled-time-shell">
-                <input id="scheduledWorkOrderTime" type="text" inputmode="text" maxlength="8" autocomplete="off" spellcheck="false" placeholder="HH:mm:ss" aria-label="Giờ phút giây theo định dạng 24 giờ" />
+                <span id="scheduledWorkOrderTimeSegments" class="scheduled-time-segments" role="group" aria-labelledby="scheduledWorkOrderTimeLabel">
+                  <span class="scheduled-time-part" data-scheduled-time-part="hour" data-placeholder="Giờ" contenteditable="true" inputmode="numeric" role="textbox" aria-label="Giờ, từ 00 đến 23" aria-placeholder="Giờ" aria-multiline="false" spellcheck="false"></span>
+                  <span class="scheduled-time-colon" aria-hidden="true">:</span>
+                  <span class="scheduled-time-part" data-scheduled-time-part="minute" data-placeholder="Phút" contenteditable="true" inputmode="numeric" role="textbox" aria-label="Phút, từ 00 đến 59" aria-placeholder="Phút" aria-multiline="false" spellcheck="false"></span>
+                  <span class="scheduled-time-colon" aria-hidden="true">:</span>
+                  <span class="scheduled-time-part" data-scheduled-time-part="second" data-placeholder="Giây" contenteditable="true" inputmode="numeric" role="textbox" aria-label="Giây, từ 00 đến 59" aria-placeholder="Giây" aria-multiline="false" spellcheck="false"></span>
+                </span>
                 <button id="scheduledWorkOrderTimePickerBtn" class="scheduled-time-picker-toggle" type="button" aria-label="Chọn giờ phút giây theo khung 24 giờ" aria-expanded="false" aria-controls="scheduledWorkOrderTimePicker"><svg class="scheduled-time-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.7"/><path d="M12 6.8v5.5l3.7 2.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 2.25v1.5M12 20.25v1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
               </span>
               <section id="scheduledWorkOrderTimePicker" class="scheduled-time-picker hidden" role="group" aria-label="Bộ chọn giờ phút giây 24 giờ">
@@ -12123,7 +12130,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260929-24-hour-picker-v106"></script>
+  <script type="module" src="app.js?v=20260929-segmented-time-v107"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12804,8 +12811,20 @@
     border:0 !important; outline:0 !important; box-shadow:none !important;
   }
   #taskModal .scheduled-time-shell { position:relative; }
-  #taskModal .scheduled-time-shell > input { padding-right:48px !important; font-variant-numeric:tabular-nums; }
-  #taskModal .scheduled-time-shell > input[aria-invalid="true"] { color:#b91c1c !important; }
+  .scheduled-time-segments {
+    display:flex; align-items:center; gap:3px; width:calc(100% - 46px); min-width:0;
+    min-height:50px; padding:0 10px; box-sizing:border-box;
+    font-size:16px; font-weight:500; font-variant-numeric:tabular-nums;
+  }
+  .scheduled-time-part {
+    display:block; flex:1 1 0; min-width:0; padding:5px 2px;
+    border-radius:7px; text-align:center; white-space:nowrap;
+    outline:0; color:#172033; caret-color:#2563eb;
+  }
+  .scheduled-time-part:empty::before { content:attr(data-placeholder); color:#94a3b8; }
+  .scheduled-time-part:focus { background:#eff6ff; box-shadow:inset 0 0 0 1px #93c5fd; }
+  .scheduled-time-part[aria-invalid="true"] { color:#b91c1c; }
+  .scheduled-time-colon { flex:0 0 auto; color:#475569; font-weight:800; }
   .scheduled-time-picker-toggle {
     position:absolute; right:0; top:0; bottom:0; display:flex; align-items:center; justify-content:center;
     width:46px; padding:0; border:0; border-left:1px solid #e2e8f0; background:transparent;

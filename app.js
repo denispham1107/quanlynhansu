@@ -1111,6 +1111,7 @@ const els = {
   scheduledWorkOrderConfig: $("#scheduledWorkOrderConfig"),
   scheduledWorkOrderDate: $("#scheduledWorkOrderDate"),
   scheduledWorkOrderTime: $("#scheduledWorkOrderTime"),
+  scheduledWorkOrderTimeSegments: $("#scheduledWorkOrderTimeSegments"),
   scheduledWorkOrderTimeField: $("#scheduledWorkOrderTimeField"),
   scheduledWorkOrderTimePickerBtn: $("#scheduledWorkOrderTimePickerBtn"),
   scheduledWorkOrderTimePicker: $("#scheduledWorkOrderTimePicker"),
@@ -9342,6 +9343,44 @@ function normalize24HourTimeValue(value) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function scheduledTimeSegments() {
+  return [...(els.scheduledWorkOrderTimeSegments?.querySelectorAll("[data-scheduled-time-part]") || [])];
+}
+
+function setScheduledWorkOrderTimeValue(value) {
+  const normalized = normalize24HourTimeValue(value);
+  const values = normalized ? normalized.split(":") : ["", "", ""];
+  scheduledTimeSegments().forEach((segment, index) => {
+    segment.textContent = values[index];
+    segment.removeAttribute("aria-invalid");
+  });
+  if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = normalized;
+}
+
+function syncScheduledWorkOrderTimeSegments() {
+  const segments = scheduledTimeSegments();
+  const values = segments.map((segment, index) => {
+    const digits = (segment.textContent || "").replace(/\D/g, "").slice(0, 2);
+    if (segment.textContent !== digits || (!digits && segment.childNodes.length)) {
+      segment.textContent = digits;
+      const selection = window.getSelection?.();
+      if (selection && segment.firstChild) {
+        const range = document.createRange();
+        range.selectNodeContents(segment);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    segment.toggleAttribute("aria-invalid", digits.length === 2 && Number(digits) > (index === 0 ? 23 : 59));
+    return digits;
+  });
+  const normalized = values.every((digits) => digits.length === 2)
+    ? normalize24HourTimeValue(values.join(":")) : "";
+  if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = normalized;
+  return normalized;
+}
+
 const scheduledTimePickerParts = ["hour", "minute", "second"];
 const scheduledTimePickerLabels = ["Giờ", "Phút", "Giây"];
 let scheduledTimePickerSelection = [0, 0, 0];
@@ -9402,7 +9441,7 @@ els.scheduledWorkOrderTimePickerValues?.addEventListener("click", (event) => {
 });
 els.scheduledWorkOrderTimePickerApply?.addEventListener("click", () => {
   if (els.scheduledWorkOrderTime) {
-    els.scheduledWorkOrderTime.value = formatScheduledTimePickerValue(scheduledTimePickerSelection);
+    setScheduledWorkOrderTimeValue(formatScheduledTimePickerValue(scheduledTimePickerSelection));
     resetScheduledWorkOrderTimeValidity();
     els.scheduledWorkOrderTime.dispatchEvent(new Event("change", { bubbles: true }));
   }
@@ -9429,18 +9468,34 @@ function resetScheduledWorkOrderTimeValidity() {
   els.scheduledWorkOrderTime?.removeAttribute("aria-invalid");
 }
 
-els.scheduledWorkOrderTime?.addEventListener("input", () => {
+els.scheduledWorkOrderTimeSegments?.addEventListener("input", (event) => {
+  if (!event.target.closest?.("[data-scheduled-time-part]")) return;
+  syncScheduledWorkOrderTimeSegments();
   resetScheduledWorkOrderTimeValidity();
   closeScheduledTimePicker();
 });
-els.scheduledWorkOrderTime?.addEventListener("blur", () => {
-  const input = els.scheduledWorkOrderTime;
-  const normalized = normalize24HourTimeValue(input?.value);
-  if (normalized) input.value = normalized;
-  const invalid = Boolean(input?.value.trim()) && !normalized;
-  input?.setCustomValidity(invalid ? "Nhập giờ theo định dạng 24 giờ HH:mm:ss, ví dụ 21:07:53." : "");
-  if (invalid) input?.setAttribute("aria-invalid", "true");
-  else input?.removeAttribute("aria-invalid");
+els.scheduledWorkOrderTimeSegments?.addEventListener("keydown", (event) => {
+  const segment = event.target.closest?.("[data-scheduled-time-part]");
+  const segments = scheduledTimeSegments();
+  const index = segments.indexOf(segment);
+  if (index < 0) return;
+  if (event.key === "Enter") event.preventDefault();
+  if (event.key === "Backspace" && !segment.textContent && index > 0) segments[index - 1].focus();
+  if (event.key === "ArrowRight" && index < 2) segments[index + 1].focus();
+  if (event.key === "ArrowLeft" && index > 0) segments[index - 1].focus();
+});
+els.scheduledWorkOrderTimeSegments?.addEventListener("paste", (event) => {
+  const segment = event.target.closest?.("[data-scheduled-time-part]");
+  if (!segment) return;
+  const pasted = event.clipboardData?.getData("text") || "";
+  event.preventDefault();
+  const fullTime = normalize24HourTimeValue(pasted);
+  if (fullTime) setScheduledWorkOrderTimeValue(fullTime);
+  else {
+    segment.textContent = pasted.replace(/\D/g, "").slice(0, 2);
+    syncScheduledWorkOrderTimeSegments();
+  }
+  resetScheduledWorkOrderTimeValidity();
 });
 
 function normalizeScheduledCountdownMinutes(value) {
@@ -9505,7 +9560,7 @@ function resetScheduledWorkOrderFormForCreate() {
   const defaultMoment = new Date(Date.now() + 5 * 60 * 1000);
   const inputs = localDateTimeInputValues(defaultMoment);
   if (els.scheduledWorkOrderDate) els.scheduledWorkOrderDate.value = inputs.date;
-  if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = inputs.time;
+  setScheduledWorkOrderTimeValue(inputs.time);
   resetScheduledWorkOrderTimeValidity();
   if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = "";
   if (els.scheduledWorkOrderCountdownMinutes) els.scheduledWorkOrderCountdownMinutes.value = "10";
@@ -9595,7 +9650,7 @@ function openScheduledWorkOrderEditor(scheduleId) {
 
   const scheduledInputs = localDateTimeInputValues(scheduledMoment);
   if (els.scheduledWorkOrderDate) els.scheduledWorkOrderDate.value = scheduledInputs.date;
-  if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = scheduledInputs.time;
+  setScheduledWorkOrderTimeValue(scheduledInputs.time);
   resetScheduledWorkOrderTimeValidity();
   if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = schedule.employeeGroupId || "";
   if (els.scheduledWorkOrderCountdownMinutes) {
@@ -10519,12 +10574,13 @@ async function createScheduledWorkOrder(button) {
     const selectedGroup = state.employeeGroups.find((group) => group.id === employeeGroupId);
 
     if (!name) throw new Error("Vui lòng nhập tên Phiếu công việc.");
-    if (!dateValue || !rawTimeValue.trim()) throw new Error("Vui lòng chọn đầy đủ ngày và giờ lên lịch.");
+    if (!dateValue) throw new Error("Vui lòng chọn ngày lên lịch.");
     if (!timeValue) {
-      els.scheduledWorkOrderTime?.focus({ preventScroll: true });
-      throw new Error("Giờ lên lịch phải theo định dạng 24 giờ HH:mm:ss, ví dụ 21:07:53.");
+      const segments = scheduledTimeSegments();
+      (segments.find((segment, index) => segment.textContent.length !== 2 || Number(segment.textContent) > (index === 0 ? 23 : 59)) || segments[0])?.focus({ preventScroll: true });
+      throw new Error("Vui lòng nhập đủ Giờ : Phút : Giây hợp lệ theo khung 24 giờ.");
     }
-    if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = timeValue;
+    setScheduledWorkOrderTimeValue(timeValue);
     if (!selectedGroup) throw new Error("Vui lòng chọn Nhóm nhân viên hợp lệ.");
     if (!Number.isInteger(assignmentCountdownMinutes) || assignmentCountdownMinutes < 1 || assignmentCountdownMinutes > 1440) {
       throw new Error("Thời gian đếm ngược phải là số nguyên từ 1 đến 1440 phút.");

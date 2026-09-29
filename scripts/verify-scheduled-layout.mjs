@@ -218,6 +218,7 @@ const prepareExpression = `(() => {
   document.getElementById("scheduleWorkOrderBtn")?.classList.remove("hidden");
   document.getElementById("scheduledWorkOrderDate").value = "2026-09-20";
   document.getElementById("scheduledWorkOrderTime").value = "22:57:30";
+  [...document.querySelectorAll(".scheduled-time-part")].forEach((part, index) => { part.textContent = ["22", "57", "30"][index]; });
   const picker = document.getElementById("scheduledWorkOrderTimePicker");
   document.getElementById("scheduledWorkOrderTimePickerParts").innerHTML = '<button>Giờ 22</button><button>Phút 57</button><button>Giây 30</button>';
   document.getElementById("scheduledWorkOrderTimePickerValues").innerHTML = Array.from({length:60}, (_,value) => '<button>'+String(value).padStart(2,'0')+'</button>').join('');
@@ -253,7 +254,15 @@ for (const profile of profiles) {
       const shells = [...document.querySelectorAll(".scheduled-control-shell")].map(box);
       const controls = [...document.querySelectorAll(".scheduled-control-shell > input, .scheduled-control-shell > select")].map(box);
       const timeInput = document.getElementById("scheduledWorkOrderTime");
-      const timeShell = timeInput.closest(".scheduled-time-shell");
+      const timeShell = document.querySelector(".scheduled-time-shell");
+      const timeParts = [...timeShell.querySelectorAll(".scheduled-time-part")].map(box);
+      const timeColons = [...timeShell.querySelectorAll(".scheduled-time-colon")].map(box);
+      const hourPart = timeShell.querySelector('[data-scheduled-time-part="hour"]');
+      const originalHour = hourPart.textContent;
+      hourPart.textContent = "";
+      const emptyHourHint = getComputedStyle(hourPart, "::before").content;
+      const emptyHourBox = box(hourPart);
+      hourPart.textContent = originalHour;
       const timeIcon = timeShell.querySelector(".scheduled-time-icon");
       const timeIconBox = box(timeIcon);
       const timeShellBox = box(timeShell);
@@ -264,7 +273,7 @@ for (const profile of profiles) {
       const footerChildren = [...document.querySelectorAll(".scheduled-time-picker-footer > *")].map(box);
       const actionButtons = [...document.querySelectorAll(".task-create-actions > .btn:not(.hidden)")].map(box);
       const inside = [...shells, ...controls].every((rect) => rect.left >= config.left - 0.5 && rect.right <= config.right + 0.5);
-      const shellControlMatch = shells.every((shell, index) => controls[index].left >= shell.left - 0.5 && controls[index].right <= shell.right + 0.5);
+      const shellControlMatch = controls.every((control) => shells.some((shell) => control.left >= shell.left - 0.5 && control.right <= shell.right + 0.5 && control.top >= shell.top - 0.5 && control.bottom <= shell.bottom + 0.5));
       const actionsInside = actionButtons.every((rect) => rect.left >= actions.left - 0.5 && rect.right <= actions.right + 0.5);
       const overlap = shells.some((left, leftIndex) => shells.some((right, rightIndex) => {
         if (rightIndex <= leftIndex) return false;
@@ -289,6 +298,11 @@ for (const profile of profiles) {
         controls,
         timeType: timeInput.type,
         timeValue: timeInput.value,
+        timePartsInside: [...timeParts, ...timeColons].every((rect) => rect.left >= timeShellBox.left - 0.5 && rect.right <= timeShellBox.right + 0.5),
+        timePartsCount: timeParts.length,
+        timeColonsCount: timeColons.length,
+        emptyHourHint,
+        emptyHourInside: emptyHourBox.left >= timeShellBox.left - 0.5 && emptyHourBox.right <= timeShellBox.right + 0.5,
         timeIconInside: timeIconBox.left >= timeShellBox.left && timeIconBox.right <= timeShellBox.right,
         pickerInside: picker.left >= config.left - 0.5 && picker.right <= config.right + 0.5
           && pickerValues.left >= picker.left - 0.5 && pickerValues.right <= picker.right + 0.5
@@ -316,9 +330,11 @@ for (const profile of profiles) {
     && result.card.left >= result.page.left - 0.5
     && result.card.right <= result.page.right + 0.5
     && result.shells.length === 6
-    && result.controls.length === 6
-    && result.timeType === "text"
+    && result.controls.length === 5
+    && result.timeType === "hidden"
     && result.timeValue === "22:57:30"
+    && result.timePartsInside && result.timePartsCount === 3 && result.timeColonsCount === 2
+    && result.emptyHourHint.includes("Giờ") && result.emptyHourInside
     && result.timeIconInside
     && result.pickerInside
     && result.pickerControlsInside
