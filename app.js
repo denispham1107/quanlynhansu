@@ -16613,20 +16613,18 @@ function getImageGalleryWorkOrderName(task, workOrderNames) {
 }
 
 function syncImageGalleryFilterOptions(select, defaultLabel, options, selectedValue) {
-  if (!select) return;
-  const previousLabel = [...select.options].find((option) => option.value === selectedValue)?.textContent;
+  if (!select) return selectedValue;
   const optionMap = new Map();
   for (const { key, label } of options) {
     if (!optionMap.has(key)) optionMap.set(key, label);
   }
-  if (selectedValue !== "all" && !optionMap.has(selectedValue)) {
-    optionMap.set(selectedValue, previousLabel || selectedValue);
-  }
+  const nextValue = selectedValue === "all" || optionMap.has(selectedValue) ? selectedValue : "all";
   const sorted = [...optionMap].sort((left, right) => left[1].localeCompare(right[1], "vi"));
   const html = `<option value="all">${escapeHtml(defaultLabel)}</option>`
     + sorted.map(([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`).join("");
   if (select.innerHTML !== html) select.innerHTML = html;
-  select.value = selectedValue;
+  select.value = nextValue;
+  return nextValue;
 }
 
 function isImageGalleryEntryInDateFilter(entry) {
@@ -16665,26 +16663,27 @@ function renderImageGallery() {
   if (!els.imageGalleryGrid || !isAdminProfile()) return;
   syncImageGalleryDateControls();
   const allEntries = getImageGalleryEntries();
-  syncImageGalleryFilterOptions(
+  const invalidRange = state.imageGalleryDateFilter.mode === "range"
+    && state.imageGalleryDateFilter.from && state.imageGalleryDateFilter.to
+    && state.imageGalleryDateFilter.from > state.imageGalleryDateFilter.to;
+  const waitingForSingleDate = state.imageGalleryDateFilter.mode === "single"
+    && !state.imageGalleryDateFilter.single;
+  const dateEntries = invalidRange ? [] : allEntries.filter(isImageGalleryEntryInDateFilter);
+  state.imageGalleryUploaderFilter = syncImageGalleryFilterOptions(
     els.imageGalleryUploaderFilter, "Tất cả người đăng",
-    allEntries.map((entry) => ({ key: entry.uploaderKey, label: entry.uploaderName })),
+    dateEntries.map((entry) => ({ key: entry.uploaderKey, label: entry.uploaderName })),
     state.imageGalleryUploaderFilter
   );
-  syncImageGalleryFilterOptions(
+  state.imageGalleryWorkOrderFilter = syncImageGalleryFilterOptions(
     els.imageGalleryWorkOrderFilter, "Tất cả Phiếu công việc",
-    allEntries.map((entry) => ({ key: entry.workOrderKey, label: entry.workOrderName })),
+    dateEntries.map((entry) => ({ key: entry.workOrderKey, label: entry.workOrderName })),
     state.imageGalleryWorkOrderFilter
   );
   const validKeys = new Set(allEntries.map((entry) => entry.key));
   for (const key of state.imageGallerySelectedKeys) {
     if (!validKeys.has(key)) state.imageGallerySelectedKeys.delete(key);
   }
-  const invalidRange = state.imageGalleryDateFilter.mode === "range"
-    && state.imageGalleryDateFilter.from && state.imageGalleryDateFilter.to
-    && state.imageGalleryDateFilter.from > state.imageGalleryDateFilter.to;
-  const waitingForSingleDate = state.imageGalleryDateFilter.mode === "single"
-    && !state.imageGalleryDateFilter.single;
-  const entries = invalidRange ? [] : allEntries.filter(isImageGalleryEntryInCombinedFilter);
+  const entries = dateEntries.filter(isImageGalleryEntryInCombinedFilter);
   state.imageGalleryEntries = entries;
 
   if (els.imageGallerySummary) {

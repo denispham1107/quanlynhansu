@@ -64,4 +64,58 @@ assert.equal(matches(photo("2026-09-24")), true);
 assert.equal(matches(photo("2026-09-26")), false);
 assert.equal(matches(photo("2026-09-24", "uid:meo")), false);
 
-console.log("PASS | Thời gian, Người đăng và Phiếu công việc lọc đồng thời; Tháng này/Tháng trước đúng biên tháng.");
+const uploaderSelect = { innerHTML: "", value: "all" };
+const workOrderSelect = { innerHTML: "", value: "all" };
+const galleryState = {
+  imageGalleryDateFilter: { mode: "today", single: "", from: "", to: "" },
+  imageGalleryUploaderFilter: "uid:meo",
+  imageGalleryWorkOrderFilter: "spa hotel",
+  imageGallerySelectedKeys: new Set(),
+  imageGalleryDeleting: false,
+  imageGalleryDownloading: false
+};
+const galleryEntries = [
+  { key: "today", dateKey: "2026-09-29", uploaderKey: "uid:ngoc", uploaderName: "Ngọc", workOrderKey: "làm hotel", workOrderName: "Làm hotel", kind: "report", task: { id: "today", title: "Việc hôm nay" }, photo: { name: "today.jpg", url: "today.jpg", uploadedAt: fixedNow } },
+  { key: "yesterday", dateKey: "2026-09-28", uploaderKey: "uid:meo", uploaderName: "Mèo", workOrderKey: "spa hotel", workOrderName: "Spa Hotel", kind: "report", task: { id: "yesterday", title: "Việc hôm qua" }, photo: { name: "yesterday.jpg", url: "yesterday.jpg", uploadedAt: new Date(2026, 8, 28) } }
+];
+const galleryContext = vm.createContext({
+  state: galleryState,
+  els: {
+    imageGalleryGrid: { classList: { toggle() {} }, innerHTML: "" },
+    imageGalleryUploaderFilter: uploaderSelect,
+    imageGalleryWorkOrderFilter: workOrderSelect,
+    imageGallerySummary: { textContent: "" }
+  },
+  isAdminProfile: () => true,
+  syncImageGalleryDateControls() {},
+  getImageGalleryEntries: () => galleryEntries,
+  todayInputValue: () => "2026-09-29",
+  yesterdayInputValue: () => "2026-09-28",
+  getMonthDateRange: context.getMonthDateRange,
+  escapeHtml: (value) => String(value),
+  formatFullDateTime: () => "29/09/2026"
+});
+vm.runInContext([
+  sourceOf("syncImageGalleryFilterOptions"),
+  sourceOf("isImageGalleryEntryInDateFilter"),
+  sourceOf("isImageGalleryEntryInCombinedFilter"),
+  sourceOf("renderImageGallery")
+].join("\n"), galleryContext);
+galleryContext.renderImageGallery();
+assert.match(uploaderSelect.innerHTML, /Ngọc/);
+assert.doesNotMatch(uploaderSelect.innerHTML, /Mèo/);
+assert.match(workOrderSelect.innerHTML, /Làm hotel/);
+assert.doesNotMatch(workOrderSelect.innerHTML, /Spa Hotel/);
+assert.equal(galleryState.imageGalleryUploaderFilter, "all");
+assert.equal(galleryState.imageGalleryWorkOrderFilter, "all");
+assert.match(galleryContext.els.imageGalleryGrid.innerHTML, /today.jpg/);
+assert.doesNotMatch(galleryContext.els.imageGalleryGrid.innerHTML, /yesterday.jpg/);
+
+galleryState.imageGalleryDateFilter.mode = "yesterday";
+galleryContext.renderImageGallery();
+assert.match(uploaderSelect.innerHTML, /Mèo/);
+assert.doesNotMatch(uploaderSelect.innerHTML, /Ngọc/);
+assert.match(workOrderSelect.innerHTML, /Spa Hotel/);
+assert.doesNotMatch(workOrderSelect.innerHTML, /Làm hotel/);
+
+console.log("PASS | Bộ lọc Người đăng và Phiếu chỉ liệt kê ảnh trong thời gian đã chọn; lựa chọn cũ được đặt lại khi không còn hợp lệ.");
