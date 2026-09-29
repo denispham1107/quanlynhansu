@@ -9,6 +9,8 @@ const server = readFileSync(join(root, "functions", "index.js"), "utf8");
 const html = readFileSync(join(root, "index.html"), "utf8");
 
 const ticketActions = app.slice(app.indexOf("function renderTicketGroup("), app.indexOf("function renderTicketGroup(") + 4800);
+assert.ok(ticketActions.indexOf('data-action="convert-scheduled-draft"') >= 0);
+assert.ok(ticketActions.indexOf('data-action="convert-scheduled-draft"') < ticketActions.indexOf('data-action="edit-scheduled-draft"'));
 assert.ok(ticketActions.indexOf('data-action="edit-scheduled-draft"') >= 0);
 assert.ok(ticketActions.indexOf('data-action="edit-scheduled-draft"') < ticketActions.indexOf('data-action="reschedule-scheduled-draft"'));
 assert.ok(ticketActions.indexOf('data-action="reschedule-scheduled-draft"') < ticketActions.indexOf('data-action="open-scheduled-group-assignment"'));
@@ -16,6 +18,9 @@ assert.match(ticketActions, /scheduledEditDeletePolicy !== "locked"/);
 assert.match(app, /if \(action === "reschedule-scheduled-draft"\) \{\s*await openScheduledWorkOrderEditorFromTicket/);
 assert.match(app, /if \(state\.scheduledEditorReturnToDashboard\) \{\s*closeTaskModal\(\);/);
 assert.match(app, /state\.scheduledEditorReturnToDashboard \? "← Quay lại trang quản lý"/);
+assert.match(app, /if \(action === "convert-scheduled-draft"\) \{\s*await convertScheduledTicketToOrdinaryDraft/);
+assert.match(app, /converted: "Đã chuyển thành Phiếu thường"/);
+assert.match(html, /<option value="converted">Đã chuyển thành Phiếu thường<\/option>/);
 
 assert.match(html, /id="cancelScheduledDraftEditBtn"[^>]*>Hủy<\/button>/);
 assert.match(html, /id="saveScheduledDraftEditBtn"[^>]*>💾 Lưu<\/button>/);
@@ -93,4 +98,44 @@ await navigation.openScheduledWorkOrderEditorFromTicket("ticket-1", navigation.b
 assert.equal(navigation.calls.some((call) => call[0] === "loading"), false);
 assert.equal(navigation.calls.some((call) => call[0] === "open"), false);
 
-console.log("PASS | Nút Dời lịch mở đúng lịch của Phiếu chưa giao, chặn lịch khóa hoặc không khớp; luồng sửa Phiếu giữ nguyên.");
+const conversion = new Function(`
+  const state = {
+    workOrders: [{ id: "ticket-1", name: "Phiếu thử", scheduleId: "schedule-1", scheduledWorkOrder: true,
+      status: "draft", scheduledGroupAssignmentPending: true, scheduledEditDeletePolicy: "editable" }],
+    tasks: [{ id: "task-1", workOrderId: "ticket-1", scheduledWorkOrder: true, status: "draft", title: "Công việc" }],
+    scheduledWorkOrders: [{ id: "schedule-1", status: "generated", generatedWorkOrderId: "ticket-1" }]
+  };
+  const button = {};
+  const calls = [];
+  const console = { error() {} };
+  let allow = false;
+  const isAdminProfile = () => true;
+  const toast = (message) => calls.push(["toast", message]);
+  const requestDestructiveConfirmation = async () => allow;
+  const setButtonLoading = (_, loading) => calls.push(["loading", loading]);
+  const convertScheduledGeneratedWorkOrderToDraftCallable = async (payload) => {
+    calls.push(["call", payload]);
+    return { data: { converted: true } };
+  };
+  const renderAdminTasks = () => calls.push(["render"]);
+  ${extractFunction("convertScheduledTicketToOrdinaryDraft")}
+  return { state, button, calls, setAllowed: (value) => { allow = value; },
+    convertScheduledTicketToOrdinaryDraft };
+`)();
+await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button);
+assert.equal(conversion.calls.some((call) => call[0] === "call"), false);
+assert.equal(conversion.state.workOrders[0].scheduledWorkOrder, true);
+conversion.setAllowed(true);
+await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button);
+assert.deepEqual(conversion.calls.find((call) => call[0] === "call"), ["call", { workOrderId: "ticket-1" }]);
+assert.equal(conversion.state.workOrders[0].scheduledWorkOrder, false);
+assert.equal(conversion.state.tasks[0].scheduledWorkOrder, false);
+assert.equal(conversion.state.scheduledWorkOrders[0].status, "converted");
+assert.equal(conversion.calls.some((call) => call[0] === "render"), true);
+conversion.calls.length = 0;
+conversion.state.workOrders[0] = { ...conversion.state.workOrders[0], scheduleId: "schedule-1",
+  scheduledWorkOrder: true, scheduledGroupAssignmentPending: true, scheduledEditDeletePolicy: "locked" };
+await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button);
+assert.equal(conversion.calls.some((call) => call[0] === "call"), false);
+
+console.log("PASS | Nút Đã mang đến chỉ chuyển sau xác nhận, giữ Phiếu và chặn lịch khóa; Dời lịch vẫn mở đúng lịch.");

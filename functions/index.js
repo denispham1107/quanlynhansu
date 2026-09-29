@@ -19,6 +19,13 @@ const {
   normalizeScheduledEditDeletePolicy,
   canModifyScheduledWorkOrder
 } = require("./scheduled-edit-policy");
+const {
+  ordinaryDraftWorkOrderUpdate,
+  ordinaryDraftTaskUpdate,
+  isScheduledDraftConversionUpdate,
+  convertedScheduleUpdate,
+  linkedLunchCompletionUpdate
+} = require("./scheduled-conversion");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth: getAdminAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
@@ -1542,6 +1549,103 @@ exports.deleteScheduledWorkOrder = onCall({
   };
 });
 
+exports.convertScheduledGeneratedWorkOrderToDraft = onCall({
+  region: REGION,
+  timeoutSeconds: 120,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  await assertAdmin(adminUid);
+  const workOrderId = String(request.data?.workOrderId || "").trim();
+  if (!workOrderId || workOrderId.includes("/") || workOrderId.length > 180) {
+    throw new HttpsError("invalid-argument", "Phiếu công việc không hợp lệ.");
+  }
+
+  const workOrderRef = db.doc(`workOrders/${workOrderId}`);
+  const conversion = await db.runTransaction(async (transaction) => {
+    const workOrderSnapshot = await transaction.get(workOrderRef);
+    const workOrder = workOrderSnapshot.data() || {};
+    const scheduleId = String(workOrder.scheduleId || "");
+    if (!workOrderSnapshot.exists || !scheduleId || scheduleId.includes("/")
+      || workOrder.scheduledWorkOrder !== true || workOrder.status !== "draft"
+      || workOrder.scheduledGroupAssignmentPending !== true) {
+      throw new HttpsError("failed-precondition", "Phiếu này không còn là Phiếu chưa giao việc được tạo từ lịch.");
+    }
+    if (String(workOrder.createdByUid || "") !== adminUid) {
+      throw new HttpsError("permission-denied", "Bạn không có quyền chuyển Phiếu này.");
+    }
+
+    const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+    const scheduleSnapshot = await transaction.get(scheduleRef);
+    const schedule = scheduleSnapshot.data() || {};
+    if (!scheduleSnapshot.exists || String(schedule.createdByUid || "") !== adminUid
+      || schedule.status !== "generated" || String(schedule.generatedWorkOrderId || "") !== workOrderId) {
+      throw new HttpsError("failed-precondition", "Lịch tạo ra Phiếu này không còn chờ giao.");
+    }
+    if (!canModifyScheduledWorkOrder(schedule)
+      || !canModifyScheduledWorkOrder({ editDeletePolicy: workOrder.scheduledEditDeletePolicy })) {
+      throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa và không thể chuyển Phiếu.");
+    }
+
+    const taskSnapshot = await transaction.get(db.collection("tasks").where("workOrderId", "==", workOrderId));
+    const lunchSnapshot = await transaction.get(
+      db.collection("tasks").where("sourceScheduledWorkOrderId", "==", workOrderId)
+    );
+    const tasks = taskSnapshot.docs;
+    if (!tasks.length || tasks.length !== Number(workOrder.taskCount || 0)
+      || tasks.some((item) => {
+        const task = item.data() || {};
+        return task.status !== "draft" || Boolean(task.assignedToUid)
+          || task.scheduledWorkOrder !== true || String(task.scheduleId || "") !== scheduleId;
+      })) {
+      throw new HttpsError("failed-precondition", "Các công việc trong Phiếu đã thay đổi; vui lòng tải lại.");
+    }
+    if (lunchSnapshot.docs.some((item) => {
+      const lunch = item.data() || {};
+      return lunch.autoCreatedByScheduledGroupTimeout !== true
+        || String(lunch.scheduleId || "") !== scheduleId
+        || !["lunch_break", "overdue", "completed"].includes(String(lunch.status || ""));
+    })) {
+      throw new HttpsError("failed-precondition", "Có Phiếu nghỉ trưa liên quan đã thay đổi; vui lòng kiểm tra trước khi chuyển.");
+    }
+
+    const now = Timestamp.now();
+    const deletionMarker = FieldValue.delete();
+    transaction.update(scheduleRef, convertedScheduleUpdate(now, adminUid, workOrderId));
+    transaction.update(workOrderRef, ordinaryDraftWorkOrderUpdate(now, deletionMarker));
+    tasks.forEach((item) => transaction.update(item.ref, ordinaryDraftTaskUpdate(deletionMarker)));
+    const activeLunchTasks = lunchSnapshot.docs.filter((item) =>
+      ["lunch_break", "overdue"].includes(String(item.data()?.status || ""))
+    );
+    activeLunchTasks.forEach((item) => {
+      transaction.update(item.ref, linkedLunchCompletionUpdate(item.data() || {}, now, workOrderId));
+    });
+
+    return {
+      converted: true,
+      workOrderId,
+      scheduleId,
+      taskCount: tasks.length,
+      completedLinkedLunchCount: activeLunchTasks.length,
+      repeatMode: normalizeScheduledRepeatMode(schedule.repeatMode),
+      seriesId: String(schedule.seriesId || scheduleId),
+      scheduledAt: schedule.scheduledAt || null
+    };
+  });
+  let recurrenceVerified = true;
+  if (conversion.repeatMode === "daily" && conversion.scheduledAt) {
+    try {
+      await ensureNextDailyScheduledOccurrence(conversion.scheduleId, conversion);
+    } catch (error) {
+      recurrenceVerified = false;
+      console.error("Không kiểm tra được lịch lặp tiếp theo sau khi chuyển Phiếu:", error);
+    }
+  }
+  const { repeatMode, seriesId, scheduledAt, ...result } = conversion;
+  return { ...result, recurrenceVerified };
+});
+
 async function materializeScheduledWorkOrderById(scheduleIdInput) {
   const scheduleId = String(scheduleIdInput || "").trim();
   if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) return null;
@@ -1550,7 +1654,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
   const scheduleSnapshot = await scheduleRef.get();
   if (!scheduleSnapshot.exists) return null;
   const schedule = scheduleSnapshot.data() || {};
-  if (["assigned", "cancelled", "deleting", "updating"].includes(String(schedule.status || ""))) return null;
+  if (["assigned", "cancelled", "converted", "deleting", "updating"].includes(String(schedule.status || ""))) return null;
   const scheduledAt = firestoreTimestampOrNull(schedule.scheduledAt);
   // Một Cloud Task cũ có thể vẫn thức dậy sau khi Admin đổi giờ của lịch.
   // Luôn đọc lại thời điểm mới và không tạo Phiếu sớm; bộ quét mỗi phút sẽ
@@ -1592,7 +1696,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
     const groupSnapshot = snapshots[2];
     const freshSchedule = freshScheduleSnapshot.data() || {};
 
-    if (["assigned", "cancelled", "deleting"].includes(String(freshSchedule.status || ""))) return;
+    if (["assigned", "cancelled", "converted", "deleting"].includes(String(freshSchedule.status || ""))) return;
     if (workOrderSnapshot.exists || freshSchedule.status === "generated") {
       alreadyGenerated = true;
       assignmentDeadlineAt = firestoreTimestampOrNull(
@@ -4729,6 +4833,9 @@ exports.syncHotelBudgetAndOvertimeLunch = onDocumentWritten({
   const afterSnapshot = event.data?.after;
   const beforeTask = beforeSnapshot?.exists ? beforeSnapshot.data() : null;
   const afterTask = afterSnapshot?.exists ? afterSnapshot.data() : null;
+
+  // Tách Phiếu khỏi lịch chỉ đổi metadata của task nháp, không tính lại Hotel/Ship.
+  if (isScheduledDraftConversionUpdate(beforeTask, afterTask)) return;
 
   const photoUpdateAction = taskPhotoUpdateAction(beforeTask, afterTask);
   if (photoUpdateAction !== "normal") {

@@ -163,6 +163,7 @@ const assignScheduledWorkOrderToGroupEmployeeCallable = httpsCallable(
 );
 const getScheduledGeneratedWorkOrderForEditCallable = httpsCallable(functions, "getScheduledGeneratedWorkOrderForEdit");
 const updateScheduledGeneratedWorkOrderCallable = httpsCallable(functions, "updateScheduledGeneratedWorkOrder");
+const convertScheduledGeneratedWorkOrderToDraftCallable = httpsCallable(functions, "convertScheduledGeneratedWorkOrderToDraft");
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -9804,6 +9805,53 @@ async function openScheduledWorkOrderEditorFromTicket(workOrderId, button) {
   }
 }
 
+async function convertScheduledTicketToOrdinaryDraft(workOrderId, button) {
+  const workOrder = state.workOrders.find((item) => item.id === workOrderId);
+  if (!isAdminProfile() || !workOrder?.scheduleId || workOrder.scheduledWorkOrder !== true
+    || workOrder.status !== "draft" || workOrder.scheduledGroupAssignmentPending !== true) {
+    toast("Phiếu này không còn là Phiếu chưa giao việc được tạo từ lịch.", "error");
+    return;
+  }
+  if (workOrder.scheduledEditDeletePolicy === "locked") {
+    toast("Lịch này đã khóa Sửa-Xóa và không thể chuyển Phiếu.", "info");
+    return;
+  }
+  const confirmed = await requestDestructiveConfirmation({
+    title: "Chuyển thành Phiếu chưa giao việc thông thường?",
+    message: `Giữ nguyên Phiếu “${workOrder.name || "Phiếu công việc"}” và các công việc bên trong, nhưng ngừng bộ đếm giao theo lịch.`,
+    details: "Nếu lịch này đã tạo Phiếu nghỉ trưa tự động vì quá giờ, chỉ các Phiếu nghỉ trưa liên quan sẽ được kết thúc. Lịch lặp của ngày khác không thay đổi.",
+    confirmLabel: "Đã mang đến"
+  });
+  if (!confirmed) return;
+
+  setButtonLoading(button, true, "Đang chuyển...");
+  try {
+    const result = await convertScheduledGeneratedWorkOrderToDraftCallable({ workOrderId });
+    if (result?.data?.converted !== true) throw new Error("Máy chủ chưa xác nhận chuyển Phiếu.");
+    state.workOrders = state.workOrders.map((item) => item.id === workOrderId
+      ? { ...item, scheduledWorkOrder: false, scheduledGroupAssignmentPending: false, scheduleId: "" }
+      : item);
+    state.tasks = state.tasks.map((item) => item.workOrderId === workOrderId
+      ? { ...item, scheduledWorkOrder: false, scheduledPhotoRequirementLocked: false, scheduleId: "" }
+      : item);
+    state.scheduledWorkOrders = state.scheduledWorkOrders.map((item) => item.id === workOrder.scheduleId
+      ? { ...item, status: "converted", generatedWorkOrderId: "" }
+      : item);
+    renderAdminTasks();
+    toast("Đã chuyển thành Phiếu chưa giao việc thông thường. Bạn có thể Sửa phiếu hoặc Giao việc như bình thường.", "success");
+    if (result.data.recurrenceVerified === false) {
+      toast("Phiếu đã chuyển, nhưng chưa xác nhận được lịch lặp ngày tiếp theo. Hãy kiểm tra Danh sách lịch.", "error");
+    }
+  } catch (error) {
+    console.error(error);
+    toast(error?.code === "functions/not-found"
+      ? "Máy chủ Firebase chưa triển khai chức năng chuyển Phiếu."
+      : error?.message || "Không chuyển được Phiếu thành Phiếu thông thường.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 async function openScheduledDraftEditor(workOrderId, button) {
   if (!isAdminProfile()) {
     toast("Chỉ Admin được chỉnh sửa Phiếu lên lịch trước khi giao.", "error");
@@ -10990,6 +11038,7 @@ function scheduledWorkOrderStatusLabel(status, waitingForAvailableEmployee = fal
   return ({
     pending: "Đang chờ đến giờ",
     generated: "Đã tạo Phiếu chưa giao việc",
+    converted: "Đã chuyển thành Phiếu thường",
     assigned: "Đã giao việc",
     deleted: "Đã xóa",
     replaced: "Đã thay thế",
@@ -11053,6 +11102,7 @@ function scheduledWorkOrderMatchesStatusFilter(schedule, filterValue = "all") {
   if (filterValue === "unassigned") return status === "pending" || status === "generated";
   if (filterValue === "deleted") return status === "deleted";
   if (filterValue === "replaced") return status === "replaced";
+  if (filterValue === "converted") return status === "converted";
   return true;
 }
 
@@ -11061,7 +11111,8 @@ function scheduledWorkOrderFilterLabel(filterValue = "all") {
     unassigned: "Chưa giao việc",
     assigned: "Đã giao việc",
     deleted: "Đã xóa",
-    replaced: "Đã thay thế"
+    replaced: "Đã thay thế",
+    converted: "Đã chuyển thành Phiếu thường"
   })[filterValue] || "Tất cả trạng thái";
 }
 
@@ -11147,7 +11198,7 @@ function renderScheduledWorkOrderList() {
   if (!els.scheduledWorkOrderList) return;
   const schedules = Array.isArray(state.scheduledWorkOrders) ? state.scheduledWorkOrders : [];
   const replacementTargets = scheduledReplacementTargets(schedules);
-  const activeStatusFilter = ["all", "unassigned", "assigned", "deleted", "replaced"].includes(state.scheduledWorkOrderStatusFilter)
+  const activeStatusFilter = ["all", "unassigned", "assigned", "deleted", "replaced", "converted"].includes(state.scheduledWorkOrderStatusFilter)
     ? state.scheduledWorkOrderStatusFilter
     : "all";
   const activeTimeFilter = normalizeScheduledWorkOrderTimeFilter(state.scheduledWorkOrderTimeFilter);
@@ -11401,7 +11452,7 @@ els.viewScheduledWorkOrdersBtn?.addEventListener("click", () => {
 });
 els.scheduledWorkOrderStatusFilter?.addEventListener("change", () => {
   const nextFilter = els.scheduledWorkOrderStatusFilter?.value || "all";
-  state.scheduledWorkOrderStatusFilter = ["unassigned", "assigned", "deleted", "replaced"].includes(nextFilter) ? nextFilter : "all";
+  state.scheduledWorkOrderStatusFilter = ["unassigned", "assigned", "deleted", "replaced", "converted"].includes(nextFilter) ? nextFilter : "all";
   renderScheduledWorkOrderList();
 });
 els.scheduledWorkOrderTimeFilter?.addEventListener("change", () => {
@@ -15337,6 +15388,9 @@ function renderTicketGroup(group, mode = "admin") {
     if (isScheduledGroupPending && group.tasks.length) {
       const cachedSchedule = state.scheduledWorkOrders.find((item) => item.id === workOrder?.scheduleId);
       if (isAdminProfile() && workOrder?.scheduledEditDeletePolicy !== "locked" && cachedSchedule?.editDeletePolicy !== "locked") {
+        if (workOrder?.scheduleId) {
+          actionButtons.push(`<button class="btn secondary small" data-action="convert-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">📦 Đã mang đến</button>`);
+        }
         actionButtons.push(`<button class="btn ghost small" data-action="edit-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Chỉnh sửa</button>`);
         if (workOrder?.scheduleId) {
           actionButtons.push(`<button class="btn ghost small" data-action="reschedule-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">🗓 Dời lịch</button>`);
@@ -16993,6 +17047,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "edit-scheduled-draft") {
     await openScheduledDraftEditor(button.dataset.workOrderId, button);
+  }
+
+  if (action === "convert-scheduled-draft") {
+    await convertScheduledTicketToOrdinaryDraft(button.dataset.workOrderId, button);
   }
 
   if (action === "reschedule-scheduled-draft") {

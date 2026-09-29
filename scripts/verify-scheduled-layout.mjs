@@ -627,6 +627,7 @@ await send("Runtime.evaluate", {
     ticket.innerHTML = '<div class="ticket-group-toolbar">'
       + '<div class="ticket-group-header"><div><span class="ticket-badge">Chưa giao việc</span><h4>Phiếu được tạo từ lịch - 1 công việc</h4></div></div>'
       + '<div class="ticket-actions">'
+      + '<button class="btn secondary small" type="button">📦 Đã mang đến</button>'
       + '<button class="btn ghost small" type="button">✏️ Chỉnh sửa</button>'
       + '<button class="btn ghost small" type="button">🗓 Dời lịch</button>'
       + '<button class="btn schedule-work-order-btn small" type="button">👤 Giao cho nhóm</button>'
@@ -655,7 +656,7 @@ for (const profile of profiles) {
       const card = ticket.getBoundingClientRect();
       const boxes = buttons.map((button) => button.getBoundingClientRect());
       return {
-        fourButtons: buttons.length === 4,
+        fiveButtons: buttons.length === 5,
         cardInsideViewport: card.left >= -0.5 && card.right <= innerWidth + 0.5,
         buttonsInsideCard: boxes.every((box) => box.left >= card.left - 0.5 && box.right <= card.right + 0.5),
         buttonsDoNotOverlap: boxes.every((box, index) => boxes.every((other, otherIndex) =>
@@ -667,10 +668,10 @@ for (const profile of profiles) {
     })()`
   });
   const result = measurement.result.value;
-  const passed = result.fourButtons && result.cardInsideViewport && result.buttonsInsideCard
+  const passed = result.fiveButtons && result.cardInsideViewport && result.buttonsInsideCard
     && result.buttonsDoNotOverlap && result.scrollWidth <= result.viewportWidth;
-  console.log(`${passed ? "PASS" : "FAIL"} | Nút Dời lịch ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
-  if (!passed) failures.push({ profile: `Nút Dời lịch ${profile.name}`, result });
+  console.log(`${passed ? "PASS" : "FAIL"} | Nút Đã mang đến ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
+  if (!passed) failures.push({ profile: `Nút Đã mang đến ${profile.name}`, result });
 }
 
 socket.close();
