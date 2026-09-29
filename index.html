@@ -12092,7 +12092,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260929-schedule-lock-save-v102"></script>
+  <script type="module" src="app.js?v=20260929-schedule-page-v103"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12925,6 +12925,35 @@
       height:calc(100dvh - 16px); max-height:calc(100dvh - 16px)!important; margin:0 auto!important;
     }
     #scheduledWorkOrderListModal .modal-header .muted { display:none; }
+  }
+
+  /* Trang Lên lịch dùng lại biểu mẫu tạo Phiếu, nhưng không dùng lớp phủ modal. */
+  body.schedule-page-open #floatingCreateTaskBtn { display:none!important; }
+  #taskModal.is-schedule-mode:not(.hidden) {
+    position:relative!important; inset:auto!important; z-index:auto!important;
+    display:block!important; width:min(100%, 1400px)!important; max-width:100%!important;
+    min-width:0!important; margin:0 auto!important;
+    padding:32px clamp(12px,3vw,36px) 60px!important;
+    box-sizing:border-box!important; overflow:visible!important;
+  }
+  #taskModal.is-schedule-mode .modal-backdrop { display:none!important; }
+  #taskModal.is-schedule-mode .task-create-modal-card {
+    display:block!important; position:relative!important;
+    width:100%!important; max-width:100%!important; min-width:0!important;
+    height:auto!important; max-height:none!important; margin:0!important;
+    box-sizing:border-box!important; overflow:visible!important; clip-path:none!important;
+    border-radius:26px!important; box-shadow:0 16px 44px rgba(15,23,42,.08)!important;
+    scrollbar-gutter:auto!important;
+  }
+  #taskModal.is-schedule-mode .task-create-modal-header { position:static!important; }
+  #taskModal.is-schedule-mode .task-create-actions { position:static!important; }
+  @media (max-width:640px) {
+    #taskModal.is-schedule-mode:not(.hidden) {
+      padding:16px max(10px,env(safe-area-inset-right,0px))
+        max(30px,env(safe-area-inset-bottom,0px))
+        max(10px,env(safe-area-inset-left,0px))!important;
+    }
+    #taskModal.is-schedule-mode .task-create-modal-card { border-radius:22px!important; }
   }
 </style>
 

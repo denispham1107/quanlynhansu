@@ -15,6 +15,7 @@ const browserPath = browserCandidates.find(existsSync);
 if (!browserPath) throw new Error("Không tìm thấy Chrome hoặc Edge để kiểm tra responsive.");
 
 const profiles = [
+  { name: "Desktop 1440", width: 1440, height: 900, mobile: false },
   { name: "iPhone 320 dọc", width: 320, height: 700 },
   { name: "iPhone 375 dọc", width: 375, height: 812 },
   { name: "iPhone 390 dọc", width: 390, height: 844 },
@@ -203,22 +204,18 @@ const prepareExpression = `(() => {
   const config = document.getElementById("scheduledWorkOrderConfig");
   const actions = form?.querySelector(".task-create-actions");
   if (!modal || !card || !form || !config || !actions) throw new Error("Thiếu DOM của form lên lịch.");
+  document.getElementById("appView").classList.remove("hidden");
+  document.getElementById("adminView").classList.add("hidden");
+  document.body.classList.add("schedule-page-open");
   modal.classList.remove("hidden");
   modal.classList.add("is-schedule-mode");
+  modal.setAttribute("role", "main");
+  modal.removeAttribute("aria-modal");
   config.classList.remove("hidden");
-  form.replaceChildren(config, actions);
   document.getElementById("saveDraftBtn")?.classList.add("hidden");
   document.getElementById("createTaskBtn")?.classList.add("hidden");
   document.getElementById("viewScheduledWorkOrdersBtn")?.classList.remove("hidden");
   document.getElementById("scheduleWorkOrderBtn")?.classList.remove("hidden");
-  card.replaceChildren(form);
-  modal.style.cssText = "display:block!important;position:relative!important;inset:auto!important;width:100%!important;padding:8px!important;";
-  card.style.cssText = "display:block!important;width:100%!important;max-width:100%!important;margin:0!important;";
-  form.style.cssText = "display:block!important;width:100%!important;padding:8px!important;";
-  [...document.body.children].forEach((child) => {
-    if (child !== modal && child.tagName !== "STYLE" && child.tagName !== "LINK") child.style.display = "none";
-  });
-  document.body.style.margin = "0";
   document.getElementById("scheduledWorkOrderDate").value = "2026-09-20";
   document.getElementById("scheduledWorkOrderTime").value = "22:57:30";
   document.getElementById("scheduledWorkOrderCountdownMinutes").value = "15";
@@ -231,8 +228,8 @@ for (const profile of profiles) {
   await send("Emulation.setDeviceMetricsOverride", {
     width: profile.width,
     height: profile.height,
-    deviceScaleFactor: 3,
-    mobile: true,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
     screenWidth: profile.width,
     screenHeight: profile.height,
   });
@@ -247,6 +244,8 @@ for (const profile of profiles) {
       };
       const config = box(document.getElementById("scheduledWorkOrderConfig"));
       const actions = box(document.querySelector(".task-create-actions"));
+      const page = box(document.getElementById("taskModal"));
+      const card = box(document.querySelector("#taskModal .task-create-modal-card"));
       const shells = [...document.querySelectorAll(".scheduled-control-shell")].map(box);
       const controls = [...document.querySelectorAll(".scheduled-control-shell > input, .scheduled-control-shell > select")].map(box);
       const actionButtons = [...document.querySelectorAll(".task-create-actions > .btn:not(.hidden)")].map(box);
@@ -264,6 +263,12 @@ for (const profile of profiles) {
         viewport: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
         columns: getComputedStyle(document.querySelector(".scheduled-work-order-config-grid")).gridTemplateColumns,
+        pagePosition: getComputedStyle(document.getElementById("taskModal")).position,
+        cardMaxHeight: getComputedStyle(document.querySelector("#taskModal .task-create-modal-card")).maxHeight,
+        backdropDisplay: getComputedStyle(document.querySelector("#taskModal .modal-backdrop")).display,
+        dashboardHidden: document.getElementById("adminView").classList.contains("hidden"),
+        page,
+        card,
         config,
         actions,
         shells,
@@ -278,6 +283,14 @@ for (const profile of profiles) {
   });
   const result = measurement.result.value;
   const passed = result.display === "grid"
+    && result.pagePosition !== "fixed"
+    && result.cardMaxHeight === "none"
+    && result.backdropDisplay === "none"
+    && result.dashboardHidden
+    && result.page.left >= -0.5
+    && result.page.right <= profile.width + 0.5
+    && result.card.left >= result.page.left - 0.5
+    && result.card.right <= result.page.right + 0.5
     && result.shells.length === 6
     && result.controls.length === 6
     && result.actionButtons.length === 2
@@ -325,8 +338,8 @@ for (const profile of profiles) {
   await send("Emulation.setDeviceMetricsOverride", {
     width: profile.width,
     height: profile.height,
-    deviceScaleFactor: 3,
-    mobile: true,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
     screenWidth: profile.width,
     screenHeight: profile.height,
   });

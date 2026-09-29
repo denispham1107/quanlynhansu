@@ -219,6 +219,8 @@ const state = {
   scheduledWorkOrderDateFromFilter: "",
   scheduledWorkOrderDateToFilter: "",
   scheduledListReturnToTaskModal: false,
+  schedulePageReturnScrollY: 0,
+  schedulePageScrollY: 0,
   editingWorkTemplateId: null,
   adminStatusFilter: "all",
   adminCompletedTypeFilter: "all",
@@ -5605,6 +5607,9 @@ onAuthStateChanged(auth, async (user) => {
 
 function showLogin() {
   stopImageGalleryListener();
+  els.taskModal?.classList.add("hidden");
+  els.scheduledWorkOrderListModal?.classList.add("hidden");
+  document.body.classList.remove("schedule-page-open");
   els.loginView.classList.remove("hidden");
   els.appView.classList.add("hidden");
   els.adminView.classList.add("hidden");
@@ -5820,6 +5825,10 @@ function applyManagementPermissionUI() {
   if (!canAccessEmployees && els.employeeManagerView && !els.employeeManagerView.classList.contains("hidden")) {
     els.employeeManagerView.classList.add("hidden");
     els.adminView?.classList.remove("hidden");
+  }
+
+  if (!isAdmin && document.body.classList.contains("schedule-page-open")) {
+    closeTaskModal();
   }
 
   if (!canCreate && els.taskModal && !els.taskModal.classList.contains("hidden")) {
@@ -9151,6 +9160,16 @@ function setTaskModalMode(mode = "create") {
   const scheduleMode = mode === "schedule";
   state.taskModalMode = scheduleMode ? "schedule" : "create";
   els.taskModal?.classList.toggle("is-schedule-mode", scheduleMode);
+  if (els.taskModal) {
+    els.taskModal.setAttribute("role", scheduleMode ? "main" : "dialog");
+    if (scheduleMode) els.taskModal.removeAttribute("aria-modal");
+    else els.taskModal.setAttribute("aria-modal", "true");
+  }
+  const closeButton = els.taskModal?.querySelector(".task-create-close-btn");
+  if (closeButton) {
+    closeButton.textContent = scheduleMode ? "←" : "×";
+    closeButton.setAttribute("aria-label", scheduleMode ? "Quay lại trang quản lý" : "Đóng");
+  }
   els.scheduledWorkOrderConfig?.classList.toggle("hidden", !scheduleMode);
   els.saveDraftBtn?.classList.toggle("hidden", scheduleMode);
   els.createTaskBtn?.classList.toggle("hidden", scheduleMode);
@@ -9188,10 +9207,18 @@ function updateScheduledCountdownPreview() {
 }
 
 function closeTaskModal() {
+  const leavingSchedulePage = state.taskModalMode === "schedule";
   els.taskModal?.classList.add("hidden");
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = "";
   setTaskModalMode("create");
+  if (leavingSchedulePage) {
+    els.scheduledWorkOrderListModal?.classList.add("hidden");
+    state.scheduledListReturnToTaskModal = false;
+    document.body.classList.remove("schedule-page-open");
+    els.adminView?.classList.remove("hidden");
+    window.scrollTo({ top: state.schedulePageReturnScrollY || 0, behavior: "auto" });
+  }
 }
 
 function openCreateWorkOrderModal() {
@@ -9252,9 +9279,18 @@ function openScheduledWorkOrderModal() {
     return;
   }
 
+  state.schedulePageReturnScrollY = window.scrollY || 0;
+  state.schedulePageScrollY = 0;
   resetScheduledWorkOrderFormForCreate();
+  els.adminView?.classList.add("hidden");
+  els.workTemplateView?.classList.add("hidden");
+  els.employeeManagerView?.classList.add("hidden");
+  els.photoReportView?.classList.add("hidden");
+  els.imageGalleryView?.classList.add("hidden");
+  document.body.classList.add("schedule-page-open");
   els.taskModal.classList.remove("hidden");
   setMobileTaskPanelMenuOpen(false);
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 els.openScheduledWorkOrderBtn?.addEventListener("click", openScheduledWorkOrderModal);
@@ -9354,6 +9390,8 @@ function openScheduledWorkOrderEditor(scheduleId) {
 
   els.scheduledWorkOrderListModal?.classList.add("hidden");
   els.taskModal?.classList.remove("hidden");
+  document.body.classList.add("schedule-page-open");
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 function openEditWorkOrderModal(workOrderId) {
@@ -10358,6 +10396,7 @@ function returnToScheduledWorkOrderModal() {
   if (state.scheduledListReturnToTaskModal) {
     setTaskModalMode("schedule");
     els.taskModal?.classList.remove("hidden");
+    window.scrollTo({ top: state.schedulePageScrollY || 0, behavior: "auto" });
   }
   state.scheduledListReturnToTaskModal = false;
 }
@@ -10580,6 +10619,7 @@ async function openScheduledWorkOrderListModal() {
     && els.taskModal
     && !els.taskModal.classList.contains("hidden")
   );
+  if (state.scheduledListReturnToTaskModal) state.schedulePageScrollY = window.scrollY || 0;
   els.taskModal?.classList.add("hidden");
   els.scheduledWorkOrderListModal?.classList.remove("hidden");
   setButtonLoading(els.viewScheduledWorkOrdersBtn, true, "Đang tải...");
