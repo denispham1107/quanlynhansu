@@ -219,6 +219,9 @@ const state = {
   taskModalMode: "create",
   scheduledAssignmentWorkOrderId: "",
   scheduledWorkOrders: [],
+  deletingScheduledWorkOrderId: "",
+  scheduledDeleteListScrollTop: 0,
+  scheduledDeleteSubmitting: false,
   scheduledWorkOrderStatusFilter: "all",
   scheduledWorkOrderTimeFilter: "today",
   scheduledWorkOrderDateFilter: "",
@@ -1136,6 +1139,12 @@ const els = {
   saveScheduledDraftEditBtn: $("#saveScheduledDraftEditBtn"),
   scheduledWorkOrderListModal: $("#scheduledWorkOrderListModal"),
   scheduledWorkOrderList: $("#scheduledWorkOrderList"),
+  scheduledWorkOrderDeleteModal: $("#scheduledWorkOrderDeleteModal"),
+  scheduledWorkOrderDeleteForm: $("#scheduledWorkOrderDeleteForm"),
+  scheduledWorkOrderDeleteSummary: $("#scheduledWorkOrderDeleteSummary"),
+  scheduledWorkOrderDeleteReason: $("#scheduledWorkOrderDeleteReason"),
+  scheduledWorkOrderDeleteError: $("#scheduledWorkOrderDeleteError"),
+  confirmScheduledWorkOrderDeleteBtn: $("#confirmScheduledWorkOrderDeleteBtn"),
   scheduledWorkOrderStatusFilter: $("#scheduledWorkOrderStatusFilter"),
   scheduledWorkOrderTimeFilter: $("#scheduledWorkOrderTimeFilter"),
   scheduledWorkOrderDateFilterField: $("#scheduledWorkOrderDateFilterField"),
@@ -5748,6 +5757,9 @@ function showLogin() {
   stopImageGalleryListener();
   els.taskModal?.classList.add("hidden");
   els.scheduledWorkOrderListModal?.classList.add("hidden");
+  els.scheduledWorkOrderDeleteModal?.classList.add("hidden");
+  state.deletingScheduledWorkOrderId = "";
+  document.body.classList.remove("scheduled-delete-dialog-open");
   document.body.classList.remove("schedule-page-open");
   els.startupView?.classList.add("hidden");
   els.loginView.classList.remove("hidden");
@@ -11082,10 +11094,13 @@ function renderScheduledWorkOrderList() {
           <span>${escapeHtml(repeatLabel)}</span>
           <span>Đếm ngược ${countdownMinutes} phút</span>
           <span>${deleted ? "Chỉ lưu lịch sử" : schedule.editDeletePolicy === "locked" ? "🔒 Không cho Sửa-Xóa" : "Cho phép Sửa-Xóa"}</span>
-          <span>${escapeHtml(scheduledWorkOrderStatusLabel(
+          <span class="scheduled-work-order-status-badge">${escapeHtml(scheduledWorkOrderStatusLabel(
             schedule.status,
             schedule.assignmentCountdownWaitingForAvailableEmployee === true
           ))}</span>
+          ${deleted && schedule.deletionReason
+            ? `<span class="scheduled-work-order-deletion-reason">Lý do: ${escapeHtml(schedule.deletionReason)}</span>`
+            : ""}
         </div>
       </article>
     `;
@@ -11131,7 +11146,21 @@ async function openScheduledWorkOrderListModal() {
   }
 }
 
-async function deleteScheduledWorkOrder(scheduleId, button) {
+function closeScheduledWorkOrderDeleteModal() {
+  if (state.scheduledDeleteSubmitting) return;
+  const scheduleId = state.deletingScheduledWorkOrderId;
+  state.deletingScheduledWorkOrderId = "";
+  els.scheduledWorkOrderDeleteModal?.classList.add("hidden");
+  els.scheduledWorkOrderListModal?.classList.remove("hidden");
+  document.body.classList.remove("scheduled-delete-dialog-open");
+  const content = els.scheduledWorkOrderListModal?.querySelector(".scheduled-work-order-list-content");
+  if (content) content.scrollTop = state.scheduledDeleteListScrollTop;
+  const originalButton = [...(els.scheduledWorkOrderList?.querySelectorAll("[data-delete-scheduled-work-order]") || [])]
+    .find((button) => button.dataset.deleteScheduledWorkOrder === scheduleId);
+  (originalButton || els.scheduledWorkOrderStatusFilter)?.focus();
+}
+
+function openScheduledWorkOrderDeleteModal(scheduleId) {
   if (!isAdminProfile()) {
     toast("Chỉ Admin được xóa lịch Phiếu công việc.", "error");
     return;
@@ -11145,28 +11174,71 @@ async function deleteScheduledWorkOrder(scheduleId, button) {
     toast("Lịch này đã khóa Sửa-Xóa và không thể xóa.", "info");
     return;
   }
-  const scheduledAt = formatScheduledListDateTime(schedule.scheduledForMs);
-  const confirmed = window.confirm(
-    `Xóa lịch “${schedule.name || "Phiếu công việc"}” lúc ${scheduledAt}?\n\n`
-    + "Lịch sẽ ngừng hoạt động và chỉ còn dòng lịch sử màu đỏ trong danh sách. Hành động này không thể hoàn tác. "
-    + "Nếu Phiếu chưa giao việc đã được tạo từ lịch này, Phiếu đó cũng sẽ bị xóa."
-  );
-  if (!confirmed) return;
+  state.deletingScheduledWorkOrderId = scheduleId;
+  state.scheduledDeleteListScrollTop = els.scheduledWorkOrderListModal
+    ?.querySelector(".scheduled-work-order-list-content")?.scrollTop || 0;
+  if (els.scheduledWorkOrderDeleteSummary) {
+    els.scheduledWorkOrderDeleteSummary.textContent = `“${schedule.name || "Phiếu công việc"}” • ${formatScheduledListDateTime(schedule.scheduledForMs)}`;
+  }
+  if (els.scheduledWorkOrderDeleteReason) els.scheduledWorkOrderDeleteReason.value = "";
+  els.scheduledWorkOrderDeleteError?.classList.add("hidden");
+  els.scheduledWorkOrderListModal?.classList.add("hidden");
+  els.scheduledWorkOrderDeleteModal?.classList.remove("hidden");
+  document.body.classList.add("scheduled-delete-dialog-open");
+  requestAnimationFrame(() => els.scheduledWorkOrderDeleteReason?.focus());
+}
 
-  setButtonLoading(button, true, "…");
+async function deleteScheduledWorkOrder(event) {
+  event.preventDefault();
+  if (state.scheduledDeleteSubmitting) return;
+  const scheduleId = state.deletingScheduledWorkOrderId;
+  const reason = String(els.scheduledWorkOrderDeleteReason?.value || "").trim();
+  if (!reason || reason.length > 500) {
+    if (els.scheduledWorkOrderDeleteError) {
+      els.scheduledWorkOrderDeleteError.textContent = "Vui lòng nhập lý do xóa lịch (tối đa 500 ký tự).";
+      els.scheduledWorkOrderDeleteError.classList.remove("hidden");
+    }
+    els.scheduledWorkOrderDeleteReason?.focus();
+    return;
+  }
+  const schedule = state.scheduledWorkOrders.find((item) => item.id === scheduleId);
+  if (!isAdminProfile() || !schedule || !canDeleteScheduledWorkOrder(schedule)) {
+    closeScheduledWorkOrderDeleteModal();
+    toast("Lịch này không còn có thể xóa.", "error");
+    return;
+  }
+
+  state.scheduledDeleteSubmitting = true;
+  setButtonLoading(els.confirmScheduledWorkOrderDeleteBtn, true, "Đang xóa...");
   try {
-    await deleteScheduledWorkOrderCallable({ scheduleId });
+    await deleteScheduledWorkOrderCallable({ scheduleId, reason });
     state.scheduledWorkOrders = state.scheduledWorkOrders.map((item) => item.id === scheduleId
-      ? { ...item, status: "deleted", deletedAtMs: Date.now() }
+      ? { ...item, status: "deleted", deletionReason: reason, deletedAtMs: Date.now() }
       : item);
     renderScheduledWorkOrderList();
+    state.scheduledDeleteSubmitting = false;
+    closeScheduledWorkOrderDeleteModal();
     toast(`Đã xóa lịch “${schedule.name || "Phiếu công việc"}”; dòng lịch sử vẫn được giữ lại.`, "success");
   } catch (error) {
     console.error(error);
+    if (els.scheduledWorkOrderDeleteError) {
+      els.scheduledWorkOrderDeleteError.textContent = error?.message || "Không thể xóa lịch Phiếu công việc.";
+      els.scheduledWorkOrderDeleteError.classList.remove("hidden");
+    }
     toast(error?.message || "Không thể xóa lịch Phiếu công việc.", "error");
-    setButtonLoading(button, false);
+  } finally {
+    state.scheduledDeleteSubmitting = false;
+    setButtonLoading(els.confirmScheduledWorkOrderDeleteBtn, false);
   }
 }
+
+els.scheduledWorkOrderDeleteForm?.addEventListener("submit", deleteScheduledWorkOrder);
+els.scheduledWorkOrderDeleteReason?.addEventListener("input", () => {
+  els.scheduledWorkOrderDeleteError?.classList.add("hidden");
+});
+$$('[data-cancel-scheduled-delete]').forEach((button) => {
+  button.addEventListener("click", closeScheduledWorkOrderDeleteModal);
+});
 
 els.viewScheduledWorkOrdersBtn?.addEventListener("click", () => {
   if (state.editingScheduledWorkOrderId) {
@@ -11213,7 +11285,7 @@ $$('[data-back-scheduled-work-order-list]').forEach((button) => {
 els.scheduledWorkOrderList?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-delete-scheduled-work-order]");
   if (button) {
-    deleteScheduledWorkOrder(button.dataset.deleteScheduledWorkOrder || "", button);
+    openScheduledWorkOrderDeleteModal(button.dataset.deleteScheduledWorkOrder || "");
     return;
   }
   const item = event.target.closest("[data-edit-scheduled-work-order]");
@@ -11228,6 +11300,11 @@ els.scheduledWorkOrderList?.addEventListener("keydown", (event) => {
   openScheduledWorkOrderEditor(item.dataset.editScheduledWorkOrder || "");
 });
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.scheduledWorkOrderDeleteModal?.classList.contains("hidden")) {
+    event.preventDefault();
+    closeScheduledWorkOrderDeleteModal();
+    return;
+  }
   if (event.key !== "Escape" || els.scheduledWorkOrderListModal?.classList.contains("hidden")) return;
   event.preventDefault();
   returnToScheduledWorkOrderModal();

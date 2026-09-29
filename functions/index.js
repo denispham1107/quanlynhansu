@@ -1381,7 +1381,8 @@ exports.listScheduledWorkOrders = onCall({
       assignmentDeadlineAtMs: firestoreTimestampOrNull(item.assignmentDeadlineAt)?.toMillis() || 0,
       generatedWorkOrderId: String(item.generatedWorkOrderId || ""),
       createdAtMs: firestoreTimestampOrNull(item.createdAt)?.toMillis() || 0,
-      deletedAtMs: firestoreTimestampOrNull(item.deletedAt)?.toMillis() || 0
+      deletedAtMs: firestoreTimestampOrNull(item.deletedAt)?.toMillis() || 0,
+      deletionReason: String(item.deletionReason || "")
     }));
 
   return { schedules };
@@ -1396,8 +1397,12 @@ exports.deleteScheduledWorkOrder = onCall({
   const adminUid = assertAuthenticated(request);
   await assertAdmin(adminUid);
   const scheduleId = String(request.data?.scheduleId || "").trim();
+  const deletionReason = typeof request.data?.reason === "string" ? request.data.reason.trim() : "";
   if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) {
     throw new HttpsError("invalid-argument", "Lịch Phiếu công việc không hợp lệ.");
+  }
+  if (!deletionReason || deletionReason.length > 500) {
+    throw new HttpsError("invalid-argument", "Vui lòng nhập lý do xóa lịch (tối đa 500 ký tự).");
   }
 
   const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
@@ -1419,11 +1424,12 @@ exports.deleteScheduledWorkOrder = onCall({
     transaction.update(scheduleRef, {
       status: "deleting",
       deletionPreviousStatus,
+      deletionReason,
       deletingAt: Timestamp.now(),
       deletingByUid: adminUid,
       updatedAt: Timestamp.now()
     });
-    return { ...currentSchedule, deletionPreviousStatus };
+    return { ...currentSchedule, deletionPreviousStatus, deletionReason };
   });
 
   const generatedWorkOrderId = String(schedule.generatedWorkOrderId || "").trim();
@@ -1490,6 +1496,7 @@ exports.deleteScheduledWorkOrder = onCall({
     occurrenceIndex: Math.max(0, Math.trunc(Number(schedule.occurrenceIndex || 0))),
     status: "deleted",
     deletionPreviousStatus: String(schedule.deletionPreviousStatus || "pending").slice(0, 40),
+    deletionReason: String(schedule.deletionReason || "").trim().slice(0, 500),
     createdByUid: adminUid,
     createdAt: schedule.createdAt || deletedAt,
     deletedAt,

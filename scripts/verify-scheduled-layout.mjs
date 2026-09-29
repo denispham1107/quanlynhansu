@@ -545,6 +545,63 @@ for (const profile of profiles) {
   if (!passed) failures.push({ profile: `Danh sách lịch ${profile.name}`, result });
 }
 
+await send("Runtime.evaluate", {
+  returnByValue: true,
+  expression: `(() => {
+    document.getElementById("scheduledWorkOrderListModal").classList.add("hidden");
+    document.getElementById("scheduledWorkOrderDeleteModal").classList.remove("hidden");
+    document.body.classList.add("scheduled-delete-dialog-open");
+    document.getElementById("scheduledWorkOrderDeleteSummary").textContent = "Phiếu công việc cần xóa • 09:00:00 30/09/2026";
+    return true;
+  })()`
+});
+
+for (const profile of profiles) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: profile.width,
+    height: profile.height,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
+    screenWidth: profile.width,
+    screenHeight: profile.height,
+  });
+  await delay(80);
+  const measurement = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const modal = document.getElementById("scheduledWorkOrderDeleteModal");
+      const card = modal.querySelector(".scheduled-work-order-delete-card");
+      const content = modal.querySelector(".scheduled-work-order-delete-content");
+      const reason = document.getElementById("scheduledWorkOrderDeleteReason");
+      const actions = [...modal.querySelectorAll(".modal-footer-actions .btn")];
+      const rect = (element) => element.getBoundingClientRect();
+      const cardRect = rect(card);
+      const contentRect = rect(content);
+      const reasonRect = rect(reason);
+      return {
+        listHidden: document.getElementById("scheduledWorkOrderListModal").classList.contains("hidden"),
+        cardInsideViewport: cardRect.left >= -0.5 && cardRect.right <= innerWidth + 0.5 && cardRect.top >= -0.5 && cardRect.bottom <= innerHeight + 0.5,
+        contentInsideCard: contentRect.left >= cardRect.left - 0.5 && contentRect.right <= cardRect.right + 0.5 && contentRect.top >= cardRect.top - 0.5 && contentRect.bottom <= cardRect.bottom + 0.5,
+        reasonInsideContent: reasonRect.left >= contentRect.left - 0.5 && reasonRect.right <= contentRect.right + 0.5,
+        actionsInsideCard: actions.every((button) => { const buttonRect = rect(button); return buttonRect.left >= cardRect.left - 0.5 && buttonRect.right <= cardRect.right + 0.5 && buttonRect.bottom <= cardRect.bottom + 0.5; }),
+        requiredReason: reason.required && reason.maxLength === 500 && !reason.checkValidity(),
+        pageScrollLocked: getComputedStyle(document.body).overflowY === "hidden",
+        cardOverflow: getComputedStyle(card).overflowY,
+        contentOverflow: getComputedStyle(content).overflowY,
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth
+      };
+    })()`
+  });
+  const result = measurement.result.value;
+  const passed = result.listHidden && result.cardInsideViewport && result.contentInsideCard
+    && result.reasonInsideContent && result.actionsInsideCard && result.requiredReason && result.pageScrollLocked
+    && result.cardOverflow === "hidden" && ["auto", "scroll"].includes(result.contentOverflow)
+    && result.scrollWidth <= result.viewportWidth;
+  console.log(`${passed ? "PASS" : "FAIL"} | Nhập lý do xóa ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
+  if (!passed) failures.push({ profile: `Nhập lý do xóa ${profile.name}`, result });
+}
+
 socket.close();
 browser.kill();
 await Promise.race([

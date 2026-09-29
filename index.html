@@ -11577,6 +11577,32 @@
     </div>
   </div>
 
+  <div id="scheduledWorkOrderDeleteModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="scheduledWorkOrderDeleteTitle">
+    <div class="modal-backdrop" data-cancel-scheduled-delete></div>
+    <div class="modal-card scheduled-work-order-delete-card">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">XÓA LỊCH</p>
+          <h3 id="scheduledWorkOrderDeleteTitle">Lý do xóa lịch</h3>
+          <p id="scheduledWorkOrderDeleteSummary" class="muted"></p>
+        </div>
+        <button class="icon-btn" type="button" data-cancel-scheduled-delete aria-label="Quay lại danh sách lịch">←</button>
+      </div>
+      <form id="scheduledWorkOrderDeleteForm" class="scheduled-work-order-delete-form">
+        <div class="scheduled-work-order-delete-content">
+          <label for="scheduledWorkOrderDeleteReason">Lý do xóa <span aria-hidden="true">*</span></label>
+          <textarea id="scheduledWorkOrderDeleteReason" rows="4" maxlength="500" required placeholder="Nhập lý do xóa lịch..."></textarea>
+          <p id="scheduledWorkOrderDeleteError" class="scheduled-work-order-delete-error hidden" role="alert"></p>
+          <p class="scheduled-work-order-delete-warning">Lịch sẽ ngừng hoạt động và chỉ còn dòng lịch sử màu hồng. Nếu Phiếu chưa giao việc đã được tạo từ lịch này, Phiếu đó cũng sẽ bị xóa. Không thể hoàn tác.</p>
+        </div>
+        <div class="modal-footer-actions">
+          <button class="btn ghost" type="button" data-cancel-scheduled-delete>Hủy</button>
+          <button id="confirmScheduledWorkOrderDeleteBtn" class="btn danger" type="submit">Xác nhận xóa lịch</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
 
   <!-- REASSIGN TASK EMPLOYEE MODAL -->
   <div id="reassignEmployeeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reassignEmployeeModalTitle">
@@ -12133,7 +12159,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260929-scheduled-deleted-history-v109"></script>
+  <script type="module" src="app.js?v=20260930-scheduled-delete-reason-v110"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12954,8 +12980,11 @@
   .scheduled-work-order-list-item.is-deleted {
     border-color:#fca5a5; background:linear-gradient(135deg,#fff1f2,#fef2f2);
   }
-  .scheduled-work-order-list-item.is-deleted .scheduled-work-order-list-meta span:last-child {
+  .scheduled-work-order-list-item.is-deleted .scheduled-work-order-status-badge {
     background:#fee2e2; color:#b91c1c;
+  }
+  .scheduled-work-order-list-item.is-deleted .scheduled-work-order-deletion-reason {
+    min-width:0; max-width:100%; overflow-wrap:anywhere; background:#fce7f3; color:#9d174d;
   }
   .scheduled-work-order-list-item[data-edit-scheduled-work-order] { min-width:0; }
   .scheduled-work-order-list-item.is-editable { cursor:pointer; transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
@@ -12974,6 +13003,38 @@
     font-size:.76rem; font-weight:800;
   }
   .scheduled-work-order-list .empty-state { margin:0; }
+  body.scheduled-delete-dialog-open { overflow:hidden!important; }
+  #scheduledWorkOrderDeleteModal:not(.hidden) {
+    padding:12px max(12px,env(safe-area-inset-right,0px)) 12px max(12px,env(safe-area-inset-left,0px))!important;
+    align-items:center!important; justify-content:center!important; overflow:hidden!important;
+  }
+  #scheduledWorkOrderDeleteModal .scheduled-work-order-delete-card {
+    display:flex!important; flex-direction:column; width:min(520px,100%)!important;
+    max-width:100%!important; max-height:calc(100dvh - 24px)!important; min-height:0;
+    margin:0 auto!important; overflow:hidden!important; box-sizing:border-box;
+  }
+  #scheduledWorkOrderDeleteModal .scheduled-work-order-delete-form {
+    display:flex; flex-direction:column; min-height:0; min-width:0; overflow:hidden;
+  }
+  #scheduledWorkOrderDeleteModal .scheduled-work-order-delete-content {
+    display:grid; gap:9px; min-width:0; min-height:0; padding:0 2px 8px;
+    overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+  }
+  #scheduledWorkOrderDeleteModal .scheduled-work-order-delete-content > label { font-weight:850; }
+  #scheduledWorkOrderDeleteModal #scheduledWorkOrderDeleteReason {
+    display:block; width:100%; min-width:0; max-width:100%; min-height:92px;
+    padding:12px; box-sizing:border-box; resize:vertical; border:1px solid #fda4af;
+    border-radius:12px; background:#fff; color:#172033; font:inherit; font-size:16px;
+  }
+  #scheduledWorkOrderDeleteModal #scheduledWorkOrderDeleteReason:focus {
+    outline:3px solid rgba(244,63,94,.2); border-color:#e11d48;
+  }
+  .scheduled-work-order-delete-error { margin:0; color:#b91c1c; font-weight:750; }
+  .scheduled-work-order-delete-warning {
+    margin:0; padding:10px 12px; border:1px solid #fecdd3; border-radius:12px;
+    background:#fff1f2; color:#9f1239; line-height:1.45;
+  }
+  #scheduledWorkOrderDeleteModal .modal-footer-actions { flex:0 0 auto; }
 
   @media (max-width: 1024px) {
     .scheduled-work-order-config-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
