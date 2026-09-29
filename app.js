@@ -9321,6 +9321,35 @@ function localDateTimeInputValues(date = new Date()) {
   };
 }
 
+function normalize24HourTimeValue(value) {
+  const raw = String(value || "").trim();
+  const separated = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(raw);
+  const compact = /^(\d{2})(\d{2})(\d{2})?$/.exec(raw);
+  const parts = separated || compact;
+  if (!parts) return "";
+  const hours = Number(parts[1]);
+  const minutes = Number(parts[2]);
+  const seconds = Number(parts[3] || 0);
+  if (hours > 23 || minutes > 59 || seconds > 59) return "";
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function resetScheduledWorkOrderTimeValidity() {
+  els.scheduledWorkOrderTime?.setCustomValidity("");
+  els.scheduledWorkOrderTime?.removeAttribute("aria-invalid");
+}
+
+els.scheduledWorkOrderTime?.addEventListener("input", resetScheduledWorkOrderTimeValidity);
+els.scheduledWorkOrderTime?.addEventListener("blur", () => {
+  const input = els.scheduledWorkOrderTime;
+  const normalized = normalize24HourTimeValue(input?.value);
+  if (normalized) input.value = normalized;
+  const invalid = Boolean(input?.value.trim()) && !normalized;
+  input?.setCustomValidity(invalid ? "Nhập giờ theo định dạng 24 giờ HH:mm:ss, ví dụ 21:07:53." : "");
+  if (invalid) input?.setAttribute("aria-invalid", "true");
+  else input?.removeAttribute("aria-invalid");
+});
+
 function normalizeScheduledCountdownMinutes(value) {
   const parsed = Math.trunc(Number(value));
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 1440 ? parsed : 10;
@@ -9382,6 +9411,7 @@ function resetScheduledWorkOrderFormForCreate() {
   const inputs = localDateTimeInputValues(defaultMoment);
   if (els.scheduledWorkOrderDate) els.scheduledWorkOrderDate.value = inputs.date;
   if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = inputs.time;
+  resetScheduledWorkOrderTimeValidity();
   if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = "";
   if (els.scheduledWorkOrderCountdownMinutes) els.scheduledWorkOrderCountdownMinutes.value = "10";
   if (els.scheduledWorkOrderRepeatMode) els.scheduledWorkOrderRepeatMode.value = "none";
@@ -9470,6 +9500,7 @@ function openScheduledWorkOrderEditor(scheduleId) {
   const scheduledInputs = localDateTimeInputValues(scheduledMoment);
   if (els.scheduledWorkOrderDate) els.scheduledWorkOrderDate.value = scheduledInputs.date;
   if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = scheduledInputs.time;
+  resetScheduledWorkOrderTimeValidity();
   if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = schedule.employeeGroupId || "";
   if (els.scheduledWorkOrderCountdownMinutes) {
     els.scheduledWorkOrderCountdownMinutes.value = String(
@@ -10384,14 +10415,20 @@ async function createScheduledWorkOrder(button) {
     const name = els.workOrderName?.value?.trim() || "";
     const employeeGroupId = els.scheduledWorkOrderGroup?.value || "";
     const dateValue = els.scheduledWorkOrderDate?.value || "";
-    const timeValue = els.scheduledWorkOrderTime?.value || "";
+    const rawTimeValue = els.scheduledWorkOrderTime?.value || "";
+    const timeValue = normalize24HourTimeValue(rawTimeValue);
     const assignmentCountdownMinutes = Number(els.scheduledWorkOrderCountdownMinutes?.value || 0);
     const repeatMode = els.scheduledWorkOrderRepeatMode?.value === "daily" ? "daily" : "none";
     const editDeletePolicy = els.scheduledWorkOrderEditDeletePolicy?.value === "locked" ? "locked" : "editable";
     const selectedGroup = state.employeeGroups.find((group) => group.id === employeeGroupId);
 
     if (!name) throw new Error("Vui lòng nhập tên Phiếu công việc.");
-    if (!dateValue || !timeValue) throw new Error("Vui lòng chọn đầy đủ ngày và giờ lên lịch.");
+    if (!dateValue || !rawTimeValue.trim()) throw new Error("Vui lòng chọn đầy đủ ngày và giờ lên lịch.");
+    if (!timeValue) {
+      els.scheduledWorkOrderTime?.focus({ preventScroll: true });
+      throw new Error("Giờ lên lịch phải theo định dạng 24 giờ HH:mm:ss, ví dụ 21:07:53.");
+    }
+    if (els.scheduledWorkOrderTime) els.scheduledWorkOrderTime.value = timeValue;
     if (!selectedGroup) throw new Error("Vui lòng chọn Nhóm nhân viên hợp lệ.");
     if (!Number.isInteger(assignmentCountdownMinutes) || assignmentCountdownMinutes < 1 || assignmentCountdownMinutes > 1440) {
       throw new Error("Thời gian đếm ngược phải là số nguyên từ 1 đến 1440 phút.");

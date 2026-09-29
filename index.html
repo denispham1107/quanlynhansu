@@ -11359,9 +11359,10 @@
               </span>
             </label>
             <label class="scheduled-work-order-time-field">
-              <span>Giờ phút giây</span>
-              <span class="scheduled-control-shell">
-                <input id="scheduledWorkOrderTime" type="time" step="1" />
+              <span>Giờ phút giây (24 giờ)</span>
+              <span class="scheduled-control-shell scheduled-time-shell">
+                <input id="scheduledWorkOrderTime" type="text" inputmode="text" maxlength="8" autocomplete="off" spellcheck="false" placeholder="HH:mm:ss" aria-label="Giờ phút giây theo định dạng 24 giờ" />
+                <svg class="scheduled-time-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.7"/><path d="M12 6.8v5.5l3.7 2.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 2.25v1.5M12 20.25v1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
               </span>
             </label>
             <label class="scheduled-work-order-group-field">
@@ -12113,7 +12114,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260929-startup-v104"></script>
+  <script type="module" src="app.js?v=20260929-24-hour-time-v105"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12792,10 +12793,15 @@
   #taskModal .scheduled-control-shell > select:focus {
     border:0 !important; outline:0 !important; box-shadow:none !important;
   }
+  #taskModal .scheduled-time-shell { position:relative; }
+  #taskModal .scheduled-time-shell > input { padding-right:48px !important; font-variant-numeric:tabular-nums; }
+  #taskModal .scheduled-time-shell > input[aria-invalid="true"] { color:#b91c1c !important; }
+  .scheduled-time-icon {
+    position:absolute; right:14px; top:50%; transform:translateY(-50%);
+    width:22px; height:22px; color:#334155; pointer-events:none;
+  }
   #taskModal .scheduled-control-shell > input[type="date"]::-webkit-date-and-time-value,
-  #taskModal .scheduled-control-shell > input[type="time"]::-webkit-date-and-time-value,
-  #taskModal .scheduled-control-shell > input[type="date"]::-webkit-datetime-edit,
-  #taskModal .scheduled-control-shell > input[type="time"]::-webkit-datetime-edit {
+  #taskModal .scheduled-control-shell > input[type="date"]::-webkit-datetime-edit {
     width:100% !important; min-width:0 !important; max-width:100% !important;
     inline-size:100% !important; min-inline-size:0 !important; max-inline-size:100% !important;
     overflow:hidden !important; box-sizing:border-box !important;
@@ -12904,8 +12910,7 @@
     .scheduled-work-order-group-field { grid-column:1 / -1; }
     .scheduled-work-order-repeat-field { grid-column:auto; }
     .scheduled-work-order-edit-policy-field { grid-column:1 / -1; }
-    #taskModal .scheduled-control-shell > input[type="date"],
-    #taskModal .scheduled-control-shell > input[type="time"] {
+    #taskModal .scheduled-control-shell > input[type="date"] {
       font-size:16px !important; overflow:hidden !important; text-overflow:ellipsis;
     }
     .scheduled-work-order-list-filter { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -12916,7 +12921,7 @@
     #scheduleWorkOrderBtn { width:100%; }
   }
 
-  /* iPhone portrait: native date/time controls have a large intrinsic width.
+  /* iPhone portrait: the native date control has a large intrinsic width.
      One field per row prevents them from overlapping at every iOS text size. */
   @media (max-width: 640px) {
     .scheduled-work-order-config-grid { grid-template-columns:minmax(0,1fr); gap:11px; }

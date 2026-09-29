@@ -248,6 +248,11 @@ for (const profile of profiles) {
       const card = box(document.querySelector("#taskModal .task-create-modal-card"));
       const shells = [...document.querySelectorAll(".scheduled-control-shell")].map(box);
       const controls = [...document.querySelectorAll(".scheduled-control-shell > input, .scheduled-control-shell > select")].map(box);
+      const timeInput = document.getElementById("scheduledWorkOrderTime");
+      const timeShell = timeInput.closest(".scheduled-time-shell");
+      const timeIcon = timeShell.querySelector(".scheduled-time-icon");
+      const timeIconBox = box(timeIcon);
+      const timeShellBox = box(timeShell);
       const actionButtons = [...document.querySelectorAll(".task-create-actions > .btn:not(.hidden)")].map(box);
       const inside = [...shells, ...controls].every((rect) => rect.left >= config.left - 0.5 && rect.right <= config.right + 0.5);
       const shellControlMatch = shells.every((shell, index) => controls[index].left >= shell.left - 0.5 && controls[index].right <= shell.right + 0.5);
@@ -273,6 +278,9 @@ for (const profile of profiles) {
         actions,
         shells,
         controls,
+        timeType: timeInput.type,
+        timeValue: timeInput.value,
+        timeIconInside: timeIconBox.left >= timeShellBox.left && timeIconBox.right <= timeShellBox.right,
         actionButtons,
         inside,
         shellControlMatch,
@@ -293,6 +301,9 @@ for (const profile of profiles) {
     && result.card.right <= result.page.right + 0.5
     && result.shells.length === 6
     && result.controls.length === 6
+    && result.timeType === "text"
+    && result.timeValue === "22:57:30"
+    && result.timeIconInside
     && result.actionButtons.length === 2
     && result.config.width > 0
     && result.shells.every((rect) => rect.width > 0)

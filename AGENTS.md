@@ -10,6 +10,10 @@
 - Sau thay đổi giao diện, phải tăng phiên bản cache của service worker để thiết bị iOS nhận CSS mới.
 - Trước khi commit, kiểm tra ít nhất cú pháp, `git diff --check`, rà soát các media query có thể ghi đè quy tắc mobile ở cuối stylesheet và chạy kiểm tra kích thước thực tế của từng ô so với card cha. Chỉ nhìn mã CSS là chưa đủ để kết luận không tràn.
 
+## Nhập thời gian
+
+- Mọi ô nhập thời gian mới hoặc được chỉnh sửa phải hiển thị và nhận theo khung giờ 24 giờ (`HH:mm` hoặc `HH:mm:ss` khi có giây), không phụ thuộc cách hiển thị AM/PM của trình duyệt hay thiết bị. Kiểm tra giá trị trước khi lưu và giữ đúng định dạng này khi mở lại để sửa.
+
 ## Modal và vùng cuộn
 
 - Không được hiển thị hai modal chồng lên nhau. Khi chuyển từ một modal sang màn hình/modal con, phải ẩn modal nguồn, giữ nguyên dữ liệu đang nhập và cung cấp nút “Quay lại” để khôi phục đúng trạng thái trước đó.
