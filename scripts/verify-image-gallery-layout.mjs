@@ -120,6 +120,16 @@ try {
     && filterColors.foreground === "rgb(15, 23, 42)";
   console.log(`${filterColorsPassed ? "PASS" : "FAIL"} | Menu lọc sáng trong chế độ tối | ${JSON.stringify(filterColors)}`);
   if (!filterColorsPassed) process.exitCode = 1;
+  await send("Runtime.evaluate", { returnByValue: true, expression: `(() => {
+    const summary = document.getElementById("adminEmployeeStatusSummary");
+    summary.classList.remove("hidden");
+    summary.innerHTML = ["free", "assigned", "hotel", "ship", "lunch", "off"].map((type) =>
+      '<button class="employee-status-card is-' + type + '" type="button"><strong><span class="employee-status-short-label">'
+      + (type === "off" ? "Đang Off" : "Trạng thái nhân viên") + '</span><span class="employee-status-count">'
+      + (type === "off" ? "9" : "…") + '</span></strong><div class="employee-status-names">'
+      + (type === "off" ? '<span class="employee-status-chip">Ngọc</span>' : '<span class="employee-status-empty">Đang đồng bộ...</span>')
+      + '</div></button>').join("");
+  })()` });
   for (const [width, height] of profiles) {
     await send("Emulation.setDeviceMetricsOverride", {
       width, height, deviceScaleFactor: width < 1025 ? 3 : 1,
@@ -137,10 +147,18 @@ try {
       const overlap = boxes.some((a, i) => boxes.some((b, j) => j > i
         && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
         && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1));
-      return { inside, overlap, scrollWidth: document.documentElement.scrollWidth };
+      const summary = document.getElementById("adminEmployeeStatusSummary").getBoundingClientRect();
+      const cards = [...document.querySelectorAll("#adminEmployeeStatusSummary > .employee-status-card")]
+        .map((card) => card.getBoundingClientRect());
+      const cardsInside = cards.length === 6 && cards.every((card) => card.left >= summary.left - 1 && card.right <= summary.right + 1);
+      const cardsOverlap = cards.some((a, i) => cards.some((b, j) => j > i
+        && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+        && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1));
+      return { inside, overlap, cardsInside, cardsOverlap, scrollWidth: document.documentElement.scrollWidth };
     })()` });
     const result = adminFilterCheck.result.value;
-    const passed = result.inside && !result.overlap && result.scrollWidth <= width;
+    const passed = result.inside && !result.overlap && result.cardsInside && !result.cardsOverlap
+      && result.scrollWidth <= width;
     console.log(`${passed ? "PASS" : "FAIL"} | Bộ lọc công việc ${width}x${height} | ${JSON.stringify(result)}`);
     if (!passed) process.exitCode = 1;
     if (width <= 768) {

@@ -23,12 +23,14 @@ function extractFunction(name) {
 const buildHelpers = new Function(`
   const state = {
     workOrders: [],
+    workOrderById: new Map(),
     scheduledWorkOrderDateFilter: "",
     scheduledWorkOrderDateFromFilter: "",
     scheduledWorkOrderDateToFilter: ""
   };
   ${extractFunction("timestampToDate")}
   ${extractFunction("toLocalDateInputValue")}
+  ${extractFunction("getWorkOrderMeta")}
   ${extractFunction("getTaskDateValue")}
   ${extractFunction("todayInputValue")}
   ${extractFunction("yesterdayInputValue")}
@@ -86,6 +88,7 @@ helpers.state.workOrders = [{
   scheduledWorkOrder: true,
   scheduledAt: new Date(2026, 8, 23, 9, 0, 0)
 }];
+helpers.state.workOrderById = new Map(helpers.state.workOrders.map((workOrder) => [workOrder.id, workOrder]));
 assert.equal(helpers.getTaskDateValue({
   scheduledWorkOrder: true,
   workOrderId: "scheduled-work-order",

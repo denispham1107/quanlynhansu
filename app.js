@@ -10,6 +10,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore,
+  initializeFirestore,
   collection,
   doc,
   getDoc,
@@ -54,9 +55,26 @@ import {
 // =========================
 // Firebase init
 // =========================
+function shouldUseIosLongPolling(userAgent, platform, maxTouchPoints) {
+  return /ipad|iphone|ipod/i.test(userAgent)
+    || (platform === "MacIntel" && maxTouchPoints > 1);
+}
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+// iOS WebKit/PWA đôi khi giữ phản hồi WebChannel trong nhiều phút. Dùng long
+// polling cho iOS để snapshot đầu tiên không phụ thuộc vào stream bị đệm.
+const isIosWebKit = shouldUseIosLongPolling(
+  navigator.userAgent,
+  navigator.platform,
+  navigator.maxTouchPoints
+);
+const db = isIosWebKit
+  ? initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+      experimentalLongPollingOptions: { timeoutSeconds: 20 }
+    })
+  : getFirestore(app);
 const storage = getStorage(app);
 const functions = getFunctions(app, "asia-southeast1");
 
@@ -328,12 +346,19 @@ const state = {
   taskReviewAlertAutoEnablePending: false,
   taskReviewAlertAutoEnableAttempted: false,
   adminTaskSnapshotReady: false,
+  adminTaskDataReady: false,
+  adminUsersSnapshotReady: false,
   adminTaskServerReady: false,
   adminHotelDailyBudgetsServerReady: false,
   adminAutoScrollSubmittedTaskId: "",
   adminAutoScrollSubmittedTaskTimer: null
 };
 let adminTasksRenderFrame = 0;
+let adminSupplementaryTimer = 0;
+let adminSupplementaryStarted = false;
+let startupExtrasTimer = 0;
+let startupExtrasUid = "";
+let authBootGeneration = 0;
 
 
 // =========================
@@ -2392,8 +2417,7 @@ function notificationSupported() {
 }
 
 function isIosDevice() {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent)
-    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return shouldUseIosLongPolling(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
 }
 
 function isStandaloneWebApp() {
@@ -5466,6 +5490,7 @@ els.logoutBtn.addEventListener("click", async () => {
 });
 
 onAuthStateChanged(auth, async (user) => {
+  const bootGeneration = ++authBootGeneration;
   cleanupSubscriptions();
   cleanupChatFeature();
   resetTaskReviewAlertSound();
@@ -5485,6 +5510,10 @@ onAuthStateChanged(auth, async (user) => {
   state.invalidTaskHistory = [];
   state.invalidTaskHistoryExpanded = false;
   state.adminTaskServerReady = false;
+  state.adminTaskSnapshotReady = false;
+  state.adminTaskDataReady = false;
+  state.adminUsersSnapshotReady = false;
+  state.adminEmployeeStatusGroups = null;
   state.adminHotelDailyBudgetsServerReady = false;
   state.employeeUnassignedTaskCountCache = new Map();
   state.employeeUnassignedTaskCountPendingKey = "";
@@ -5537,6 +5566,7 @@ onAuthStateChanged(auth, async (user) => {
 
   try {
     const profileSnap = await getDoc(doc(db, "users", user.uid));
+    if (bootGeneration !== authBootGeneration || state.user?.uid !== user.uid) return;
 
     if (!profileSnap.exists()) {
       toast("Tài khoản này chưa có hồ sơ trong collection users. Hãy tạo users/{uid} trước.", "error");
@@ -5550,7 +5580,8 @@ onAuthStateChanged(auth, async (user) => {
     // Dashboard và dữ liệu công việc phải được đăng ký trước các luồng phụ
     // (Thông báo, Chat, FCM) để truy vấn lớn của luồng phụ không tranh lượt tải
     // với màn hình chính ngay khi người dùng vừa vào ứng dụng.
-    if (isManagementProfile()) {
+    const managementDashboard = isManagementProfile();
+    if (managementDashboard) {
       setupAdminDashboard();
     } else {
       setupEmployeeDashboard();
@@ -5558,14 +5589,11 @@ onAuthStateChanged(auth, async (user) => {
 
     if (state.pendingPushTaskId) queuePushTaskOpen(state.pendingPushTaskId);
 
-    const bootUid = user.uid;
-    window.setTimeout(() => {
-      if (state.user?.uid !== bootUid) return;
-      setupNotificationListener();
-      void setupChatFeature();
-      void syncPushSubscriptionIfAllowed();
-    }, 0);
+    // Luồng phụ không cạnh tranh với snapshot màn hình chính ngay lúc mở app.
+    // Nếu mạng chậm, vẫn khởi động chúng sau thời hạn để không mất thông báo.
+    scheduleStartupExtras(user.uid, managementDashboard ? 12000 : 0);
   } catch (error) {
+    if (bootGeneration !== authBootGeneration) return;
     console.error(error);
     toast("Không tải được hồ sơ người dùng. Kiểm tra Firestore Rules.", "error");
     await signOut(auth);
@@ -5602,10 +5630,31 @@ function showApp() {
 function cleanupSubscriptions() {
   state.unsubs.forEach((unsubscribe) => unsubscribe());
   state.unsubs = [];
+  if (startupExtrasTimer) window.clearTimeout(startupExtrasTimer);
+  startupExtrasTimer = 0;
+  startupExtrasUid = "";
+  if (adminSupplementaryTimer) window.clearTimeout(adminSupplementaryTimer);
+  adminSupplementaryTimer = 0;
+  adminSupplementaryStarted = false;
   if (adminTasksRenderFrame) {
     window.cancelAnimationFrame(adminTasksRenderFrame);
     adminTasksRenderFrame = 0;
   }
+}
+
+function startStartupExtras(uid) {
+  if (!uid || state.user?.uid !== uid || startupExtrasUid !== uid) return;
+  startupExtrasUid = "";
+  if (startupExtrasTimer) window.clearTimeout(startupExtrasTimer);
+  startupExtrasTimer = 0;
+  setupNotificationListener();
+  void setupChatFeature();
+  void syncPushSubscriptionIfAllowed();
+}
+
+function scheduleStartupExtras(uid, delayMs) {
+  startupExtrasUid = uid;
+  startupExtrasTimer = window.setTimeout(() => startStartupExtras(uid), delayMs);
 }
 
 // =========================
@@ -5875,6 +5924,8 @@ function setAdminTasksSyncStatus(message) {
 }
 
 function setupAdminDashboard() {
+  const bootUid = state.user?.uid;
+  const bootGeneration = authBootGeneration;
   els.adminView.classList.remove("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
@@ -5887,6 +5938,8 @@ function setupAdminDashboard() {
   const unsubUsers = onSnapshot(
     collection(db, "users"),
     (snapshot) => {
+      if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
+      state.adminUsersSnapshotReady = snapshot.docs.length > 0 || !snapshot.metadata.fromCache;
       const users = snapshot.docs
         .map((item) => ({ id: item.id, ...item.data() }));
 
@@ -5913,6 +5966,8 @@ function setupAdminDashboard() {
       applyManagementPermissionUI();
       renderEmployeeSelects();
       renderEmployeeGroupList();
+      // Trạng thái Đang Off chỉ phụ thuộc users; không đợi truy vấn toàn bộ tasks.
+      scheduleAdminTasksRender();
       if (els.employeeStatusHistoryModal && !els.employeeStatusHistoryModal.classList.contains("hidden")) {
         renderEmployeeStatusHistory();
       }
@@ -5933,6 +5988,7 @@ function setupAdminDashboard() {
   const tasksQuery = query(collection(db, "tasks"), orderBy("createdAt", "desc"));
 
   state.adminTaskSnapshotReady = false;
+  state.adminTaskDataReady = false;
   state.adminTaskServerReady = false;
   state.adminHotelDailyBudgetsServerReady = false;
   state.adminAutoScrollSubmittedTaskId = "";
@@ -5945,6 +6001,8 @@ function setupAdminDashboard() {
     tasksQuery,
     { includeMetadataChanges: true },
     async (snapshot) => {
+      if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
+      state.adminTaskDataReady = snapshot.docs.length > 0 || !snapshot.metadata.fromCache;
       const wasServerReady = state.adminTaskServerReady;
       if (!snapshot.metadata.fromCache) {
         state.adminTaskServerReady = true;
@@ -5968,6 +6026,10 @@ function setupAdminDashboard() {
 
       state.tasks = nextTasks;
       scheduleAdminTasksRender();
+      if (!snapshot.metadata.fromCache) {
+        startStartupExtras(bootUid);
+        startAdminSupplementaryListeners();
+      }
       renderImageGalleryIfOpen();
       syncTaskReviewAlertSound();
       // Không chạy các callable backfill lịch sử ở mỗi lần đăng nhập/snapshot:
@@ -6009,6 +6071,14 @@ function setupAdminDashboard() {
     handleSnapshotError
   );
 
+  function startAdminSupplementaryListeners() {
+    if (adminSupplementaryStarted || state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
+    adminSupplementaryStarted = true;
+    if (adminSupplementaryTimer) window.clearTimeout(adminSupplementaryTimer);
+    adminSupplementaryTimer = 0;
+
+  // Các dữ liệu lịch sử/mẫu/báo cáo được nạp sau snapshot công việc chính.
+  // Trên mạng chậm vẫn bắt đầu sau 12 giây để các màn hình phụ không chờ vô hạn.
   // Lịch sử mỗi lần Phiếu Chưa giao việc được giao thành công.
   // Dùng collection riêng để lịch sử vẫn còn ngay cả khi Phiếu gốc thay đổi trạng thái.
   const assignmentHistoryQuery = query(
@@ -6090,6 +6160,16 @@ function setupAdminDashboard() {
     }
   );
 
+    state.unsubs.push(
+      unsubWorkAssignmentHistory,
+      unsubInvalidTaskHistory,
+      unsubWorkTemplates,
+      unsubTimeExtensionReasons,
+      unsubHotelDailyReports
+    );
+  }
+
+  // Hạn mức Hotel ảnh hưởng trực tiếp việc tạo/sửa Phiếu nên không trì hoãn.
   const unsubHotelDailyBudgets = onSnapshot(
     collection(db, "hotelDailyBudgets"),
     { includeMetadataChanges: true },
@@ -6132,15 +6212,13 @@ function setupAdminDashboard() {
     unsubEmployeeGroups,
     unsubTasks,
     unsubWorkOrders,
-    unsubWorkAssignmentHistory,
-    unsubInvalidTaskHistory,
-    unsubWorkTemplates,
-    unsubTimeExtensionReasons,
-    unsubHotelDailyReports,
     unsubHotelDailyBudgets,
     unsubWorkOrderControlSettings,
     unsubWorkSupervision
   );
+  if (!adminSupplementaryStarted) {
+    adminSupplementaryTimer = window.setTimeout(startAdminSupplementaryListeners, 12000);
+  }
 }
 
 function handleSnapshotError(error) {
@@ -11530,6 +11608,7 @@ function syncWorkOrderSettingsLimitControls() {
 }
 
 function getCurrentFreeEmployeesForWorkSupervisionSettings() {
+  if (!state.adminUsersSnapshotReady || !state.adminTaskDataReady) return [];
   const cached = Array.isArray(state.adminEmployeeStatusGroups?.free)
     ? state.adminEmployeeStatusGroups.free
     : [];
@@ -11555,6 +11634,11 @@ function getSelectedWorkSupervisionExcludedEmployeeUids() {
 function populateWorkSupervisionExcludedEmployeeOptions(settings = getWorkOrderControlSettings()) {
   const list = els.workSupervisionExcludedEmployeeList;
   if (!list) return;
+  if (!state.adminUsersSnapshotReady || !state.adminTaskDataReady) {
+    list.innerHTML = '<p class="work-supervision-excluded-empty">Đang tải trạng thái nhân viên...</p>';
+    delete list.dataset.initialized;
+    return;
+  }
 
   const checkedBeforeRender = getSelectedWorkSupervisionExcludedEmployeeUids();
   const hasRenderedBefore = list.dataset.initialized === "true";
@@ -13509,19 +13593,20 @@ function getEmployeeStatusGroupConfig(type) {
   return configs[type] || configs.free;
 }
 
-function renderEmployeeStatusCard(type, employees) {
+function renderEmployeeStatusCard(type, employees, loading = false) {
   const config = getEmployeeStatusGroupConfig(type);
   const count = employees.length;
+  const countLabel = loading ? "…" : String(count);
 
   return `
-    <button class="employee-status-card ${config.cardClass}" type="button" data-employee-status-type="${escapeHtml(type)}" aria-label="${escapeHtml(config.detailTitle)}: ${count}">
+    <button class="employee-status-card ${config.cardClass}" type="button" data-employee-status-type="${escapeHtml(type)}" aria-label="${escapeHtml(config.detailTitle)}: ${loading ? "Đang tải" : count}" ${loading ? "disabled aria-busy=\"true\"" : ""}>
       <span class="employee-status-card-icon" aria-hidden="true">${config.icon}</span>
       <strong>
         <span class="employee-status-long-label">${escapeHtml(config.longLabel)}</span>
         <span class="employee-status-short-label">${escapeHtml(config.shortLabel)}</span>
-        <span class="employee-status-count">${count}</span>
+        <span class="employee-status-count">${countLabel}</span>
       </strong>
-      <div class="employee-status-names">${renderEmployeeStatusNameChips(employees)}</div>
+      <div class="employee-status-names">${loading ? '<span class="employee-status-empty">Đang đồng bộ...</span>' : renderEmployeeStatusNameChips(employees)}</div>
     </button>
   `;
 }
@@ -13537,7 +13622,9 @@ function updateMobileEmployeeStatusOverview() {
   const lunchCount = groups.lunch?.length || 0;
   const offCount = groups.off?.length || 0;
 
-  els.adminMobileEmployeeStatusOverview.textContent = `Chưa ${freeCount} • Đã ${assignedCount} • Hotel ${hotelCount} • Ship ${shipCount} • Nghỉ ${lunchCount} • Off ${offCount}`;
+  const taskCount = (count) => state.adminTaskDataReady && state.adminUsersSnapshotReady ? count : "…";
+  const offLabel = state.adminUsersSnapshotReady ? offCount : "…";
+  els.adminMobileEmployeeStatusOverview.textContent = `Chưa ${taskCount(freeCount)} • Đã ${taskCount(assignedCount)} • Hotel ${taskCount(hotelCount)} • Ship ${taskCount(shipCount)} • Nghỉ ${taskCount(lunchCount)} • Off ${offLabel}`;
 }
 
 function applyMobileEmployeeStatusExpanded() {
@@ -13596,13 +13683,14 @@ function renderAdminEmployeeStatusSummary(computedTasks = []) {
   };
 
   summaryEl.classList.remove("hidden");
+  const taskGroupsLoading = !state.adminUsersSnapshotReady || !state.adminTaskDataReady;
   summaryEl.innerHTML = [
-    renderEmployeeStatusCard("free", freeEmployees),
-    renderEmployeeStatusCard("assigned", assignedEmployees),
-    renderEmployeeStatusCard("hotel", hotelEmployees),
-    renderEmployeeStatusCard("ship", shipEmployees),
-    renderEmployeeStatusCard("lunch", lunchEmployees),
-    renderEmployeeStatusCard("off", offEmployees)
+    renderEmployeeStatusCard("free", freeEmployees, taskGroupsLoading),
+    renderEmployeeStatusCard("assigned", assignedEmployees, taskGroupsLoading),
+    renderEmployeeStatusCard("hotel", hotelEmployees, taskGroupsLoading),
+    renderEmployeeStatusCard("ship", shipEmployees, taskGroupsLoading),
+    renderEmployeeStatusCard("lunch", lunchEmployees, taskGroupsLoading),
+    renderEmployeeStatusCard("off", offEmployees, !state.adminUsersSnapshotReady)
   ].join("");
 
   updateMobileEmployeeStatusOverview();
@@ -14231,10 +14319,11 @@ function renderAdminTasks() {
     completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
 
-  if (els.statDraft) els.statDraft.textContent = stats.draft;
-  if (els.statDoing) els.statDoing.textContent = stats.doing;
-  if (els.statHotel) els.statHotel.textContent = stats.hotel;
-  if (els.statCompleted) els.statCompleted.textContent = stats.completed;
+  const displayCount = (count) => state.adminTaskDataReady ? count : "…";
+  if (els.statDraft) els.statDraft.textContent = displayCount(stats.draft);
+  if (els.statDoing) els.statDoing.textContent = displayCount(stats.doing);
+  if (els.statHotel) els.statHotel.textContent = displayCount(stats.hotel);
+  if (els.statCompleted) els.statCompleted.textContent = displayCount(stats.completed);
 
   let filtered = baseFiltered;
 
