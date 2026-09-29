@@ -10412,6 +10412,15 @@
   <style id="image-gallery-style">
     .image-gallery-action-btn { background:linear-gradient(135deg,#0891b2,#2563eb)!important; color:#fff!important; border-color:transparent!important; }
     .image-gallery-action-btn:hover { filter:brightness(.96); }
+    .image-gallery-icon {
+      display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px;
+      width:26px; height:26px; border:1px solid rgba(255,255,255,.28); border-radius:8px;
+      background:rgba(255,255,255,.14); box-shadow:inset 0 1px 0 rgba(255,255,255,.24);
+    }
+    .image-gallery-icon svg {
+      display:block; width:19px; height:19px; fill:none; stroke:currentColor;
+      stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round;
+    }
     .image-gallery-page, .image-gallery-page * { box-sizing:border-box; }
     .image-gallery-hero { align-items:center; gap:18px; }
     .image-gallery-hero > div { min-width:0; }
@@ -10739,7 +10748,16 @@
               </button>
               <button id="openGoogleCalendarImportBtn" class="btn calendar-import-btn calendar-import-header-btn small calendar-import-desktop-only hidden" type="button">📅 Nạp lịch</button>
               <button id="openGoogleCalendarImportMobileBtn" class="btn calendar-import-btn small calendar-import-mobile-only hidden" type="button">📅 Nạp lịch</button>
-              <button id="openImageGalleryBtn" class="btn image-gallery-action-btn small hidden" type="button">🖼 Hình ảnh</button>
+              <button id="openImageGalleryBtn" class="btn image-gallery-action-btn small hidden" type="button">
+                <span class="image-gallery-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <rect x="2.75" y="3.75" width="18.5" height="16.5" rx="3.25"></rect>
+                    <circle cx="16.2" cy="8.8" r="1.55"></circle>
+                    <path d="m3.4 16.9 5.25-5.25a1.3 1.3 0 0 1 1.85 0l6.9 7M13.4 15.1l1.65-1.65a1.3 1.3 0 0 1 1.85 0l3.7 3.75"></path>
+                  </svg>
+                </span>
+                <span>Hình ảnh</span>
+              </button>
               <button id="openWorkOrderSettingsBtn" class="btn settings-action-btn small hidden" type="button" aria-haspopup="dialog" aria-controls="workOrderSettingsModal">
                 <span aria-hidden="true">⚙</span> Cài đặt
               </button>
@@ -12057,7 +12075,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260929-startup-v95"></script>
+  <script type="module" src="app.js?v=20260929-startup-v96"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12687,6 +12705,12 @@
   }
   .schedule-calendar-icon circle { fill:currentColor; stroke:none; }
   .schedule-work-order-btn:hover { color:#fff!important; filter:brightness(.96); }
+  @media (min-width: 769px) {
+    #adminView .task-panel-header-actions .mobile-task-panel-menu > .btn {
+      box-sizing:border-box; height:50px!important; min-height:50px!important;
+      padding:0 14px!important; border-radius:14px; white-space:nowrap;
+    }
+  }
   .scheduled-work-order-config {
     width:100%; min-width:0; max-width:100%; box-sizing:border-box; overflow:hidden;
     padding:16px; border:1px dashed #a78bfa; border-radius:18px;

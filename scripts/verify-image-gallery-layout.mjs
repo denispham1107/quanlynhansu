@@ -72,7 +72,7 @@ try {
   const menuCheck = await send("Runtime.evaluate", { returnByValue: true, expression: `(() => {
     document.getElementById("appView").classList.remove("hidden");
     document.getElementById("adminView").classList.remove("hidden");
-    for (const id of ["openGoogleCalendarImportBtn", "openImageGalleryBtn", "openWorkOrderSettingsBtn"]) document.getElementById(id).classList.remove("hidden");
+    for (const id of ["openScheduledWorkOrderBtn", "openGoogleCalendarImportBtn", "openImageGalleryBtn", "openWorkOrderSettingsBtn"]) document.getElementById(id).classList.remove("hidden");
     const ids = ["openGoogleCalendarImportBtn", "openImageGalleryBtn", "openWorkOrderSettingsBtn"];
     const buttons = ids.map((id) => document.getElementById(id));
     const boxes = buttons.map((button) => button.getBoundingClientRect());
@@ -86,6 +86,24 @@ try {
   const menuPassed = menu.order && menu.sameRow && menu.separated && menu.inside;
   console.log(`${menuPassed ? "PASS" : "FAIL"} | Desktop Hình ảnh giữa Nạp lịch và Cài đặt | ${JSON.stringify(menu)}`);
   if (!menuPassed) process.exitCode = 1;
+  const desktopActionsCheck = await send("Runtime.evaluate", { returnByValue: true, expression: `(() => {
+    const ids = ["deleteAllWorkOrdersBtn", "openScheduledWorkOrderBtn", "openGoogleCalendarImportBtn", "openImageGalleryBtn", "openWorkOrderSettingsBtn"];
+    const buttons = ids.map((id) => document.getElementById(id));
+    const boxes = buttons.map((button) => button.getBoundingClientRect());
+    const icon = document.querySelector("#openImageGalleryBtn .image-gallery-icon svg");
+    const iconBox = icon.getBoundingClientRect();
+    return { heights:boxes.map((box)=>box.height), tops:boxes.map((box)=>box.top),
+      allVisible:buttons.every((button)=>getComputedStyle(button).display!=="none"),
+      iconInside:iconBox.left>=boxes[3].left && iconBox.right<=boxes[3].right && iconBox.top>=boxes[3].top && iconBox.bottom<=boxes[3].bottom,
+      pageWidth:document.documentElement.scrollWidth };
+  })()` });
+  const desktopActions = desktopActionsCheck.result.value;
+  const desktopActionsPassed = desktopActions.allVisible && desktopActions.iconInside
+    && Math.max(...desktopActions.heights) - Math.min(...desktopActions.heights) <= 1
+    && Math.max(...desktopActions.tops) - Math.min(...desktopActions.tops) <= 1.5
+    && desktopActions.pageWidth <= 1600;
+  console.log(`${desktopActionsPassed ? "PASS" : "FAIL"} | Nút thao tác desktop đều chiều cao, icon Hình ảnh nằm trong nút | ${JSON.stringify(desktopActions)}`);
+  if (!desktopActionsPassed) process.exitCode = 1;
   await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
   const filterColorsCheck = await send("Runtime.evaluate", { returnByValue: true, expression: `(() => {
     const select = document.getElementById("adminDateMode");
@@ -125,6 +143,29 @@ try {
     const passed = result.inside && !result.overlap && result.scrollWidth <= width;
     console.log(`${passed ? "PASS" : "FAIL"} | Bộ lọc công việc ${width}x${height} | ${JSON.stringify(result)}`);
     if (!passed) process.exitCode = 1;
+    if (width <= 768) {
+      const actionCheck = await send("Runtime.evaluate", { returnByValue: true, expression: `(() => {
+        document.getElementById("adminMobileFilterModalRoot").classList.remove("is-open");
+        document.getElementById("adminMobileFilterSheet").classList.remove("is-open");
+        const menu = document.getElementById("mobileTaskPanelMenu");
+        menu.classList.add("is-open");
+        document.getElementById("openGoogleCalendarImportMobileBtn").classList.remove("hidden");
+        const panel = menu.getBoundingClientRect();
+        const ids = ["deleteAllWorkOrdersBtn", "openScheduledWorkOrderBtn", "openGoogleCalendarImportMobileBtn", "openImageGalleryBtn", "openWorkOrderSettingsBtn"];
+        const buttons = ids.map((id) => document.getElementById(id));
+        const boxes = buttons.map((button) => button.getBoundingClientRect());
+        const icon = document.querySelector("#openImageGalleryBtn .image-gallery-icon svg").getBoundingClientRect();
+        return { visible:buttons.every((button)=>getComputedStyle(button).display!=="none"),
+          inside:boxes.every((box)=>box.left>=panel.left-1 && box.right<=panel.right+1),
+          ordered:boxes.every((box,index)=>index===0 || boxes[index-1].bottom<=box.top),
+          iconInside:icon.left>=boxes[3].left && icon.right<=boxes[3].right && icon.top>=boxes[3].top && icon.bottom<=boxes[3].bottom,
+          pageWidth:document.documentElement.scrollWidth };
+      })()` });
+      const actions = actionCheck.result.value;
+      const actionPassed = actions.visible && actions.inside && actions.ordered && actions.iconInside && actions.pageWidth <= width;
+      console.log(`${actionPassed ? "PASS" : "FAIL"} | Menu nút & icon ${width}x${height} | ${JSON.stringify(actions)}`);
+      if (!actionPassed) process.exitCode = 1;
+    }
   }
   await send("Emulation.setDeviceMetricsOverride", {
     width: 390, height: 844, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 844
