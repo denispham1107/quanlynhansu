@@ -9651,7 +9651,8 @@ function canEditScheduledWorkOrder(schedule) {
 }
 
 function canDeleteScheduledWorkOrder(schedule) {
-  return schedule?.editDeletePolicy !== "locked";
+  return schedule?.editDeletePolicy !== "locked"
+    && String(schedule?.status || "pending") !== "deleted";
 }
 
 function openScheduledWorkOrderEditor(scheduleId) {
@@ -10905,6 +10906,7 @@ function scheduledWorkOrderStatusLabel(status, waitingForAvailableEmployee = fal
     pending: "Đang chờ đến giờ",
     generated: "Đã tạo Phiếu chưa giao việc",
     assigned: "Đã giao việc",
+    deleted: "Đã xóa",
     cancelled: "Đã hủy",
     failed: "Tạo Phiếu thất bại"
   })[String(status || "")] || "Không xác định";
@@ -10928,13 +10930,15 @@ function scheduledWorkOrderMatchesStatusFilter(schedule, filterValue = "all") {
   const status = String(schedule?.status || "pending");
   if (filterValue === "assigned") return status === "assigned";
   if (filterValue === "unassigned") return status === "pending" || status === "generated";
+  if (filterValue === "deleted") return status === "deleted";
   return true;
 }
 
 function scheduledWorkOrderFilterLabel(filterValue = "all") {
   return ({
     unassigned: "Chưa giao việc",
-    assigned: "Đã giao việc"
+    assigned: "Đã giao việc",
+    deleted: "Đã xóa"
   })[filterValue] || "Tất cả trạng thái";
 }
 
@@ -11019,7 +11023,7 @@ function resetScheduledWorkOrderTimeFilter() {
 function renderScheduledWorkOrderList() {
   if (!els.scheduledWorkOrderList) return;
   const schedules = Array.isArray(state.scheduledWorkOrders) ? state.scheduledWorkOrders : [];
-  const activeStatusFilter = ["all", "unassigned", "assigned"].includes(state.scheduledWorkOrderStatusFilter)
+  const activeStatusFilter = ["all", "unassigned", "assigned", "deleted"].includes(state.scheduledWorkOrderStatusFilter)
     ? state.scheduledWorkOrderStatusFilter
     : "all";
   const activeTimeFilter = normalizeScheduledWorkOrderTimeFilter(state.scheduledWorkOrderTimeFilter);
@@ -11048,6 +11052,7 @@ function renderScheduledWorkOrderList() {
   els.scheduledWorkOrderList.innerHTML = filteredSchedules.map((schedule) => {
     const editable = canEditScheduledWorkOrder(schedule);
     const deletable = canDeleteScheduledWorkOrder(schedule);
+    const deleted = schedule.status === "deleted";
     const taskNames = Array.isArray(schedule.taskNames) && schedule.taskNames.length
       ? schedule.taskNames.join("; ")
       : "Chưa có tên công việc";
@@ -11056,7 +11061,7 @@ function renderScheduledWorkOrderList() {
     const countdownMinutes = normalizeScheduledCountdownMinutes(schedule.assignmentCountdownMinutes);
     return `
       <article
-        class="scheduled-work-order-list-item${editable ? " is-editable" : ""}"
+        class="scheduled-work-order-list-item${editable ? " is-editable" : ""}${deleted ? " is-deleted" : ""}"
         ${editable ? `data-edit-scheduled-work-order="${escapeHtml(schedule.id)}" role="button" tabindex="0" aria-label="Chỉnh sửa lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"` : ""}
       >
         <div class="scheduled-work-order-list-row${deletable ? "" : " is-locked"}">
@@ -11069,14 +11074,14 @@ function renderScheduledWorkOrderList() {
             class="btn danger scheduled-work-order-delete-btn"
             type="button"
             data-delete-scheduled-work-order="${escapeHtml(schedule.id)}"
-            aria-label="Xóa vĩnh viễn lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"
-            title="Xóa vĩnh viễn lịch"
+            aria-label="Xóa lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"
+            title="Xóa lịch"
           >×</button>` : ""}
         </div>
         <div class="scheduled-work-order-list-meta">
           <span>${escapeHtml(repeatLabel)}</span>
           <span>Đếm ngược ${countdownMinutes} phút</span>
-          <span>${schedule.editDeletePolicy === "locked" ? "🔒 Không cho Sửa-Xóa" : "Cho phép Sửa-Xóa"}</span>
+          <span>${deleted ? "Chỉ lưu lịch sử" : schedule.editDeletePolicy === "locked" ? "🔒 Không cho Sửa-Xóa" : "Cho phép Sửa-Xóa"}</span>
           <span>${escapeHtml(scheduledWorkOrderStatusLabel(
             schedule.status,
             schedule.assignmentCountdownWaitingForAvailableEmployee === true
@@ -11142,17 +11147,20 @@ async function deleteScheduledWorkOrder(scheduleId, button) {
   }
   const scheduledAt = formatScheduledListDateTime(schedule.scheduledForMs);
   const confirmed = window.confirm(
-    `Xóa vĩnh viễn lịch “${schedule.name || "Phiếu công việc"}” lúc ${scheduledAt}?\n\n`
-    + "Hành động này không thể hoàn tác. Nếu Phiếu chưa giao việc đã được tạo từ lịch này, Phiếu đó cũng sẽ bị xóa."
+    `Xóa lịch “${schedule.name || "Phiếu công việc"}” lúc ${scheduledAt}?\n\n`
+    + "Lịch sẽ ngừng hoạt động và chỉ còn dòng lịch sử màu đỏ trong danh sách. Hành động này không thể hoàn tác. "
+    + "Nếu Phiếu chưa giao việc đã được tạo từ lịch này, Phiếu đó cũng sẽ bị xóa."
   );
   if (!confirmed) return;
 
   setButtonLoading(button, true, "…");
   try {
     await deleteScheduledWorkOrderCallable({ scheduleId });
-    state.scheduledWorkOrders = state.scheduledWorkOrders.filter((item) => item.id !== scheduleId);
+    state.scheduledWorkOrders = state.scheduledWorkOrders.map((item) => item.id === scheduleId
+      ? { ...item, status: "deleted", deletedAtMs: Date.now() }
+      : item);
     renderScheduledWorkOrderList();
-    toast(`Đã xóa vĩnh viễn lịch “${schedule.name || "Phiếu công việc"}”.`, "success");
+    toast(`Đã xóa lịch “${schedule.name || "Phiếu công việc"}”; dòng lịch sử vẫn được giữ lại.`, "success");
   } catch (error) {
     console.error(error);
     toast(error?.message || "Không thể xóa lịch Phiếu công việc.", "error");
@@ -11169,7 +11177,7 @@ els.viewScheduledWorkOrdersBtn?.addEventListener("click", () => {
 });
 els.scheduledWorkOrderStatusFilter?.addEventListener("change", () => {
   const nextFilter = els.scheduledWorkOrderStatusFilter?.value || "all";
-  state.scheduledWorkOrderStatusFilter = ["unassigned", "assigned"].includes(nextFilter) ? nextFilter : "all";
+  state.scheduledWorkOrderStatusFilter = ["unassigned", "assigned", "deleted"].includes(nextFilter) ? nextFilter : "all";
   renderScheduledWorkOrderList();
 });
 els.scheduledWorkOrderTimeFilter?.addEventListener("change", () => {

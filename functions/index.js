@@ -1346,7 +1346,10 @@ exports.listScheduledWorkOrders = onCall({
     await ensureNextDailyScheduledOccurrence(item.id, item.data() || {});
   }
   if (schedulesNeedingNext.length) snapshot = await db.collection("scheduledWorkOrders").get();
-  const schedules = snapshot.docs
+  const deletedSnapshot = await db.collection("deletedScheduledWorkOrders")
+    .where("createdByUid", "==", adminUid)
+    .get();
+  const schedules = [...snapshot.docs, ...deletedSnapshot.docs]
     .map((item) => ({ id: item.id, ...item.data() }))
     .filter((item) => String(item.createdByUid || "") === adminUid)
     .sort((left, right) => (
@@ -1362,9 +1365,11 @@ exports.listScheduledWorkOrders = onCall({
       rows: (Array.isArray(item.rows) ? item.rows : []).map(scheduledWorkOrderRowForClient),
       photoRequired: item.photoRequired === true,
       requiredPhotoCount: Math.max(0, Math.min(100, Math.trunc(Number(item.requiredPhotoCount || 0)))),
-      taskNames: (Array.isArray(item.rows) ? item.rows : [])
-        .map((row) => String(row?.title || "").trim())
-        .filter(Boolean),
+      taskNames: Array.isArray(item.taskNames)
+        ? item.taskNames.map((name) => String(name || "").trim()).filter(Boolean)
+        : (Array.isArray(item.rows) ? item.rows : [])
+          .map((row) => String(row?.title || "").trim())
+          .filter(Boolean),
       assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(item.assignmentCountdownMinutes),
       repeatMode: normalizeScheduledRepeatMode(item.repeatMode),
       editDeletePolicy: normalizeScheduledEditDeletePolicy(item.editDeletePolicy),
@@ -1375,7 +1380,8 @@ exports.listScheduledWorkOrders = onCall({
       assignmentCountdownStartedAtMs: firestoreTimestampOrNull(item.assignmentCountdownStartedAt)?.toMillis() || 0,
       assignmentDeadlineAtMs: firestoreTimestampOrNull(item.assignmentDeadlineAt)?.toMillis() || 0,
       generatedWorkOrderId: String(item.generatedWorkOrderId || ""),
-      createdAtMs: firestoreTimestampOrNull(item.createdAt)?.toMillis() || 0
+      createdAtMs: firestoreTimestampOrNull(item.createdAt)?.toMillis() || 0,
+      deletedAtMs: firestoreTimestampOrNull(item.deletedAt)?.toMillis() || 0
     }));
 
   return { schedules };
@@ -1457,10 +1463,6 @@ exports.deleteScheduledWorkOrder = onCall({
       }
     });
   }
-  // Xóa bản ghi lịch sau cùng để nếu một batch dọn dữ liệu liên quan gặp lỗi,
-  // Admin vẫn có thể thử lại thao tác từ danh sách lịch.
-  refsToDelete.set(scheduleRef.path, scheduleRef);
-
   const refs = [...refsToDelete.values()];
   for (let offset = 0; offset < refs.length; offset += 450) {
     const batch = db.batch();
@@ -1468,11 +1470,39 @@ exports.deleteScheduledWorkOrder = onCall({
     await batch.commit();
   }
 
+  // Chỉ giữ một bản ghi lịch sử để hiển thị; lịch hoạt động vẫn bị xóa khỏi
+  // scheduledWorkOrders. Ghi lịch sử và xóa lịch cùng một batch để không mất dòng.
+  const deletedAt = Timestamp.now();
+  const deletedScheduleRef = db.doc(`deletedScheduledWorkOrders/${scheduleId}`);
+  const finalBatch = db.batch();
+  finalBatch.set(deletedScheduleRef, {
+    name: String(schedule.name || "Phiếu công việc").slice(0, 180),
+    employeeGroupId: String(schedule.employeeGroupId || "").slice(0, 180),
+    employeeGroupName: String(schedule.employeeGroupName || "Nhóm nhân viên").slice(0, 80),
+    scheduledAt: schedule.scheduledAt || null,
+    taskNames: (Array.isArray(schedule.rows) ? schedule.rows : [])
+      .map((row) => String(row?.title || "").trim().slice(0, 180))
+      .filter(Boolean),
+    assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(schedule.assignmentCountdownMinutes),
+    repeatMode: normalizeScheduledRepeatMode(schedule.repeatMode),
+    editDeletePolicy: normalizeScheduledEditDeletePolicy(schedule.editDeletePolicy),
+    seriesId: String(schedule.seriesId || scheduleId).slice(0, 180),
+    occurrenceIndex: Math.max(0, Math.trunc(Number(schedule.occurrenceIndex || 0))),
+    status: "deleted",
+    deletionPreviousStatus: String(schedule.deletionPreviousStatus || "pending").slice(0, 40),
+    createdByUid: adminUid,
+    createdAt: schedule.createdAt || deletedAt,
+    deletedAt,
+    deletedByUid: adminUid
+  });
+  finalBatch.delete(scheduleRef);
+  await finalBatch.commit();
+
   return {
     deleted: true,
     scheduleId,
     deletedGeneratedDraft: shouldRemoveGeneratedDraft,
-    deletedDocumentCount: refs.length
+    deletedDocumentCount: refs.length + 1
   };
 });
 

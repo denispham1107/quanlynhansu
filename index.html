@@ -11541,6 +11541,7 @@
                 <option value="all">Tất cả trạng thái</option>
                 <option value="unassigned">Chưa giao việc</option>
                 <option value="assigned">Đã giao việc</option>
+                <option value="deleted">Đã xóa</option>
               </select>
             </div>
           </label>
@@ -12132,7 +12133,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260929-scheduled-draft-edit-v108"></script>
+  <script type="module" src="app.js?v=20260929-scheduled-deleted-history-v109"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12949,6 +12950,12 @@
   .scheduled-work-order-list-item {
     display:grid; gap:8px; min-width:0; padding:13px 14px;
     border:1px solid #ddd6fe; border-radius:16px; background:linear-gradient(135deg,#faf5ff,#f8fafc);
+  }
+  .scheduled-work-order-list-item.is-deleted {
+    border-color:#fca5a5; background:linear-gradient(135deg,#fff1f2,#fef2f2);
+  }
+  .scheduled-work-order-list-item.is-deleted .scheduled-work-order-list-meta span:last-child {
+    background:#fee2e2; color:#b91c1c;
   }
   .scheduled-work-order-list-item[data-edit-scheduled-work-order] { min-width:0; }
   .scheduled-work-order-list-item.is-editable { cursor:pointer; transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
