@@ -11358,13 +11358,22 @@
                 <input id="scheduledWorkOrderDate" type="date" />
               </span>
             </label>
-            <label class="scheduled-work-order-time-field">
-              <span>Giờ phút giây (24 giờ)</span>
+            <div class="scheduled-work-order-time-field" id="scheduledWorkOrderTimeField">
+              <label for="scheduledWorkOrderTime">Giờ phút giây (24 giờ)</label>
               <span class="scheduled-control-shell scheduled-time-shell">
                 <input id="scheduledWorkOrderTime" type="text" inputmode="text" maxlength="8" autocomplete="off" spellcheck="false" placeholder="HH:mm:ss" aria-label="Giờ phút giây theo định dạng 24 giờ" />
-                <svg class="scheduled-time-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.7"/><path d="M12 6.8v5.5l3.7 2.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 2.25v1.5M12 20.25v1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                <button id="scheduledWorkOrderTimePickerBtn" class="scheduled-time-picker-toggle" type="button" aria-label="Chọn giờ phút giây theo khung 24 giờ" aria-expanded="false" aria-controls="scheduledWorkOrderTimePicker"><svg class="scheduled-time-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.7"/><path d="M12 6.8v5.5l3.7 2.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 2.25v1.5M12 20.25v1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
               </span>
-            </label>
+              <section id="scheduledWorkOrderTimePicker" class="scheduled-time-picker hidden" role="group" aria-label="Bộ chọn giờ phút giây 24 giờ">
+                <div id="scheduledWorkOrderTimePickerParts" class="scheduled-time-picker-parts"></div>
+                <div id="scheduledWorkOrderTimePickerValues" class="scheduled-time-picker-values"></div>
+                <div class="scheduled-time-picker-footer">
+                  <span id="scheduledWorkOrderTimePickerPreview" class="scheduled-time-picker-preview">00:00:00</span>
+                  <button id="scheduledWorkOrderTimePickerCancel" type="button">Đóng</button>
+                  <button id="scheduledWorkOrderTimePickerApply" type="button">Áp dụng</button>
+                </div>
+              </section>
+            </div>
             <label class="scheduled-work-order-group-field">
               <span>Nhóm nhân viên</span>
               <span class="scheduled-control-shell">
@@ -12114,7 +12123,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260929-24-hour-time-v105"></script>
+  <script type="module" src="app.js?v=20260929-24-hour-picker-v106"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12766,7 +12775,8 @@
     width:100%; min-width:0; max-width:100%;
   }
   .scheduled-work-order-repeat-field { grid-column:auto; }
-  .scheduled-work-order-config-grid label {
+  .scheduled-work-order-config-grid > label,
+  .scheduled-work-order-config-grid > .scheduled-work-order-time-field {
     display:grid; gap:7px; min-width:0; max-width:100%;
     font-weight:800; color:#172033;
   }
@@ -12796,10 +12806,41 @@
   #taskModal .scheduled-time-shell { position:relative; }
   #taskModal .scheduled-time-shell > input { padding-right:48px !important; font-variant-numeric:tabular-nums; }
   #taskModal .scheduled-time-shell > input[aria-invalid="true"] { color:#b91c1c !important; }
+  .scheduled-time-picker-toggle {
+    position:absolute; right:0; top:0; bottom:0; display:flex; align-items:center; justify-content:center;
+    width:46px; padding:0; border:0; border-left:1px solid #e2e8f0; background:transparent;
+    color:#334155; cursor:pointer;
+  }
+  .scheduled-time-picker-toggle:hover, .scheduled-time-picker-toggle[aria-expanded="true"] { background:#eff6ff; color:#2563eb; }
+  .scheduled-time-picker-toggle:focus-visible { outline:2px solid #2563eb; outline-offset:-3px; }
   .scheduled-time-icon {
-    position:absolute; right:14px; top:50%; transform:translateY(-50%);
     width:22px; height:22px; color:#334155; pointer-events:none;
   }
+  .scheduled-time-picker {
+    display:grid; gap:9px; min-width:0; width:100%; box-sizing:border-box;
+    padding:10px; border:1px solid #c4b5fd; border-radius:14px; background:#fff;
+    box-shadow:0 10px 25px rgba(76,29,149,.1);
+  }
+  .scheduled-time-picker-parts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; min-width:0; }
+  .scheduled-time-picker-parts > button,
+  .scheduled-time-picker-values > button,
+  .scheduled-time-picker-footer > button {
+    min-width:0; padding:7px 3px; border:1px solid #dbe6f5; border-radius:9px;
+    background:#fff; color:#172033; font-size:14px; font-weight:800;
+  }
+  .scheduled-time-picker-parts > button[aria-pressed="true"],
+  .scheduled-time-picker-values > button[aria-pressed="true"] { border-color:#6d28d9; background:#ede9fe; color:#5b21b6; }
+  .scheduled-time-picker-parts > button:focus-visible,
+  .scheduled-time-picker-values > button:focus-visible,
+  .scheduled-time-picker-footer > button:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
+  .scheduled-time-picker-values {
+    display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:5px;
+    min-width:0; max-height:180px; overflow-y:auto; overflow-x:hidden;
+  }
+  .scheduled-time-picker-values > button { min-height:34px; font-variant-numeric:tabular-nums; }
+  .scheduled-time-picker-footer { display:flex; align-items:center; justify-content:flex-end; gap:5px; min-width:0; }
+  .scheduled-time-picker-preview { margin-right:auto; font-size:14px; font-weight:900; color:#5b21b6; font-variant-numeric:tabular-nums; }
+  .scheduled-time-picker-footer > #scheduledWorkOrderTimePickerApply { border-color:#6d28d9; background:#6d28d9; color:#fff; }
   #taskModal .scheduled-control-shell > input[type="date"]::-webkit-date-and-time-value,
   #taskModal .scheduled-control-shell > input[type="date"]::-webkit-datetime-edit {
     width:100% !important; min-width:0 !important; max-width:100% !important;
@@ -12905,7 +12946,8 @@
 
   @media (max-width: 1024px) {
     .scheduled-work-order-config-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    .scheduled-work-order-config-grid label,
+    .scheduled-work-order-config-grid > label,
+    .scheduled-work-order-config-grid > .scheduled-work-order-time-field,
     #taskModal .scheduled-control-shell { contain:inline-size; }
     .scheduled-work-order-group-field { grid-column:1 / -1; }
     .scheduled-work-order-repeat-field { grid-column:auto; }
@@ -12925,10 +12967,12 @@
      One field per row prevents them from overlapping at every iOS text size. */
   @media (max-width: 640px) {
     .scheduled-work-order-config-grid { grid-template-columns:minmax(0,1fr); gap:11px; }
-    .scheduled-work-order-config-grid label,
+    .scheduled-work-order-config-grid > label,
     .scheduled-work-order-group-field,
     .scheduled-work-order-repeat-field,
-    .scheduled-work-order-edit-policy-field { grid-column:1 / -1; }
+    .scheduled-work-order-edit-policy-field,
+    .scheduled-work-order-time-field { grid-column:1 / -1; }
+    .scheduled-time-picker-values { grid-template-columns:repeat(4,minmax(0,1fr)); }
     #taskModal .scheduled-control-shell { width:100% !important; max-width:100% !important; }
     #scheduledWorkOrderListModal .scheduled-work-order-list-card {
       width:100%; max-width:100%; height:calc(100dvh - 130px);

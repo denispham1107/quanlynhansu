@@ -13,6 +13,7 @@
 ## Nhập thời gian
 
 - Mọi ô nhập thời gian mới hoặc được chỉnh sửa phải hiển thị và nhận theo khung giờ 24 giờ (`HH:mm` hoặc `HH:mm:ss` khi có giây), không phụ thuộc cách hiển thị AM/PM của trình duyệt hay thiết bị. Kiểm tra giá trị trước khi lưu và giữ đúng định dạng này khi mở lại để sửa.
+- Khi một ô thời gian có bộ chọn bằng thao tác bấm, phải giữ cả khả năng bấm chọn lẫn nhập thủ công; không thay bộ chọn bằng ô nhập tay đơn thuần. Bộ chọn cũng phải dùng khung giờ 24 giờ.
 
 ## Modal và vùng cuộn
 

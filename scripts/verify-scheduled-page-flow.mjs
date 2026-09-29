@@ -62,6 +62,7 @@ const navigate = new Function("state", "els", "document", "window", `
   const setTaskModalMode = (mode) => { state.taskModalMode = mode; };
   const setMobileTaskPanelMenuOpen = () => {};
   const renderScheduledWorkOrderList = () => {};
+  const closeScheduledTimePicker = () => {};
   ${extractFunction("openScheduledWorkOrderModal")}
   ${extractFunction("closeTaskModal")}
   ${extractFunction("returnToScheduledWorkOrderModal")}

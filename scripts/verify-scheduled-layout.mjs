@@ -218,6 +218,10 @@ const prepareExpression = `(() => {
   document.getElementById("scheduleWorkOrderBtn")?.classList.remove("hidden");
   document.getElementById("scheduledWorkOrderDate").value = "2026-09-20";
   document.getElementById("scheduledWorkOrderTime").value = "22:57:30";
+  const picker = document.getElementById("scheduledWorkOrderTimePicker");
+  document.getElementById("scheduledWorkOrderTimePickerParts").innerHTML = '<button>Giờ 22</button><button>Phút 57</button><button>Giây 30</button>';
+  document.getElementById("scheduledWorkOrderTimePickerValues").innerHTML = Array.from({length:60}, (_,value) => '<button>'+String(value).padStart(2,'0')+'</button>').join('');
+  picker.classList.remove("hidden");
   document.getElementById("scheduledWorkOrderCountdownMinutes").value = "15";
   document.getElementById("scheduledWorkOrderRepeatMode").value = "daily";
   return true;
@@ -253,6 +257,11 @@ for (const profile of profiles) {
       const timeIcon = timeShell.querySelector(".scheduled-time-icon");
       const timeIconBox = box(timeIcon);
       const timeShellBox = box(timeShell);
+      const picker = box(document.getElementById("scheduledWorkOrderTimePicker"));
+      const pickerValues = box(document.getElementById("scheduledWorkOrderTimePickerValues"));
+      const pickerFooter = box(document.querySelector(".scheduled-time-picker-footer"));
+      const pickerButtons = [...document.querySelectorAll(".scheduled-time-picker button")].map(box);
+      const footerChildren = [...document.querySelectorAll(".scheduled-time-picker-footer > *")].map(box);
       const actionButtons = [...document.querySelectorAll(".task-create-actions > .btn:not(.hidden)")].map(box);
       const inside = [...shells, ...controls].every((rect) => rect.left >= config.left - 0.5 && rect.right <= config.right + 0.5);
       const shellControlMatch = shells.every((shell, index) => controls[index].left >= shell.left - 0.5 && controls[index].right <= shell.right + 0.5);
@@ -281,6 +290,13 @@ for (const profile of profiles) {
         timeType: timeInput.type,
         timeValue: timeInput.value,
         timeIconInside: timeIconBox.left >= timeShellBox.left && timeIconBox.right <= timeShellBox.right,
+        pickerInside: picker.left >= config.left - 0.5 && picker.right <= config.right + 0.5
+          && pickerValues.left >= picker.left - 0.5 && pickerValues.right <= picker.right + 0.5
+          && pickerFooter.left >= picker.left - 0.5 && pickerFooter.right <= picker.right + 0.5,
+        pickerControlsInside: pickerButtons.every((rect) => rect.left >= picker.left - 0.5 && rect.right <= picker.right + 0.5)
+          && footerChildren.every((rect) => rect.left >= pickerFooter.left - 0.5 && rect.right <= pickerFooter.right + 0.5),
+        pickerValueScrolls: document.getElementById("scheduledWorkOrderTimePickerValues").scrollHeight
+          > document.getElementById("scheduledWorkOrderTimePickerValues").clientHeight,
         actionButtons,
         inside,
         shellControlMatch,
@@ -304,6 +320,9 @@ for (const profile of profiles) {
     && result.timeType === "text"
     && result.timeValue === "22:57:30"
     && result.timeIconInside
+    && result.pickerInside
+    && result.pickerControlsInside
+    && result.pickerValueScrolls
     && result.actionButtons.length === 2
     && result.config.width > 0
     && result.shells.every((rect) => rect.width > 0)

@@ -1111,6 +1111,14 @@ const els = {
   scheduledWorkOrderConfig: $("#scheduledWorkOrderConfig"),
   scheduledWorkOrderDate: $("#scheduledWorkOrderDate"),
   scheduledWorkOrderTime: $("#scheduledWorkOrderTime"),
+  scheduledWorkOrderTimeField: $("#scheduledWorkOrderTimeField"),
+  scheduledWorkOrderTimePickerBtn: $("#scheduledWorkOrderTimePickerBtn"),
+  scheduledWorkOrderTimePicker: $("#scheduledWorkOrderTimePicker"),
+  scheduledWorkOrderTimePickerParts: $("#scheduledWorkOrderTimePickerParts"),
+  scheduledWorkOrderTimePickerValues: $("#scheduledWorkOrderTimePickerValues"),
+  scheduledWorkOrderTimePickerPreview: $("#scheduledWorkOrderTimePickerPreview"),
+  scheduledWorkOrderTimePickerCancel: $("#scheduledWorkOrderTimePickerCancel"),
+  scheduledWorkOrderTimePickerApply: $("#scheduledWorkOrderTimePickerApply"),
   scheduledWorkOrderGroup: $("#scheduledWorkOrderGroup"),
   scheduledWorkOrderCountdownMinutes: $("#scheduledWorkOrderCountdownMinutes"),
   scheduledWorkOrderCountdownPreview: $("#scheduledWorkOrderCountdownPreview"),
@@ -9334,12 +9342,97 @@ function normalize24HourTimeValue(value) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+const scheduledTimePickerParts = ["hour", "minute", "second"];
+const scheduledTimePickerLabels = ["Giờ", "Phút", "Giây"];
+let scheduledTimePickerSelection = [0, 0, 0];
+let scheduledTimePickerPart = 0;
+
+function formatScheduledTimePickerValue(values) {
+  return values.map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function renderScheduledTimePicker() {
+  if (!els.scheduledWorkOrderTimePickerParts || !els.scheduledWorkOrderTimePickerValues) return;
+  els.scheduledWorkOrderTimePickerParts.innerHTML = scheduledTimePickerParts.map((part, index) => (
+    `<button type="button" data-time-part="${part}" aria-pressed="${index === scheduledTimePickerPart}">${scheduledTimePickerLabels[index]} ${String(scheduledTimePickerSelection[index]).padStart(2, "0")}</button>`
+  )).join("");
+  const limit = scheduledTimePickerPart === 0 ? 24 : 60;
+  els.scheduledWorkOrderTimePickerValues.innerHTML = Array.from({ length: limit }, (_, value) => (
+    `<button type="button" data-time-value="${value}" aria-pressed="${value === scheduledTimePickerSelection[scheduledTimePickerPart]}">${String(value).padStart(2, "0")}</button>`
+  )).join("");
+  if (els.scheduledWorkOrderTimePickerPreview) {
+    els.scheduledWorkOrderTimePickerPreview.textContent = formatScheduledTimePickerValue(scheduledTimePickerSelection);
+  }
+}
+
+function closeScheduledTimePicker() {
+  els.scheduledWorkOrderTimePicker?.classList.add("hidden");
+  els.scheduledWorkOrderTimePickerBtn?.setAttribute("aria-expanded", "false");
+}
+
+function openScheduledTimePicker() {
+  const initialValue = normalize24HourTimeValue(els.scheduledWorkOrderTime?.value)
+    || localDateTimeInputValues().time;
+  scheduledTimePickerSelection = initialValue.split(":").map(Number);
+  scheduledTimePickerPart = 0;
+  renderScheduledTimePicker();
+  els.scheduledWorkOrderTimePicker?.classList.remove("hidden");
+  els.scheduledWorkOrderTimePickerBtn?.setAttribute("aria-expanded", "true");
+}
+
+els.scheduledWorkOrderTimePickerBtn?.addEventListener("click", () => {
+  if (els.scheduledWorkOrderTimePicker?.classList.contains("hidden")) openScheduledTimePicker();
+  else closeScheduledTimePicker();
+});
+els.scheduledWorkOrderTimePickerParts?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-time-part]");
+  const index = scheduledTimePickerParts.indexOf(button?.dataset.timePart);
+  if (index < 0) return;
+  scheduledTimePickerPart = index;
+  renderScheduledTimePicker();
+});
+els.scheduledWorkOrderTimePickerValues?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-time-value]");
+  const value = Number(button?.dataset.timeValue);
+  const limit = scheduledTimePickerPart === 0 ? 24 : 60;
+  if (!button || !Number.isInteger(value) || value < 0 || value >= limit) return;
+  scheduledTimePickerSelection[scheduledTimePickerPart] = value;
+  if (scheduledTimePickerPart < 2) scheduledTimePickerPart += 1;
+  renderScheduledTimePicker();
+});
+els.scheduledWorkOrderTimePickerApply?.addEventListener("click", () => {
+  if (els.scheduledWorkOrderTime) {
+    els.scheduledWorkOrderTime.value = formatScheduledTimePickerValue(scheduledTimePickerSelection);
+    resetScheduledWorkOrderTimeValidity();
+    els.scheduledWorkOrderTime.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  closeScheduledTimePicker();
+  els.scheduledWorkOrderTimePickerBtn?.focus({ preventScroll: true });
+});
+els.scheduledWorkOrderTimePickerCancel?.addEventListener("click", () => {
+  closeScheduledTimePicker();
+  els.scheduledWorkOrderTimePickerBtn?.focus({ preventScroll: true });
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!els.scheduledWorkOrderTimePicker?.classList.contains("hidden")
+    && !els.scheduledWorkOrderTimeField?.contains(event.target)) closeScheduledTimePicker();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || els.scheduledWorkOrderTimePicker?.classList.contains("hidden")) return;
+  event.stopPropagation();
+  closeScheduledTimePicker();
+  els.scheduledWorkOrderTimePickerBtn?.focus({ preventScroll: true });
+});
+
 function resetScheduledWorkOrderTimeValidity() {
   els.scheduledWorkOrderTime?.setCustomValidity("");
   els.scheduledWorkOrderTime?.removeAttribute("aria-invalid");
 }
 
-els.scheduledWorkOrderTime?.addEventListener("input", resetScheduledWorkOrderTimeValidity);
+els.scheduledWorkOrderTime?.addEventListener("input", () => {
+  resetScheduledWorkOrderTimeValidity();
+  closeScheduledTimePicker();
+});
 els.scheduledWorkOrderTime?.addEventListener("blur", () => {
   const input = els.scheduledWorkOrderTime;
   const normalized = normalize24HourTimeValue(input?.value);
@@ -9363,6 +9456,7 @@ function updateScheduledCountdownPreview() {
 
 function closeTaskModal() {
   const leavingSchedulePage = state.taskModalMode === "schedule";
+  closeScheduledTimePicker();
   els.taskModal?.classList.add("hidden");
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = "";
@@ -9400,6 +9494,7 @@ els.openTaskModalBtn?.addEventListener("click", openCreateWorkOrderModal);
 els.floatingCreateTaskBtn?.addEventListener("click", openCreateWorkOrderModal);
 
 function resetScheduledWorkOrderFormForCreate() {
+  closeScheduledTimePicker();
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = "";
   els.workOrderName.value = "";
@@ -9463,6 +9558,7 @@ function canDeleteScheduledWorkOrder(schedule) {
 }
 
 function openScheduledWorkOrderEditor(scheduleId) {
+  closeScheduledTimePicker();
   if (!isAdminProfile()) {
     toast("Chỉ Admin được chỉnh sửa lịch Phiếu công việc.", "error");
     return;
