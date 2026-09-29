@@ -12832,6 +12832,10 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
 
     closeWorkOrderSettingsModal();
     toast("Đã lưu Cài đặt Phiếu công việc.", "success");
+    const removedCount = Number(result?.data?.removedInvalidExcludedEmployeeCount || 0);
+    if (removedCount > 0) {
+      toast(`Đã bỏ ${removedCount} tài khoản không còn hợp lệ khỏi danh sách nhân viên miễn giám sát.`, "info");
+    }
   } catch (error) {
     console.error("Không lưu được Cài đặt:", error);
     const code = String(error?.code || "");
@@ -12839,6 +12843,8 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       closeWorkOrderSettingsModal();
       toast("Phiên xác thực Cài đặt không còn hợp lệ. Vui lòng nhập lại mật khẩu.", "error");
       openWorkOrderSettingsPasswordModal();
+    } else if (code.includes("invalid-argument") || code.includes("failed-precondition")) {
+      toast(error?.message || "Dữ liệu Cài đặt không hợp lệ. Vui lòng kiểm tra lại.", "error");
     } else {
       toast("Không lưu được Cài đặt. Vui lòng kiểm tra kết nối và Cloud Functions.", "error");
     }

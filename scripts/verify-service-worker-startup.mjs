@@ -57,7 +57,7 @@ async function fetchThroughWorker(url) {
   return { response, elapsed, waits };
 }
 
-const url = "https://example.com/app.js?v=20260930-locked-schedule-override-v116";
+const url = "https://example.com/app.js?v=20260930-settings-stale-exclusions-v117";
 stored.set(url, new Response("cached"));
 const cachedResult = await fetchThroughWorker(url);
 assert.equal(await cachedResult.response.text(), "cached");

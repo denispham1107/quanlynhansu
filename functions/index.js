@@ -14,6 +14,7 @@ const {
 } = require("./scheduled-availability");
 const { scheduledTaskDateKey } = require("./scheduled-task-date");
 const { shouldPrepareNextDailyScheduledOccurrence } = require("./scheduled-recurrence");
+const { reconcileExcludedEmployees } = require("./work-supervision-exclusions");
 const {
   isValidScheduledEditDeletePolicy,
   normalizeScheduledEditDeletePolicy,
@@ -328,7 +329,7 @@ exports.saveWorkOrderControlSettings = onCall({
   const rawWorkSupervisionExcludedEmployeeUids = Array.isArray(request.data?.workSupervisionExcludedEmployeeUids)
     ? request.data.workSupervisionExcludedEmployeeUids
     : (legacyWorkSupervisionExcludedEmployeeUid ? [legacyWorkSupervisionExcludedEmployeeUid] : []);
-  const workSupervisionExcludedEmployeeUids = [...new Set(
+  let workSupervisionExcludedEmployeeUids = [...new Set(
     rawWorkSupervisionExcludedEmployeeUids
       .map((employeeUid) => String(employeeUid || "").trim())
       .filter(Boolean)
@@ -383,16 +384,33 @@ exports.saveWorkOrderControlSettings = onCall({
   }
 
   const workSupervisionExcludedEmployeeNames = {};
+  let removedInvalidExcludedEmployeeCount = 0;
   if (workSupervisionExcludedEmployeeUids.length) {
-    const excludedEmployeeSnaps = await Promise.all(
-      workSupervisionExcludedEmployeeUids.map((employeeUid) => db.doc(`users/${employeeUid}`).get())
-    );
+    const [settingsSnap, excludedEmployeeSnaps] = await Promise.all([
+      existingSettingsSnap || db.doc("appSettings/workOrderControls").get(),
+      Promise.all(workSupervisionExcludedEmployeeUids.map((employeeUid) => db.doc(`users/${employeeUid}`).get()))
+    ]);
+    const previousSettings = settingsSnap.data() || {};
+    const previousExcludedEmployeeUids = Array.isArray(previousSettings.workSupervisionExcludedEmployeeUids)
+      ? previousSettings.workSupervisionExcludedEmployeeUids
+      : [previousSettings.workSupervisionExcludedEmployeeUid].filter(Boolean);
+    const employeeProfiles = new Map();
     excludedEmployeeSnaps.forEach((excludedEmployeeSnap, index) => {
       const employeeUid = workSupervisionExcludedEmployeeUids[index];
-      const excludedEmployee = excludedEmployeeSnap.exists ? excludedEmployeeSnap.data() || {} : {};
-      if (!excludedEmployeeSnap.exists || excludedEmployee.role !== "employee") {
-        throw new HttpsError("invalid-argument", "Tất cả tài khoản được miễn giám sát phải là nhân viên hợp lệ.");
-      }
+      if (excludedEmployeeSnap.exists) employeeProfiles.set(employeeUid, excludedEmployeeSnap.data() || {});
+    });
+    const reconciled = reconcileExcludedEmployees(
+      workSupervisionExcludedEmployeeUids,
+      previousExcludedEmployeeUids,
+      employeeProfiles
+    );
+    if (reconciled.hasInvalidNewUid) {
+      throw new HttpsError("invalid-argument", "Tất cả tài khoản được miễn giám sát phải là nhân viên hợp lệ.");
+    }
+    workSupervisionExcludedEmployeeUids = reconciled.validUids;
+    removedInvalidExcludedEmployeeCount = reconciled.removedStaleCount;
+    workSupervisionExcludedEmployeeUids.forEach((employeeUid) => {
+      const excludedEmployee = employeeProfiles.get(employeeUid);
       workSupervisionExcludedEmployeeNames[employeeUid] = supervisionEmployeeName({
         uid: employeeUid,
         ...excludedEmployee
@@ -437,6 +455,7 @@ exports.saveWorkOrderControlSettings = onCall({
 
   return {
     saved: true,
+    removedInvalidExcludedEmployeeCount,
     settings: {
       maxExtendMinutes,
       preventWorkOrderDeletion,
