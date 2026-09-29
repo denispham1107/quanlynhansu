@@ -13,6 +13,7 @@ const {
   findAvailableScheduledEmployees
 } = require("./scheduled-availability");
 const { scheduledTaskDateKey } = require("./scheduled-task-date");
+const { shouldPrepareNextDailyScheduledOccurrence } = require("./scheduled-recurrence");
 const {
   isValidScheduledEditDeletePolicy,
   normalizeScheduledEditDeletePolicy,
@@ -853,28 +854,31 @@ async function ensureNextDailyScheduledOccurrence(scheduleId, schedule = {}) {
     if (
       !currentSnapshot?.exists
       || ["cancelled", "deleting"].includes(String(currentSchedule.status || ""))
+      || normalizeScheduledRepeatMode(currentSchedule.repeatMode) !== "daily"
+      || firestoreTimestampOrNull(currentSchedule.scheduledAt)?.toMillis() !== currentScheduledAt.toMillis()
+      || String(currentSchedule.seriesId || scheduleId) !== seriesId
     ) return;
     canCreateNext = true;
     if (!nextSnapshot.exists) {
       const now = Timestamp.now();
       transaction.set(nextScheduleRef, {
         id: nextScheduleId,
-        name: String(schedule.name || "Phiếu công việc lên lịch").slice(0, 180),
-        employeeGroupId: String(schedule.employeeGroupId || "").slice(0, 180),
-        employeeGroupName: String(schedule.employeeGroupName || "Nhóm nhân viên").slice(0, 80),
+        name: String(currentSchedule.name || "Phiếu công việc lên lịch").slice(0, 180),
+        employeeGroupId: String(currentSchedule.employeeGroupId || "").slice(0, 180),
+        employeeGroupName: String(currentSchedule.employeeGroupName || "Nhóm nhân viên").slice(0, 80),
         scheduledAt: nextScheduledAt,
-        rows: nextDailyScheduledRows(Array.isArray(schedule.rows) ? schedule.rows : []),
-        photoRequired: schedule.photoRequired === true,
-        requiredPhotoCount: Math.max(0, Math.min(100, Math.trunc(Number(schedule.requiredPhotoCount || 0)))),
-        assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(schedule.assignmentCountdownMinutes),
+        rows: nextDailyScheduledRows(Array.isArray(currentSchedule.rows) ? currentSchedule.rows : []),
+        photoRequired: currentSchedule.photoRequired === true,
+        requiredPhotoCount: Math.max(0, Math.min(100, Math.trunc(Number(currentSchedule.requiredPhotoCount || 0)))),
+        assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(currentSchedule.assignmentCountdownMinutes),
         repeatMode: "daily",
         editDeletePolicy: normalizeScheduledEditDeletePolicy(currentSchedule.editDeletePolicy),
         seriesId,
-        occurrenceIndex: Math.max(0, Math.trunc(Number(schedule.occurrenceIndex || 0))) + 1,
+        occurrenceIndex: Math.max(0, Math.trunc(Number(currentSchedule.occurrenceIndex || 0))) + 1,
         previousScheduleId: scheduleId,
         status: "pending",
-        createdByUid: String(schedule.createdByUid || "system").slice(0, 180),
-        createdByName: String(schedule.createdByName || "Admin").slice(0, 120),
+        createdByUid: String(currentSchedule.createdByUid || "system").slice(0, 180),
+        createdByName: String(currentSchedule.createdByName || "Admin").slice(0, 120),
         createdAt: now,
         updatedAt: now,
         materializationEnqueuedAt: null,
@@ -1070,6 +1074,15 @@ exports.createScheduledWorkOrder = onCall({
   });
 
   const enqueued = await tryEnqueueScheduledMaterialization(scheduleRef.id, scheduledAt);
+  if (repeatMode === "daily") {
+    try {
+      await ensureNextDailyScheduledOccurrence(scheduleRef.id, {
+        scheduledAt, repeatMode, seriesId: scheduleRef.id
+      });
+    } catch (error) {
+      console.error("Không chuẩn bị được lịch lặp của ngày kế tiếp:", error);
+    }
+  }
   return {
     created: true,
     scheduleId: scheduleRef.id,
@@ -1140,6 +1153,7 @@ exports.updateScheduledWorkOrder = onCall({
   let previousStatus = "pending";
   let generatedWorkOrderId = "";
   let existingNextScheduleId = "";
+  let seriesId = scheduleId;
 
   await db.runTransaction(async (transaction) => {
     const [scheduleSnapshot, groupSnapshot] = await transaction.getAll(scheduleRef, groupRef);
@@ -1174,6 +1188,7 @@ exports.updateScheduledWorkOrder = onCall({
       currentSchedule.generatedWorkOrderId || `scheduled_${scheduleId}`
     ).slice(0, 180);
     existingNextScheduleId = String(currentSchedule.nextScheduleId || "").slice(0, 180);
+    seriesId = String(currentSchedule.seriesId || scheduleId).slice(0, 180);
     const nextScheduleData = {
       name,
       employeeGroupId,
@@ -1185,6 +1200,8 @@ exports.updateScheduledWorkOrder = onCall({
       assignmentCountdownMinutes,
       repeatMode,
       editDeletePolicy,
+      nextScheduleId: FieldValue.delete(),
+      nextScheduledAt: FieldValue.delete(),
       updatedAt: Timestamp.now(),
       materializationEnqueuedAt: null,
       queueEnqueueError: FieldValue.delete(),
@@ -1259,19 +1276,20 @@ exports.updateScheduledWorkOrder = onCall({
       });
     });
 
-    if (existingNextScheduleId) {
-      const nextScheduleRef = db.doc(`scheduledWorkOrders/${existingNextScheduleId}`);
-      const nextScheduleSnapshot = await nextScheduleRef.get();
-      const nextSchedule = nextScheduleSnapshot.data() || {};
-      const canUpdateNext = nextScheduleSnapshot.exists
-        && String(nextSchedule.previousScheduleId || "") === scheduleId
-        && String(nextSchedule.createdByUid || "") === adminUid
-        && String(nextSchedule.status || "") === "pending";
-      if (canUpdateNext) {
-        // Xóa lần kế tiếp cũ để khi lịch hiện tại được tạo lại, hệ thống sinh
-        // đúng occurrence mới theo ngày/giờ và nội dung vừa chỉnh sửa.
-        await nextScheduleRef.delete();
-      }
+  }
+
+  if (existingNextScheduleId) {
+    const nextScheduleRef = db.doc(`scheduledWorkOrders/${existingNextScheduleId}`);
+    const nextScheduleSnapshot = await nextScheduleRef.get();
+    const nextSchedule = nextScheduleSnapshot.data() || {};
+    const canUpdateNext = nextScheduleSnapshot.exists
+      && String(nextSchedule.previousScheduleId || "") === scheduleId
+      && String(nextSchedule.createdByUid || "") === adminUid
+      && String(nextSchedule.status || "") === "pending"
+      && canModifyScheduledWorkOrder(nextSchedule);
+    if (canUpdateNext) {
+      // Lịch kế tiếp đã được tạo sớm: bỏ bản cũ để dữ liệu chỉnh sửa được áp dụng.
+      await nextScheduleRef.delete();
     }
   }
 
@@ -1281,6 +1299,15 @@ exports.updateScheduledWorkOrder = onCall({
     enqueued = true;
   } else {
     enqueued = await tryEnqueueScheduledMaterialization(scheduleId, scheduledAt);
+  }
+  if (repeatMode === "daily") {
+    try {
+      await ensureNextDailyScheduledOccurrence(scheduleId, {
+        scheduledAt, repeatMode, seriesId
+      });
+    } catch (error) {
+      console.error("Không chuẩn bị lại được lịch lặp của ngày kế tiếp:", error);
+    }
   }
   return {
     updated: true,
@@ -1303,7 +1330,22 @@ exports.listScheduledWorkOrders = onCall({
 }, async (request) => {
   const adminUid = assertAuthenticated(request);
   await assertAdmin(adminUid);
-  const snapshot = await db.collection("scheduledWorkOrders").get();
+  let snapshot = await db.collection("scheduledWorkOrders").get();
+  const nowMs = Date.now();
+  const todayKey = scheduledTaskDateKey(nowMs, WORK_SUPERVISION_TIME_ZONE);
+  const schedulesNeedingNext = snapshot.docs.filter((item) => {
+    const schedule = item.data() || {};
+    return String(schedule.createdByUid || "") === adminUid
+      && shouldPrepareNextDailyScheduledOccurrence(
+        schedule,
+        scheduledTaskDateKey(firestoreTimestampOrNull(schedule.scheduledAt)?.toMillis(), WORK_SUPERVISION_TIME_ZONE),
+        todayKey
+      );
+  });
+  for (const item of schedulesNeedingNext) {
+    await ensureNextDailyScheduledOccurrence(item.id, item.data() || {});
+  }
+  if (schedulesNeedingNext.length) snapshot = await db.collection("scheduledWorkOrders").get();
   const schedules = snapshot.docs
     .map((item) => ({ id: item.id, ...item.data() }))
     .filter((item) => String(item.createdByUid || "") === adminUid)
@@ -2075,10 +2117,18 @@ exports.processScheduledWorkOrdersFallback = onSchedule({
   memory: "256MiB"
 }, async () => {
   const nowMs = Date.now();
+  const todayKey = scheduledTaskDateKey(nowMs, WORK_SUPERVISION_TIME_ZONE);
   const snapshot = await db.collection("scheduledWorkOrders").where("status", "in", ["pending", "generated"]).get();
   for (const item of snapshot.docs) {
     const schedule = item.data() || {};
     const scheduledAtMs = firestoreTimestampOrNull(schedule.scheduledAt)?.toMillis() || 0;
+    if (shouldPrepareNextDailyScheduledOccurrence(
+      schedule,
+      scheduledTaskDateKey(scheduledAtMs, WORK_SUPERVISION_TIME_ZONE),
+      todayKey
+    )) {
+      await ensureNextDailyScheduledOccurrence(item.id, schedule);
+    }
     if (schedule.status === "pending") {
       if (scheduledAtMs <= nowMs) {
         await materializeScheduledWorkOrderById(item.id);
