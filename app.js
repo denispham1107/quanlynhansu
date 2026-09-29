@@ -14,6 +14,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   setDoc,
   updateDoc,
@@ -362,6 +363,47 @@ let adminSupplementaryStarted = false;
 let startupExtrasTimer = 0;
 let startupExtrasUid = "";
 let authBootGeneration = 0;
+let activeDashboardRole = "";
+const STARTUP_PROFILE_CACHE_PREFIX = "culao-startup-profile-v1:";
+const STARTUP_PROFILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function readStartupProfile(uid) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(`${STARTUP_PROFILE_CACHE_PREFIX}${uid}`) || "null");
+    if (!cached || cached.uid !== uid || !Number.isFinite(cached.savedAt)) return null;
+    if (cached.savedAt > Date.now() || Date.now() - cached.savedAt > STARTUP_PROFILE_MAX_AGE_MS) return null;
+    if (!["admin", "supervisor", "employee"].includes(cached.profile?.role)) return null;
+    return cached.profile;
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveStartupProfile(uid, profile) {
+  if (!uid || !["admin", "supervisor", "employee"].includes(profile?.role)) return;
+  try {
+    localStorage.setItem(`${STARTUP_PROFILE_CACHE_PREFIX}${uid}`, JSON.stringify({
+      uid,
+      savedAt: Date.now(),
+      profile: {
+        role: profile.role,
+        name: String(profile.name || ""),
+        email: String(profile.email || ""),
+        employeeGroupId: String(profile.employeeGroupId || ""),
+        employeeGroupName: String(profile.employeeGroupName || ""),
+        permissions: profile.role === "supervisor" ? normalizeSupervisorPermissions(profile.permissions) : {},
+        employmentStatus: String(profile.employmentStatus || "")
+      }
+    }));
+  } catch (_) {
+    // Dung lượng/bộ nhớ riêng tư bị chặn: lần sau vẫn tải hồ sơ trực tiếp.
+  }
+}
+
+function clearStartupProfile(uid) {
+  if (!uid) return;
+  try { localStorage.removeItem(`${STARTUP_PROFILE_CACHE_PREFIX}${uid}`); } catch (_) {}
+}
 
 
 // =========================
@@ -951,6 +993,9 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 const els = {
+  startupView: $("#startupView"),
+  startupStatus: $("#startupStatus"),
+  startupRetry: $("#startupRetry"),
   loginView: $("#loginView"),
   appView: $("#appView"),
   adminView: $("#adminView"),
@@ -1555,6 +1600,35 @@ function downloadBlobFile(blob, fileName) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+let jsZipLoadPromise = null;
+function loadJsZipWhenNeeded() {
+  if (window.JSZip) return Promise.resolve(window.JSZip);
+  if (jsZipLoadPromise) return jsZipLoadPromise;
+
+  jsZipLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    const timeoutId = window.setTimeout(() => fail(), 15000);
+    function fail() {
+      window.clearTimeout(timeoutId);
+      script.remove();
+      reject(new Error("Không tải được thư viện ZIP. Vui lòng kiểm tra kết nối rồi thử lại."));
+    }
+    script.async = true;
+    script.src = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
+    script.onload = () => {
+      window.clearTimeout(timeoutId);
+      if (window.JSZip) resolve(window.JSZip);
+      else fail();
+    };
+    script.onerror = fail;
+    document.head.appendChild(script);
+  }).catch((error) => {
+    jsZipLoadPromise = null;
+    throw error;
+  });
+  return jsZipLoadPromise;
 }
 
 const PHOTO_UPLOAD_MAX_DIMENSION = 1280;
@@ -4150,11 +4224,8 @@ async function downloadAllChatMediaFromButton(button) {
       return;
     }
 
-    if (!window.JSZip) {
-      throw new Error("Chưa tải được thư viện tạo file ZIP. Vui lòng tải lại trang rồi thử lại.");
-    }
-
-    const zip = new window.JSZip();
+    const JSZip = await loadJsZipWhenNeeded();
+    const zip = new JSZip();
     const usedNames = new Set();
     const failedFiles = [];
     let successCount = 0;
@@ -5490,15 +5561,42 @@ els.logoutBtn.addEventListener("click", async () => {
   try {
     await unregisterCurrentDevicePushToken();
   } finally {
+    clearStartupProfile(auth.currentUser?.uid);
     await signOut(auth);
   }
 });
 
+function activateAuthenticatedDashboard(profile) {
+  const nextRoute = isManagementProfile(profile) ? "management" : "employee";
+  const routeChanged = activeDashboardRole !== nextRoute;
+  if (activeDashboardRole && routeChanged) {
+    cleanupSubscriptions();
+    state.tasks = [];
+    state.workOrders = [];
+    state.employees = [];
+    state.supervisors = [];
+    state.staffAccounts = [];
+  }
+  state.profile = profile;
+  showApp();
+  if (routeChanged) {
+    activeDashboardRole = nextRoute;
+    if (nextRoute === "management") setupAdminDashboard();
+    else setupEmployeeDashboard();
+  } else if (nextRoute === "management") {
+    applyManagementPermissionUI();
+  } else {
+    renderEmployeeEmploymentStatusBanner();
+  }
+}
+
 onAuthStateChanged(auth, async (user) => {
   const bootGeneration = ++authBootGeneration;
+  const previousUid = state.user?.uid;
   cleanupSubscriptions();
   cleanupChatFeature();
   resetTaskReviewAlertSound();
+  activeDashboardRole = "";
 
   state.user = user;
   state.profile = null;
@@ -5564,52 +5662,78 @@ onAuthStateChanged(auth, async (user) => {
   state.chatConversationListenerWarningShown = false;
 
   if (!user) {
+    clearStartupProfile(previousUid);
     showLogin();
     renderNotifications();
     return;
   }
 
+  showStartup("Đang khôi phục hồ sơ và dữ liệu...");
+  const cachedProfile = readStartupProfile(user.uid);
   try {
-    const profileSnap = await getDoc(doc(db, "users", user.uid));
+    const profileRef = doc(db, "users", user.uid);
+    // Đưa yêu cầu xác minh hồ sơ vào hàng đợi trước các listener dữ liệu lớn.
+    const profileRequest = cachedProfile ? getDocFromServer(profileRef) : getDoc(profileRef);
+    if (cachedProfile) {
+      // Hồ sơ đã xác minh ở lần trước cho phép mở dashboard ngay. Firestore Rules
+      // vẫn quyết định mọi quyền đọc/ghi; hồ sơ mới trên máy chủ sẽ thay thế cache.
+      activateAuthenticatedDashboard(cachedProfile);
+      if (state.pendingPushTaskId) queuePushTaskOpen(state.pendingPushTaskId);
+    }
+
+    const profileSnap = await profileRequest;
     if (bootGeneration !== authBootGeneration || state.user?.uid !== user.uid) return;
 
     if (!profileSnap.exists()) {
+      clearStartupProfile(user.uid);
       toast("Tài khoản này chưa có hồ sơ trong collection users. Hãy tạo users/{uid} trước.", "error");
       await signOut(auth);
       return;
     }
 
-    state.profile = profileSnap.data();
-
-    showApp();
+    const profile = profileSnap.data();
+    saveStartupProfile(user.uid, profile);
+    activateAuthenticatedDashboard(profile);
     // Dashboard và dữ liệu công việc phải được đăng ký trước các luồng phụ
     // (Thông báo, Chat, FCM) để truy vấn lớn của luồng phụ không tranh lượt tải
     // với màn hình chính ngay khi người dùng vừa vào ứng dụng.
-    const managementDashboard = isManagementProfile();
-    if (managementDashboard) {
-      setupAdminDashboard();
-    } else {
-      setupEmployeeDashboard();
-    }
-
-    if (state.pendingPushTaskId) queuePushTaskOpen(state.pendingPushTaskId);
+    if (!cachedProfile && state.pendingPushTaskId) queuePushTaskOpen(state.pendingPushTaskId);
 
     // Luồng phụ không cạnh tranh với snapshot màn hình chính ngay lúc mở app.
     // Nếu mạng chậm, vẫn khởi động chúng sau thời hạn để không mất thông báo.
-    scheduleStartupExtras(user.uid, managementDashboard ? 12000 : 0);
+    scheduleStartupExtras(user.uid, isManagementProfile() ? 12000 : 0);
   } catch (error) {
     if (bootGeneration !== authBootGeneration) return;
     console.error(error);
-    toast("Không tải được hồ sơ người dùng. Kiểm tra Firestore Rules.", "error");
-    await signOut(auth);
+    if (String(error?.code || "").includes("permission-denied")) {
+      clearStartupProfile(user.uid);
+      toast("Không còn quyền truy cập hồ sơ người dùng.", "error");
+      await signOut(auth);
+      return;
+    }
+    if (cachedProfile) {
+      toast("Chưa xác minh được hồ sơ mới do kết nối chậm. Đang dùng phiên đã lưu.", "warning");
+      scheduleStartupExtras(user.uid, isManagementProfile() ? 12000 : 0);
+    } else {
+      showStartup("Không tải được hồ sơ. Kiểm tra kết nối rồi chọn Thử tải lại; phiên đăng nhập vẫn được giữ.", true);
+    }
   }
 });
+
+function showStartup(message, canRetry = false) {
+  els.startupView?.classList.remove("hidden");
+  els.loginView.classList.add("hidden");
+  els.appView.classList.add("hidden");
+  if (els.startupStatus) els.startupStatus.textContent = message;
+  els.startupRetry?.classList.toggle("hidden", !canRetry);
+}
 
 function showLogin() {
   stopImageGalleryListener();
   els.taskModal?.classList.add("hidden");
   els.scheduledWorkOrderListModal?.classList.add("hidden");
   document.body.classList.remove("schedule-page-open");
+  els.startupView?.classList.add("hidden");
   els.loginView.classList.remove("hidden");
   els.appView.classList.add("hidden");
   els.adminView.classList.add("hidden");
@@ -5624,6 +5748,7 @@ function showLogin() {
 }
 
 function showApp() {
+  els.startupView?.classList.add("hidden");
   els.loginView.classList.add("hidden");
   els.appView.classList.remove("hidden");
 
@@ -5958,6 +6083,7 @@ function setupAdminDashboard() {
       const currentProfile = users.find((item) => item.uid === state.user?.uid || item.id === state.user?.uid);
       if (currentProfile && isManagementProfile(currentProfile)) {
         state.profile = currentProfile;
+        if (!snapshot.metadata.fromCache) saveStartupProfile(bootUid, currentProfile);
         showApp();
       }
 
@@ -13019,6 +13145,8 @@ window.addEventListener("focus", ensureWorkSupervisionEmployeeReminderTimer);
 // Employee dashboard
 // =========================
 function setupEmployeeDashboard() {
+  const bootUid = state.user?.uid;
+  const bootGeneration = authBootGeneration;
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
@@ -13029,8 +13157,10 @@ function setupEmployeeDashboard() {
   const unsubOwnProfile = onSnapshot(
     doc(db, "users", state.user.uid),
     (snapshot) => {
+      if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
       if (snapshot.exists()) {
         state.profile = { id: snapshot.id, ...snapshot.data() };
+        if (!snapshot.metadata.fromCache) saveStartupProfile(bootUid, state.profile);
         renderEmployeeEmploymentStatusBanner();
         renderWorkSupervisionCountdown();
       }
@@ -17916,11 +18046,8 @@ function getPhotoReportZipMeta(task, zipBaseName = "") {
 }
 
 async function createPhotoReportZipBlob(task, photos, onProgress = null, zipBaseName = "") {
-  if (!window.JSZip) {
-    throw new Error("Chưa tải được thư viện tạo file ZIP. Vui lòng tải lại trang rồi thử lại.");
-  }
-
-  const zip = new window.JSZip();
+  const JSZip = await loadJsZipWhenNeeded();
+  const zip = new JSZip();
   const { folderName, fileName } = getPhotoReportZipMeta(task, zipBaseName);
   const folder = zip.folder(folderName) || zip;
   const usedNames = new Set();

@@ -15,8 +15,8 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="preload" href="task-review-alert-max.wav" as="audio" type="audio/wav" />
-  <link rel="preload" href="scheduled-work-order-alert-max.wav" as="audio" type="audio/wav" />
+  <link rel="preload" href="task-review-alert-max.wav" as="audio" type="audio/wav" fetchpriority="low" />
+  <link rel="preload" href="scheduled-work-order-alert-max.wav" as="audio" type="audio/wav" fetchpriority="low" />
 
   <!--
     Khởi tạo PWA thật sớm, trước khi app.js và Firebase tải xong.
@@ -50,6 +50,18 @@
             return null;
           });
       }
+
+      // Mã Firebase là module ngoài miền. Nếu mạng chậm, vẫn phải nói rõ ứng
+      // dụng đang khôi phục phiên chứ không hiện nhầm màn hình đăng nhập.
+      window.setTimeout(() => {
+        const view = document.getElementById("startupView");
+        if (!view || view.classList.contains("hidden")) return;
+        const status = document.getElementById("startupStatus");
+        if (status && !status.textContent.includes("Không tải được")) {
+          status.textContent = "Đang chờ kết nối xác thực. Bạn vẫn đang giữ phiên đăng nhập.";
+        }
+        document.getElementById("startupRetry")?.classList.remove("hidden");
+      }, 12000);
     })();
   </script>
 
@@ -10510,8 +10522,18 @@
     </section>
   </div>
 
+  <!-- Chỉ hiện form đăng nhập sau khi Firebase xác nhận không còn phiên đăng nhập. -->
+  <section id="startupView" class="login-view" role="status" aria-live="polite">
+    <div class="login-card startup-card">
+      <div class="brand-badge">Culao Task</div>
+      <div class="startup-heading"><span class="startup-spinner" aria-hidden="true"></span><h1>Đang mở ứng dụng</h1></div>
+      <p id="startupStatus" class="muted">Đang khôi phục phiên đăng nhập...</p>
+      <a id="startupRetry" class="btn ghost startup-retry hidden" href="./">Thử tải lại</a>
+    </div>
+  </section>
+
   <!-- LOGIN -->
-  <section id="loginView" class="login-view">
+  <section id="loginView" class="login-view hidden">
     <div class="login-card">
       <div class="brand-badge">Culao Task</div>
       <h1>Đăng nhập quản lý giao việc</h1>
@@ -12091,8 +12113,7 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260929-schedule-page-v103"></script>
+  <script type="module" src="app.js?v=20260929-startup-v104"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
