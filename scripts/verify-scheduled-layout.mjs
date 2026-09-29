@@ -353,6 +353,59 @@ for (const profile of profiles) {
 }
 
 await send("Runtime.evaluate", {
+  expression: `(() => {
+    const modal = document.getElementById("taskModal");
+    modal.classList.add("is-scheduled-draft-edit");
+    document.getElementById("viewScheduledWorkOrdersBtn").classList.add("hidden");
+    document.getElementById("scheduleWorkOrderBtn").classList.add("hidden");
+    document.getElementById("cancelScheduledDraftEditBtn").classList.remove("hidden");
+    document.getElementById("saveScheduledDraftEditBtn").classList.remove("hidden");
+    for (const control of document.querySelectorAll("#scheduledWorkOrderConfig input, #scheduledWorkOrderConfig select, #scheduledWorkOrderConfig button")) control.disabled = true;
+    for (const part of document.querySelectorAll(".scheduled-time-part")) part.contentEditable = "false";
+    for (const control of document.querySelectorAll("#taskRowsContainer .row-date, #taskRowsContainer .row-assignee")) control.disabled = true;
+    for (const control of document.querySelectorAll("#taskRowsContainer .row-hotel, #taskRowsContainer .row-hotel-pet-count")) control.disabled = true;
+    return true;
+  })()`
+});
+for (const profile of profiles) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: profile.width, height: profile.height,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
+    screenWidth: profile.width, screenHeight: profile.height
+  });
+  await delay(80);
+  const measurement = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const modal = document.getElementById("taskModal");
+      const card = modal.querySelector(".task-create-modal-card").getBoundingClientRect();
+      const actions = [...modal.querySelectorAll(".task-create-actions > .btn:not(.hidden)")];
+      const inside = actions.every((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.left >= card.left - .5 && rect.right <= card.right + .5;
+      });
+      return {
+        buttons: actions.map((button) => button.id),
+        inside,
+        scheduleLocked: [...modal.querySelectorAll("#scheduledWorkOrderConfig input, #scheduledWorkOrderConfig select, #scheduledWorkOrderConfig button")].every((control) => control.disabled),
+        segmentsLocked: [...modal.querySelectorAll(".scheduled-time-part")].every((part) => part.contentEditable === "false"),
+        assignmentsLocked: [...modal.querySelectorAll("#taskRowsContainer .row-date, #taskRowsContainer .row-assignee")].every((control) => control.disabled),
+        hotelLocked: [...modal.querySelectorAll("#taskRowsContainer .row-hotel, #taskRowsContainer .row-hotel-pet-count")].every((control) => control.disabled),
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth
+      };
+    })()`
+  });
+  const result = measurement.result.value;
+  const passed = result.buttons.join(",") === "cancelScheduledDraftEditBtn,saveScheduledDraftEditBtn"
+    && result.inside && result.scheduleLocked && result.segmentsLocked && result.assignmentsLocked && result.hotelLocked
+    && result.scrollWidth <= result.viewportWidth;
+  console.log(`${passed ? "PASS" : "FAIL"} | Sửa Phiếu từ lịch ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
+  if (!passed) failures.push({ profile: `Sửa Phiếu từ lịch ${profile.name}`, result });
+}
+
+await send("Runtime.evaluate", {
   returnByValue: true,
   expression: `(() => {
     const taskModal = document.getElementById("taskModal");

@@ -11474,6 +11474,8 @@
           <button id="createTaskBtn" class="btn primary" type="submit">Tạo Phiếu &amp; giao việc</button>
           <button id="viewScheduledWorkOrdersBtn" class="btn ghost hidden" type="button">📋 Xem lịch</button>
           <button id="scheduleWorkOrderBtn" class="btn schedule-work-order-btn hidden" type="button">🗓 Xác nhận lên lịch</button>
+          <button id="cancelScheduledDraftEditBtn" class="btn ghost hidden" type="button">Hủy</button>
+          <button id="saveScheduledDraftEditBtn" class="btn primary hidden" type="button">💾 Lưu</button>
         </div>
       </form>
     </div>
@@ -12130,7 +12132,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260929-segmented-time-v107"></script>
+  <script type="module" src="app.js?v=20260929-scheduled-draft-edit-v108"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12811,6 +12813,9 @@
     border:0 !important; outline:0 !important; box-shadow:none !important;
   }
   #taskModal .scheduled-time-shell { position:relative; }
+  #taskModal.is-scheduled-draft-edit #scheduledWorkOrderConfig { opacity:.72; }
+  #taskModal.is-scheduled-draft-edit #scheduledWorkOrderConfig .scheduled-control-shell { background:#f1f5f9; }
+  #taskModal.is-scheduled-draft-edit .task-work-photo-actions { display:none; }
   .scheduled-time-segments {
     display:flex; align-items:center; gap:3px; width:calc(100% - 46px); min-width:0;
     min-height:50px; padding:0 10px; box-sizing:border-box;

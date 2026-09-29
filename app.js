@@ -161,6 +161,8 @@ const assignScheduledWorkOrderToGroupEmployeeCallable = httpsCallable(
   functions,
   "assignScheduledWorkOrderToGroupEmployee"
 );
+const getScheduledGeneratedWorkOrderForEditCallable = httpsCallable(functions, "getScheduledGeneratedWorkOrderForEdit");
+const updateScheduledGeneratedWorkOrderCallable = httpsCallable(functions, "updateScheduledGeneratedWorkOrder");
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -211,6 +213,9 @@ const state = {
   unsubs: [],
   editingWorkOrderId: null,
   editingScheduledWorkOrderId: "",
+  editingScheduledDraftWorkOrderId: "",
+  editingScheduledDraftRevision: 0,
+  editingScheduledDraftGeneratedAtMs: 0,
   taskModalMode: "create",
   scheduledAssignmentWorkOrderId: "",
   scheduledWorkOrders: [],
@@ -1127,6 +1132,8 @@ const els = {
   scheduledWorkOrderEditDeletePolicy: $("#scheduledWorkOrderEditDeletePolicy"),
   viewScheduledWorkOrdersBtn: $("#viewScheduledWorkOrdersBtn"),
   scheduleWorkOrderBtn: $("#scheduleWorkOrderBtn"),
+  cancelScheduledDraftEditBtn: $("#cancelScheduledDraftEditBtn"),
+  saveScheduledDraftEditBtn: $("#saveScheduledDraftEditBtn"),
   scheduledWorkOrderListModal: $("#scheduledWorkOrderListModal"),
   scheduledWorkOrderList: $("#scheduledWorkOrderList"),
   scheduledWorkOrderStatusFilter: $("#scheduledWorkOrderStatusFilter"),
@@ -8678,6 +8685,10 @@ function createTaskRowElement(prefill = null) {
   const wrapper = document.createElement("div");
   wrapper.className = "task-row";
   wrapper.dataset.rowId = rowId;
+  if (prefill?.taskId) wrapper.dataset.taskId = prefill.taskId;
+  if (prefill?.isHotel && Number(prefill?.deadlineMinutes || 0) > 0) {
+    wrapper.dataset.originalHotelDeadlineMinutes = String(prefill.deadlineMinutes);
+  }
 
   wrapper.innerHTML = `
     <div class="task-row-head">
@@ -8859,7 +8870,7 @@ function activateTaskRow(row, { focusTitle = false, scrollIntoView = false } = {
 function addTaskRow({ focusTitle = false, scrollIntoView = false } = {}) {
   const row = createTaskRowElement();
   els.taskRowsContainer.appendChild(row);
-  if (state.taskModalMode === "schedule") {
+  if (["schedule", "scheduled-draft-edit"].includes(state.taskModalMode)) {
     const assignee = row.querySelector(".row-assignee");
     if (assignee) {
       assignee.value = "";
@@ -8869,6 +8880,10 @@ function addTaskRow({ focusTitle = false, scrollIntoView = false } = {}) {
     if (dateInput) {
       dateInput.value = els.scheduledWorkOrderDate?.value || todayInputValue();
       dateInput.disabled = true;
+    }
+    if (state.taskModalMode === "scheduled-draft-edit") {
+      row.querySelector(".row-hotel").disabled = true;
+      row.querySelector(".row-hotel-pet-count").disabled = true;
     }
   }
   updateTaskRowHeadings();
@@ -8885,6 +8900,11 @@ function removeTaskRow(rowId) {
   }
 
   const row = els.taskRowsContainer.querySelector(`[data-row-id="${rowId}"]`);
+  if (state.taskModalMode === "scheduled-draft-edit"
+    && (row?.querySelector(".row-hotel")?.checked || (taskRowWorkPhotos.get(rowId) || []).length)) {
+    toast("Không thể bỏ công việc Hotel hoặc công việc có ảnh đã lưu.", "error");
+    return;
+  }
   const rowToActivate = row?.nextElementSibling || row?.previousElementSibling || null;
   row?.remove();
   taskRowWorkPhotos.delete(rowId);
@@ -9269,7 +9289,7 @@ els.taskRowsContainer.addEventListener("change", (event) => {
 });
 
 function syncScheduledTaskRowDates() {
-  if (state.taskModalMode !== "schedule") return;
+  if (!["schedule", "scheduled-draft-edit"].includes(state.taskModalMode)) return;
   const scheduledDate = els.scheduledWorkOrderDate?.value || todayInputValue();
   $$("#taskRowsContainer .row-date").forEach((dateInput) => {
     dateInput.value = scheduledDate;
@@ -9292,9 +9312,11 @@ function updateScheduledWorkOrderEditorControls() {
 }
 
 function setTaskModalMode(mode = "create") {
-  const scheduleMode = mode === "schedule";
-  state.taskModalMode = scheduleMode ? "schedule" : "create";
+  const editingScheduledDraft = mode === "scheduled-draft-edit";
+  const scheduleMode = mode === "schedule" || editingScheduledDraft;
+  state.taskModalMode = scheduleMode ? mode : "create";
   els.taskModal?.classList.toggle("is-schedule-mode", scheduleMode);
+  els.taskModal?.classList.toggle("is-scheduled-draft-edit", editingScheduledDraft);
   if (els.taskModal) {
     els.taskModal.setAttribute("role", scheduleMode ? "main" : "dialog");
     if (scheduleMode) els.taskModal.removeAttribute("aria-modal");
@@ -9305,11 +9327,25 @@ function setTaskModalMode(mode = "create") {
     closeButton.textContent = scheduleMode ? "←" : "×";
     closeButton.setAttribute("aria-label", scheduleMode ? "Quay lại trang quản lý" : "Đóng");
   }
+  const subtitle = els.taskModal?.querySelector(".task-create-subtitle");
+  if (subtitle) {
+    subtitle.textContent = editingScheduledDraft
+      ? "Chỉnh sửa nội dung Phiếu hiện tại trước khi giao nhóm. Lịch lặp, ngày giao, người được giao, ảnh CV và hạn mức Hotel đã lưu được giữ nguyên."
+      : "Nhập thông tin Phiếu và các công việc cần giao.";
+  }
   els.scheduledWorkOrderConfig?.classList.toggle("hidden", !scheduleMode);
   els.saveDraftBtn?.classList.toggle("hidden", scheduleMode);
   els.createTaskBtn?.classList.toggle("hidden", scheduleMode);
-  els.viewScheduledWorkOrdersBtn?.classList.toggle("hidden", !scheduleMode);
-  els.scheduleWorkOrderBtn?.classList.toggle("hidden", !scheduleMode);
+  els.viewScheduledWorkOrdersBtn?.classList.toggle("hidden", mode !== "schedule");
+  els.scheduleWorkOrderBtn?.classList.toggle("hidden", mode !== "schedule");
+  els.cancelScheduledDraftEditBtn?.classList.toggle("hidden", !editingScheduledDraft);
+  els.saveScheduledDraftEditBtn?.classList.toggle("hidden", !editingScheduledDraft);
+
+  [els.scheduledWorkOrderDate, els.scheduledWorkOrderGroup, els.scheduledWorkOrderCountdownMinutes,
+    els.scheduledWorkOrderRepeatMode, els.scheduledWorkOrderEditDeletePolicy, els.scheduledWorkOrderTimePickerBtn]
+    .forEach((control) => { if (control) control.disabled = editingScheduledDraft; });
+  scheduledTimeSegments().forEach((segment) => { segment.contentEditable = String(!editingScheduledDraft); });
+  els.scheduledWorkOrderConfig?.setAttribute("aria-disabled", String(editingScheduledDraft));
 
   $$("#taskRowsContainer .row-assignee").forEach((select) => {
     if (scheduleMode) select.value = "";
@@ -9317,6 +9353,9 @@ function setTaskModalMode(mode = "create") {
   });
   $$("#taskRowsContainer .row-date").forEach((dateInput) => {
     dateInput.disabled = scheduleMode;
+  });
+  $$("#taskRowsContainer .row-hotel, #taskRowsContainer .row-hotel-pet-count").forEach((control) => {
+    control.disabled = editingScheduledDraft;
   });
   if (scheduleMode) syncScheduledTaskRowDates();
   updateScheduledWorkOrderEditorControls();
@@ -9510,11 +9549,14 @@ function updateScheduledCountdownPreview() {
 }
 
 function closeTaskModal() {
-  const leavingSchedulePage = state.taskModalMode === "schedule";
+  const leavingSchedulePage = ["schedule", "scheduled-draft-edit"].includes(state.taskModalMode);
   closeScheduledTimePicker();
   els.taskModal?.classList.add("hidden");
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = "";
+  state.editingScheduledDraftWorkOrderId = "";
+  state.editingScheduledDraftRevision = 0;
+  state.editingScheduledDraftGeneratedAtMs = 0;
   setTaskModalMode("create");
   if (leavingSchedulePage) {
     els.scheduledWorkOrderListModal?.classList.add("hidden");
@@ -9702,8 +9744,129 @@ function openScheduledWorkOrderEditor(scheduleId) {
   window.scrollTo({ top: 0, behavior: "auto" });
 }
 
+async function openScheduledDraftEditor(workOrderId, button) {
+  if (!isAdminProfile()) {
+    toast("Chỉ Admin được chỉnh sửa Phiếu lên lịch trước khi giao.", "error");
+    return;
+  }
+  setButtonLoading(button, true, "Đang mở...");
+  try {
+    const result = await getScheduledGeneratedWorkOrderForEditCallable({ workOrderId });
+    const ticket = result?.data || {};
+    if (!Array.isArray(ticket.rows) || !ticket.rows.length) throw new Error("Phiếu này không còn công việc để chỉnh sửa.");
+    const scheduledMoment = new Date(Number(ticket.scheduledForMs || 0));
+    if (!Number.isFinite(scheduledMoment.getTime())) throw new Error("Thời điểm lên lịch không hợp lệ.");
+
+    state.schedulePageReturnScrollY = window.scrollY || 0;
+    state.editingWorkOrderId = null;
+    state.editingScheduledWorkOrderId = "";
+    state.editingScheduledDraftWorkOrderId = workOrderId;
+    state.editingScheduledDraftRevision = Number(ticket.revision || 0);
+    state.editingScheduledDraftGeneratedAtMs = Number(ticket.generatedAtMs || 0);
+    closeScheduledTimePicker();
+    taskRowWorkPhotos.clear();
+    els.taskRowsContainer.innerHTML = "";
+    els.workOrderName.value = ticket.name || "";
+    const inputs = localDateTimeInputValues(scheduledMoment);
+    if (els.scheduledWorkOrderDate) els.scheduledWorkOrderDate.value = ticket.taskDate || inputs.date;
+    setScheduledWorkOrderTimeValue(inputs.time);
+    if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = ticket.employeeGroupId || "";
+    if (els.scheduledWorkOrderCountdownMinutes) {
+      els.scheduledWorkOrderCountdownMinutes.value = String(ticket.assignmentCountdownMinutes || 10);
+    }
+    if (els.scheduledWorkOrderRepeatMode) els.scheduledWorkOrderRepeatMode.value = ticket.repeatMode || "none";
+    if (els.scheduledWorkOrderEditDeletePolicy) els.scheduledWorkOrderEditDeletePolicy.value = ticket.editDeletePolicy || "editable";
+
+    ticket.rows.forEach((row) => {
+      const deadlineMinutes = Number(row.deadlineMinutes || 0);
+      els.taskRowsContainer.appendChild(createTaskRowElement({
+        ...row,
+        taskDate: ticket.taskDate || row.taskDate || inputs.date,
+        assignedToUid: "",
+        hours: Math.floor(deadlineMinutes / 60),
+        minutes: deadlineMinutes % 60
+      }));
+    });
+    updateTaskRowHeadings();
+    const firstRow = els.taskRowsContainer.querySelector(".task-row");
+    if (firstRow) activateTaskRow(firstRow);
+    setPhotoRequirementControlsFromTask({
+      photoRequired: ticket.photoRequired === true,
+      requiredPhotoCount: Number(ticket.requiredPhotoCount || 0)
+    });
+    setTaskModalMode("scheduled-draft-edit");
+    updateScheduledCountdownPreview();
+    $("#taskModalTitle").textContent = "Chỉnh sửa Phiếu chưa giao việc từ lịch";
+    els.adminView?.classList.add("hidden");
+    els.taskModal?.classList.remove("hidden");
+    document.body.classList.add("schedule-page-open");
+    setMobileTaskPanelMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  } catch (error) {
+    console.error(error);
+    state.editingScheduledDraftWorkOrderId = "";
+    state.editingScheduledDraftRevision = 0;
+    state.editingScheduledDraftGeneratedAtMs = 0;
+    toast(error?.code === "functions/not-found"
+      ? "Máy chủ Firebase chưa triển khai chức năng chỉnh sửa Phiếu lên lịch."
+      : error?.message || "Không mở được Phiếu lên lịch để chỉnh sửa.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function saveScheduledDraftEdit(button) {
+  const workOrderId = state.editingScheduledDraftWorkOrderId;
+  if (!isAdminProfile() || !workOrderId) return;
+  setButtonLoading(button, true, "Đang lưu...");
+  try {
+    const name = els.workOrderName?.value.trim() || "";
+    if (!name) throw new Error("Vui lòng nhập tên Phiếu công việc.");
+    const rows = readTaskRowsData();
+    const validationError = validateTaskRows(rows);
+    if (validationError) throw new Error(validationError);
+    const photoOptions = readPhotoRequirementOptions();
+    const photoError = validatePhotoRequirementOptions(photoOptions);
+    if (photoError) throw new Error(photoError);
+    await updateScheduledGeneratedWorkOrderCallable({
+      workOrderId,
+      expectedRevision: state.editingScheduledDraftRevision,
+      expectedGeneratedAtMs: state.editingScheduledDraftGeneratedAtMs,
+      name,
+      ...photoOptions,
+      rows: rows.map((row) => ({
+        taskId: row.taskId,
+        title: row.title,
+        description: row.description,
+        deadlineMinutes: row.deadlineMinutes,
+        isLunchBreak: row.isLunchBreak,
+        isHotel: row.isHotel,
+        isShip: row.isShip,
+        hotelPetCount: row.hotelPetCount
+      }))
+    });
+    closeTaskModal();
+    toast("Đã lưu nội dung Phiếu. Bạn có thể bấm Giao cho nhóm.", "success");
+  } catch (error) {
+    console.error(error);
+    toast(error?.code === "functions/not-found"
+      ? "Máy chủ Firebase chưa triển khai chức năng lưu Phiếu lên lịch."
+      : error?.message || "Không thể lưu nội dung Phiếu lên lịch.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+els.cancelScheduledDraftEditBtn?.addEventListener("click", closeTaskModal);
+els.saveScheduledDraftEditBtn?.addEventListener("click", () => saveScheduledDraftEdit(els.saveScheduledDraftEditBtn));
+
 function openEditWorkOrderModal(workOrderId) {
   if (!requirePermission("editWorkOrder", "Tài khoản của bạn chưa được cấp quyền sửa Phiếu chưa giao.")) return;
+
+  if (getWorkOrderMeta(workOrderId)?.scheduledWorkOrder === true) {
+    toast("Phiếu từ lịch phải được sửa bằng nút Chỉnh sửa riêng trước khi giao cho nhóm.", "error");
+    return;
+  }
 
   setTaskModalMode("create");
 
@@ -9781,7 +9944,9 @@ function readTaskRowsData() {
     // Bảo vệ lớp dữ liệu: nếu tên công việc khớp chính xác với Danh sách công việc,
     // luôn dùng thời gian của công việc mẫu kể cả khi DOM bị chỉnh thủ công.
     const deadlineMinutes = isHotel
-      ? Math.max(0, Number(row.dataset.hotelRemainingSeconds || 0) / 60)
+      ? state.taskModalMode === "scheduled-draft-edit" && row.dataset.originalHotelDeadlineMinutes
+        ? Number(row.dataset.originalHotelDeadlineMinutes)
+        : Math.max(0, Number(row.dataset.hotelRemainingSeconds || 0) / 60)
       : templateDeadlineMinutes > 0
       ? templateDeadlineMinutes
       : (hours * 60 + minutes);
@@ -9790,6 +9955,7 @@ function readTaskRowsData() {
     return {
       index,
       rowId: row.dataset.rowId || "",
+      taskId: row.dataset.taskId || "",
       workPhotos: (taskRowWorkPhotos.get(row.dataset.rowId || "") || []).slice(),
       title,
       description,
@@ -10291,6 +10457,9 @@ async function persistWorkOrder(dispatch, button) {
   setButtonLoading(button, true, dispatch ? "Đang giao việc..." : "Đang lưu...");
 
   try {
+    if (state.editingWorkOrderId && getWorkOrderMeta(state.editingWorkOrderId)?.scheduledWorkOrder === true) {
+      throw new Error("Phiếu tạo từ lịch không được lưu bằng luồng sửa Phiếu thông thường.");
+    }
     const workOrderName = els.workOrderName.value.trim();
 
     if (!workOrderName) {
@@ -10691,6 +10860,10 @@ async function createScheduledWorkOrder(button) {
 
 els.createTaskForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (state.taskModalMode === "scheduled-draft-edit") {
+    await saveScheduledDraftEdit(els.saveScheduledDraftEditBtn);
+    return;
+  }
   if (state.taskModalMode === "schedule") {
     await createScheduledWorkOrder(els.scheduleWorkOrderBtn);
     return;
@@ -14920,6 +15093,10 @@ function renderTicketGroup(group, mode = "admin") {
 
   if (mode === "admin" && isDraft) {
     if (isScheduledGroupPending && group.tasks.length) {
+      const cachedSchedule = state.scheduledWorkOrders.find((item) => item.id === workOrder?.scheduleId);
+      if (isAdminProfile() && workOrder?.scheduledEditDeletePolicy !== "locked" && cachedSchedule?.editDeletePolicy !== "locked") {
+        actionButtons.push(`<button class="btn ghost small" data-action="edit-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Chỉnh sửa</button>`);
+      }
       actionButtons.push(`<button class="btn schedule-work-order-btn small" data-action="open-scheduled-group-assignment" data-work-order-id="${escapeHtml(group.key)}" type="button">👤 Giao cho nhóm</button>`);
     } else if (hasPermission("editWorkOrder")) {
       actionButtons.push(`<button class="btn ghost small" data-action="edit-work-order" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Sửa phiếu</button>`);
@@ -16567,6 +16744,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "edit-work-order") {
     openEditWorkOrderModal(button.dataset.workOrderId);
+  }
+
+  if (action === "edit-scheduled-draft") {
+    await openScheduledDraftEditor(button.dataset.workOrderId, button);
   }
 
   if (action === "dispatch-work-order") {

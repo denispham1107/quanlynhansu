@@ -1584,12 +1584,14 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
       scheduledEmployeeGroupId: String(freshSchedule.employeeGroupId || ""),
       scheduledEmployeeGroupName: String(freshSchedule.employeeGroupName || groupSnapshot.data()?.name || "Nhóm nhân viên"),
       scheduledGroupAssignmentPending: true,
+      scheduledDraftRevision: 0,
       scheduledAssignmentDeadlineAt: assignmentDeadlineAt,
       scheduledAssignmentCountdownStartedAt: waitingForAvailableEmployee ? null : now,
       scheduledAssignmentWaitingForAvailableEmployee: waitingForAvailableEmployee,
       scheduledAvailableEmployeeCountAtCountdownStart: availableEmployees.length,
       scheduledAssignmentCountdownMinutes: assignmentCountdownMinutes,
       scheduledRepeatMode: normalizeScheduledRepeatMode(freshSchedule.repeatMode),
+      scheduledEditDeletePolicy: normalizeScheduledEditDeletePolicy(freshSchedule.editDeletePolicy),
       scheduledGroupTimeoutProcessed: false
     }, { merge: false });
 
@@ -2152,6 +2154,217 @@ exports.processScheduledWorkOrdersFallback = onSchedule({
   }
 });
 
+exports.getScheduledGeneratedWorkOrderForEdit = onCall({
+  region: REGION,
+  timeoutSeconds: 60,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  await assertAdmin(adminUid);
+  const workOrderId = String(request.data?.workOrderId || "").trim();
+  if (!workOrderId || workOrderId.includes("/") || workOrderId.length > 180) {
+    throw new HttpsError("invalid-argument", "Phiếu công việc không hợp lệ.");
+  }
+  const workOrderSnapshot = await db.doc(`workOrders/${workOrderId}`).get();
+  const workOrder = workOrderSnapshot.data() || {};
+  const scheduleId = String(workOrder.scheduleId || "");
+  if (!workOrderSnapshot.exists || !scheduleId || workOrder.scheduledWorkOrder !== true
+    || workOrder.status !== "draft" || workOrder.scheduledGroupAssignmentPending !== true) {
+    throw new HttpsError("failed-precondition", "Phiếu này không còn chờ giao cho nhóm.");
+  }
+  const [scheduleSnapshot, taskSnapshot] = await Promise.all([
+    db.doc(`scheduledWorkOrders/${scheduleId}`).get(),
+    db.collection("tasks").where("workOrderId", "==", workOrderId).get()
+  ]);
+  const schedule = scheduleSnapshot.data() || {};
+  if (!scheduleSnapshot.exists || schedule.status !== "generated" || !canModifyScheduledWorkOrder(schedule)) {
+    throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa hoặc không còn chờ giao.");
+  }
+  const tasks = taskSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
+    .sort((left, right) => Number(left.rowIndex || 0) - Number(right.rowIndex || 0));
+  if (!tasks.length || tasks.some((task) => task.status !== "draft" || task.assignedToUid
+    || task.scheduledWorkOrder !== true || String(task.scheduleId || "") !== scheduleId)) {
+    throw new HttpsError("failed-precondition", "Các công việc của Phiếu đã thay đổi; vui lòng tải lại.");
+  }
+  return {
+    workOrderId,
+    name: String(workOrder.name || ""),
+    revision: Math.max(0, Number(workOrder.scheduledDraftRevision || 0)),
+    generatedAtMs: firestoreTimestampOrNull(workOrder.scheduledGeneratedAt)?.toMillis() || 0,
+    scheduledForMs: firestoreTimestampOrNull(workOrder.scheduledAt || schedule.scheduledAt)?.toMillis() || 0,
+    taskDate: String(workOrder.scheduledTaskDate || tasks[0].taskDate || ""),
+    employeeGroupId: String(workOrder.scheduledEmployeeGroupId || schedule.employeeGroupId || ""),
+    assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(workOrder.scheduledAssignmentCountdownMinutes),
+    repeatMode: normalizeScheduledRepeatMode(workOrder.scheduledRepeatMode || schedule.repeatMode),
+    editDeletePolicy: normalizeScheduledEditDeletePolicy(schedule.editDeletePolicy),
+    photoRequired: tasks.some((task) => task.photoRequired === true),
+    requiredPhotoCount: Math.max(0, Number(tasks.find((task) => task.photoRequired === true)?.requiredPhotoCount || 0)),
+    rows: tasks.map((task) => ({
+      taskId: task.id,
+      title: String(task.title || ""),
+      description: String(task.description || ""),
+      taskDate: String(task.taskDate || ""),
+      deadlineMinutes: Number(task.deadlineMinutes || 0),
+      isLunchBreak: task.isLunchBreak === true,
+      isHotel: task.isHotel === true,
+      isShip: task.isShip === true,
+      hotelPetCount: Number(task.hotelPetCount || 0),
+      workPhotos: Array.isArray(task.workPhotos) ? task.workPhotos : []
+    }))
+  };
+});
+
+exports.updateScheduledGeneratedWorkOrder = onCall({
+  region: REGION,
+  timeoutSeconds: 120,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  await assertAdmin(adminUid);
+  const workOrderId = String(request.data?.workOrderId || "").trim();
+  const name = String(request.data?.name || "").trim().slice(0, 180);
+  if (!workOrderId || workOrderId.includes("/") || workOrderId.length > 180 || !name) {
+    throw new HttpsError("invalid-argument", "Tên hoặc mã Phiếu công việc không hợp lệ.");
+  }
+  const requestedRows = request.data?.rows;
+  if (!Array.isArray(requestedRows)) {
+    throw new HttpsError("invalid-argument", "Danh sách công việc không hợp lệ.");
+  }
+  // Ngày giao và người được giao luôn do Phiếu gốc quyết định, không tin dữ liệu từ trình duyệt.
+  const rows = normalizeScheduledWorkOrderRows(requestedRows.map((row) => ({ ...row, taskDate: "2000-01-01", workPhotos: [] })));
+  const requestedPhotoRequired = request.data?.photoRequired === true;
+  const requestedPhotoCount = Number(request.data?.requiredPhotoCount || 0);
+  if (requestedPhotoRequired && (!Number.isInteger(requestedPhotoCount) || requestedPhotoCount < 1 || requestedPhotoCount > 100)) {
+    throw new HttpsError("invalid-argument", "Số lượng hình bắt buộc phải từ 1 đến 100.");
+  }
+  const workOrderRef = db.doc(`workOrders/${workOrderId}`);
+  const saved = await db.runTransaction(async (transaction) => {
+    const workOrderSnapshot = await transaction.get(workOrderRef);
+    const workOrder = workOrderSnapshot.data() || {};
+    const scheduleId = String(workOrder.scheduleId || "");
+    if (!workOrderSnapshot.exists || !scheduleId || workOrder.scheduledWorkOrder !== true
+      || workOrder.status !== "draft" || workOrder.scheduledGroupAssignmentPending !== true) {
+      throw new HttpsError("failed-precondition", "Phiếu này đã được giao hoặc không còn chờ giao cho nhóm.");
+    }
+    if (Number(request.data?.expectedRevision) !== Number(workOrder.scheduledDraftRevision || 0)
+      || Number(request.data?.expectedGeneratedAtMs) !== (firestoreTimestampOrNull(workOrder.scheduledGeneratedAt)?.toMillis() || 0)) {
+      throw new HttpsError("aborted", "Phiếu đã thay đổi trong lúc chỉnh sửa; vui lòng mở lại.");
+    }
+    const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
+    const [scheduleSnapshot, taskSnapshot] = await Promise.all([
+      transaction.get(scheduleRef),
+      transaction.get(db.collection("tasks").where("workOrderId", "==", workOrderId))
+    ]);
+    const schedule = scheduleSnapshot.data() || {};
+    if (!scheduleSnapshot.exists || schedule.status !== "generated" || !canModifyScheduledWorkOrder(schedule)) {
+      throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa hoặc không còn chờ giao.");
+    }
+    const currentTasks = new Map(taskSnapshot.docs.map((item) => [item.id, { ref: item.ref, ...item.data() }]));
+    if (!currentTasks.size || [...currentTasks.values()].some((task) => task.status !== "draft" || task.assignedToUid
+      || task.scheduledWorkOrder !== true || String(task.scheduleId || "") !== scheduleId)) {
+      throw new HttpsError("failed-precondition", "Danh sách công việc đã thay đổi; vui lòng tải lại.");
+    }
+    const taskDate = String(workOrder.scheduledTaskDate || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(taskDate)) {
+      throw new HttpsError("failed-precondition", "Ngày giao của Phiếu không hợp lệ.");
+    }
+    const usedIds = new Set();
+    const now = Timestamp.now();
+    const adminName = String(request.auth.token?.email || "Admin").slice(0, 120);
+    const taskIds = [];
+    rows.forEach((row, index) => {
+      const taskId = String(requestedRows[index]?.taskId || "").trim();
+      if (taskId && (!currentTasks.has(taskId) || usedIds.has(taskId))) {
+        throw new HttpsError("invalid-argument", "Công việc đã thay đổi hoặc bị trùng; vui lòng tải lại.");
+      }
+      if (taskId) usedIds.add(taskId);
+      const current = taskId ? currentTasks.get(taskId) : null;
+      if (row.isHotel !== (current?.isHotel === true) || (row.isHotel && row.hotelPetCount !== Number(current?.hotelPetCount || 0))) {
+        throw new HttpsError("failed-precondition", "Không thể thêm, bỏ hoặc thay đổi Số lượng bé Hotel khi Phiếu đã được tạo.");
+      }
+      const ref = current?.ref || db.collection("tasks").doc();
+      taskIds.push(ref.id);
+      const photoRequired = !row.isLunchBreak && !row.isHotel && requestedPhotoRequired;
+      const changes = {
+        title: row.title,
+        description: row.description,
+        taskDate,
+        scheduledForDate: taskDate,
+        workOrderName: name,
+        workOrderTaskCount: rows.length,
+        rowIndex: index,
+        deadlineMinutes: row.isHotel ? Number(current?.deadlineMinutes || 0) : row.deadlineMinutes,
+        isLunchBreak: row.isLunchBreak,
+        isHotel: row.isHotel,
+        isShip: row.isShip,
+        photoRequired,
+        requiredPhotoCount: photoRequired ? requestedPhotoCount : 0
+      };
+      if (current) transaction.update(ref, changes);
+      else transaction.set(ref, {
+        id: ref.id,
+        ...changes,
+        assignedToUid: "",
+        assignedToName: "",
+        assignedByUid: adminUid,
+        assignedByName: adminName,
+        workOrderId,
+        createdAt: now,
+        deadlineAt: null,
+        dispatchedAt: null,
+        queueStartAt: null,
+        pauseStartedAt: null,
+        remainingMsAtPause: null,
+        accumulatedWorkedMs: 0,
+        submittedAt: null,
+        approvedAt: null,
+        status: "draft",
+        actualMinutes: null,
+        resultType: null,
+        differenceMinutes: null,
+        differencePercent: null,
+        hotelPetCount: 0,
+        hotelAllowedMinutes: 0,
+        hotelPhotoRequired: false,
+        hotelTotalRequiredPhotoCount: 0,
+        hotelRequiredPhotoCount: 0,
+        hotelPhotoInstruction: "",
+        workPhotos: [],
+        workPhotoCount: 0,
+        lastWorkPhotoUploadedAt: null,
+        photos: [],
+        photoCount: 0,
+        lastPhotoUploadedAt: null,
+        scheduledWorkOrder: true,
+        scheduledPhotoRequirementLocked: true,
+        scheduleId,
+        scheduledEmployeeGroupId: String(workOrder.scheduledEmployeeGroupId || ""),
+        scheduledEmployeeGroupName: String(workOrder.scheduledEmployeeGroupName || "")
+      });
+    });
+    for (const [taskId, task] of currentTasks) {
+      if (usedIds.has(taskId)) continue;
+      if (task.isHotel === true || (Array.isArray(task.workPhotos) && task.workPhotos.length) || (Array.isArray(task.photos) && task.photos.length)) {
+        throw new HttpsError("failed-precondition", "Không thể bỏ công việc Hotel hoặc công việc có ảnh đã lưu trong Phiếu.");
+      }
+      transaction.delete(task.ref);
+    }
+    transaction.update(workOrderRef, {
+      name,
+      taskCount: rows.length,
+      scheduledDraftRevision: Math.max(0, Number(workOrder.scheduledDraftRevision || 0)) + 1,
+      updatedAt: now
+    });
+    if (String(schedule.firstTaskId || "") !== taskIds[0]) {
+      transaction.update(scheduleRef, { firstTaskId: taskIds[0], updatedAt: now });
+    }
+    return { workOrderId, taskCount: rows.length };
+  });
+  return { saved: true, ...saved };
+});
+
 exports.assignScheduledWorkOrderToGroupEmployee = onCall({
   region: REGION,
   timeoutSeconds: 120,
@@ -2237,6 +2450,10 @@ exports.assignScheduledWorkOrderToGroupEmployee = onCall({
     const freshEmployee = allSnapshots[2]?.data() || {};
     if (freshWorkOrder.scheduledGroupAssignmentPending !== true || freshWorkOrder.status !== "draft") {
       throw new HttpsError("already-exists", "Phiếu lên lịch vừa được giao bởi một thao tác khác.");
+    }
+    if (Number(freshWorkOrder.scheduledDraftRevision || 0) !== Number(workOrder.scheduledDraftRevision || 0)
+      || Number(freshWorkOrder.taskCount || 0) !== orderedTasks.length) {
+      throw new HttpsError("aborted", "Phiếu vừa được chỉnh sửa; vui lòng mở lại Giao cho nhóm.");
     }
     if (freshSchedule.status !== "generated") {
       throw new HttpsError("failed-precondition", "Lịch này không còn ở trạng thái chờ giao.");
