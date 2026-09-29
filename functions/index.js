@@ -1401,6 +1401,7 @@ exports.listScheduledWorkOrders = onCall({
       repeatMode: normalizeScheduledRepeatMode(item.repeatMode),
       editDeletePolicy: normalizeScheduledEditDeletePolicy(item.editDeletePolicy),
       seriesId: String(item.seriesId || item.id),
+      sourceScheduleId: String(item.sourceScheduleId || ""),
       occurrenceIndex: Math.max(0, Math.trunc(Number(item.occurrenceIndex || 0))),
       status: String(item.status || "pending"),
       assignmentCountdownWaitingForAvailableEmployee: item.assignmentCountdownWaitingForAvailableEmployee === true,

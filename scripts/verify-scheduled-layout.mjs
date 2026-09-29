@@ -426,7 +426,7 @@ await send("Runtime.evaluate", {
           <div class="scheduled-work-order-list-main">22/09/2026, 08:30:00, Nhóm nhân viên, “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
           \${index >= 22 ? "" : '<button class="btn danger scheduled-work-order-delete-btn" type="button">×</button>'}
         </div>
-        <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : index === 22 ? "Đã thay thế" : "Đang chờ đến giờ"}</span></div>
+        <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : index === 22 ? "Đã thay thế" : "Đang chờ đến giờ"}</span>\${index === 22 ? '<button class="scheduled-work-order-replacement-link" type="button">Lịch mới: 09:45:00 30/09/2026 →</button>' : ""}</div>
       </article>
     \`).join("");
     return true;
@@ -464,6 +464,7 @@ for (const profile of profiles) {
       const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
       const deletedElement = listElement.querySelector(".scheduled-work-order-list-item.is-deleted");
       const replacedElement = listElement.querySelector(".scheduled-work-order-list-item.is-replaced");
+    const replacementLinkElement = replacedElement.querySelector(".scheduled-work-order-replacement-link");
     const card = box(cardElement);
     const content = box(contentElement);
     const filter = box(filterElement);
@@ -491,8 +492,9 @@ for (const profile of profiles) {
         deletedNoActions: !deletedElement.querySelector("button, [data-edit-scheduled-work-order]"),
         deletedRedBorder: getComputedStyle(deletedElement).borderTopColor === "rgb(252, 165, 165)",
         replacedInsideList: box(replacedElement).left >= list.left - 0.5 && box(replacedElement).right <= list.right + 0.5,
-        replacedNoActions: !replacedElement.querySelector("button, [data-edit-scheduled-work-order]"),
+        replacedNoActions: !replacedElement.querySelector("[data-delete-scheduled-work-order], [data-edit-scheduled-work-order]"),
         replacedBlueBorder: getComputedStyle(replacedElement).borderTopColor === "rgb(147, 197, 253)",
+        replacementLinkInsideRow: box(replacementLinkElement).left >= box(replacedElement).left - 0.5 && box(replacementLinkElement).right <= box(replacedElement).right + 0.5,
         contentClientHeight: contentElement.clientHeight,
         contentScrollHeight: contentElement.scrollHeight,
       contentInsideCard: content.left >= card.left - 0.5 && content.right <= card.right + 0.5 && content.top >= card.top - 0.5 && content.bottom <= card.bottom + 0.5,
@@ -542,6 +544,7 @@ for (const profile of profiles) {
     && result.replacedInsideList
     && result.replacedNoActions
     && result.replacedBlueBorder
+    && result.replacementLinkInsideRow
     && result.cardInsideViewport
     && result.modalOverflowY === "hidden"
     && result.cardOverflowY === "hidden"

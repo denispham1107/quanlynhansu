@@ -10961,6 +10961,41 @@ function formatScheduledListDateTime(milliseconds) {
   }).format(date);
 }
 
+function formatScheduledReplacementDateTime(milliseconds) {
+  const date = new Date(Number(milliseconds || 0));
+  if (!Number.isFinite(date.getTime())) return "--";
+  const time = new Intl.DateTimeFormat("vi-VN", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+  }).format(date);
+  const day = new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit", month: "2-digit", year: "numeric"
+  }).format(date);
+  return `${time} ${day}`;
+}
+
+function scheduledReplacementTargets(schedules) {
+  const targets = new Map();
+  const byId = new Map(schedules.map((schedule) => [schedule.id, schedule]));
+  const historiesBySource = new Map();
+  schedules.forEach((schedule) => {
+    if (schedule.status !== "replaced" || !schedule.sourceScheduleId) return;
+    const history = historiesBySource.get(schedule.sourceScheduleId) || [];
+    history.push(schedule);
+    historiesBySource.set(schedule.sourceScheduleId, history);
+  });
+  historiesBySource.forEach((history, sourceScheduleId) => {
+    history.sort((left, right) => (
+      Number(left.replacedAtMs || 0) - Number(right.replacedAtMs || 0)
+      || String(left.id).localeCompare(String(right.id))
+    ));
+    history.forEach((version, index) => {
+      const successor = history[index + 1] || byId.get(sourceScheduleId);
+      if (successor && Number(successor.scheduledForMs) > 0) targets.set(version.id, successor);
+    });
+  });
+  return targets;
+}
+
 function scheduledWorkOrderMatchesStatusFilter(schedule, filterValue = "all") {
   const status = String(schedule?.status || "pending");
   if (filterValue === "assigned") return status === "assigned";
@@ -11060,6 +11095,7 @@ function resetScheduledWorkOrderTimeFilter() {
 function renderScheduledWorkOrderList() {
   if (!els.scheduledWorkOrderList) return;
   const schedules = Array.isArray(state.scheduledWorkOrders) ? state.scheduledWorkOrders : [];
+  const replacementTargets = scheduledReplacementTargets(schedules);
   const activeStatusFilter = ["all", "unassigned", "assigned", "deleted", "replaced"].includes(state.scheduledWorkOrderStatusFilter)
     ? state.scheduledWorkOrderStatusFilter
     : "all";
@@ -11091,6 +11127,7 @@ function renderScheduledWorkOrderList() {
     const deletable = canDeleteScheduledWorkOrder(schedule);
     const deleted = schedule.status === "deleted";
     const replaced = schedule.status === "replaced";
+    const replacementTarget = replaced ? replacementTargets.get(schedule.id) : null;
     const taskNames = Array.isArray(schedule.taskNames) && schedule.taskNames.length
       ? schedule.taskNames.join("; ")
       : "Chưa có tên công việc";
@@ -11100,6 +11137,7 @@ function renderScheduledWorkOrderList() {
     return `
       <article
         class="scheduled-work-order-list-item${editable ? " is-editable" : ""}${deleted ? " is-deleted" : ""}${replaced ? " is-replaced" : ""}"
+        data-scheduled-list-item-id="${escapeHtml(schedule.id)}"
         ${editable ? `data-edit-scheduled-work-order="${escapeHtml(schedule.id)}" role="button" tabindex="0" aria-label="Chỉnh sửa lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"` : ""}
       >
         <div class="scheduled-work-order-list-row${deletable ? "" : " is-locked"}">
@@ -11124,6 +11162,12 @@ function renderScheduledWorkOrderList() {
             schedule.status,
             schedule.assignmentCountdownWaitingForAvailableEmployee === true
           ))}</span>
+          ${replacementTarget ? `<button
+            class="scheduled-work-order-replacement-link"
+            type="button"
+            data-show-scheduled-replacement="${escapeHtml(replacementTarget.id)}"
+            aria-label="Xem lịch đã thay thế: ${escapeHtml(formatScheduledReplacementDateTime(replacementTarget.scheduledForMs))}"
+          >Lịch mới: ${escapeHtml(formatScheduledReplacementDateTime(replacementTarget.scheduledForMs))} →</button>` : ""}
           ${deleted && schedule.deletionReason
             ? `<span class="scheduled-work-order-deletion-reason">Lý do: ${escapeHtml(schedule.deletionReason)}</span>`
             : ""}
@@ -11131,6 +11175,36 @@ function renderScheduledWorkOrderList() {
       </article>
     `;
   }).join("");
+}
+
+function showScheduledReplacement(scheduleId) {
+  const target = state.scheduledWorkOrders.find((schedule) => schedule.id === scheduleId);
+  if (!target) {
+    toast("Không còn tìm thấy lịch đã thay thế. Vui lòng tải lại danh sách.", "error");
+    return;
+  }
+  const targetDate = scheduledWorkOrderDateValue(target);
+  if (!targetDate) {
+    toast("Ngày của lịch đã thay thế không hợp lệ.", "error");
+    return;
+  }
+  state.scheduledWorkOrderStatusFilter = "all";
+  state.scheduledWorkOrderTimeFilter = "date";
+  state.scheduledWorkOrderDateFilter = targetDate;
+  renderScheduledWorkOrderList();
+  requestAnimationFrame(() => {
+    const row = [...(els.scheduledWorkOrderList?.querySelectorAll("[data-scheduled-list-item-id]") || [])]
+      .find((item) => item.dataset.scheduledListItemId === scheduleId);
+    const content = els.scheduledWorkOrderListModal?.querySelector(".scheduled-work-order-list-content");
+    if (!row || !content) return;
+    const rowRect = row.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    content.scrollTop += rowRect.top - contentRect.top - Math.max(0, (contentRect.height - rowRect.height) / 2);
+    if (!row.hasAttribute("tabindex")) row.tabIndex = -1;
+    row.focus({ preventScroll: true });
+    row.classList.add("is-jump-target");
+    setTimeout(() => row.classList.remove("is-jump-target"), 2400);
+  });
 }
 
 async function openScheduledWorkOrderListModal() {
@@ -11309,6 +11383,11 @@ $$('[data-back-scheduled-work-order-list]').forEach((button) => {
   button.addEventListener("click", returnToScheduledWorkOrderModal);
 });
 els.scheduledWorkOrderList?.addEventListener("click", (event) => {
+  const replacementLink = event.target.closest("[data-show-scheduled-replacement]");
+  if (replacementLink) {
+    showScheduledReplacement(replacementLink.dataset.showScheduledReplacement || "");
+    return;
+  }
   const button = event.target.closest("[data-delete-scheduled-work-order]");
   if (button) {
     openScheduledWorkOrderDeleteModal(button.dataset.deleteScheduledWorkOrder || "");
