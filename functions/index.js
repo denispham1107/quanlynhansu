@@ -13,6 +13,11 @@ const {
   findAvailableScheduledEmployees
 } = require("./scheduled-availability");
 const { scheduledTaskDateKey } = require("./scheduled-task-date");
+const {
+  isValidScheduledEditDeletePolicy,
+  normalizeScheduledEditDeletePolicy,
+  canModifyScheduledWorkOrder
+} = require("./scheduled-edit-policy");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth: getAdminAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
@@ -863,6 +868,7 @@ async function ensureNextDailyScheduledOccurrence(scheduleId, schedule = {}) {
         requiredPhotoCount: Math.max(0, Math.min(100, Math.trunc(Number(schedule.requiredPhotoCount || 0)))),
         assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(schedule.assignmentCountdownMinutes),
         repeatMode: "daily",
+        editDeletePolicy: normalizeScheduledEditDeletePolicy(currentSchedule.editDeletePolicy),
         seriesId,
         occurrenceIndex: Math.max(0, Math.trunc(Number(schedule.occurrenceIndex || 0))) + 1,
         previousScheduleId: scheduleId,
@@ -989,6 +995,8 @@ exports.createScheduledWorkOrder = onCall({
     requestedAssignmentCountdownMinutes
   );
   const repeatMode = normalizeScheduledRepeatMode(request.data?.repeatMode);
+  const requestedEditDeletePolicy = request.data?.editDeletePolicy;
+  const editDeletePolicy = normalizeScheduledEditDeletePolicy(requestedEditDeletePolicy);
   const photoRequired = request.data?.photoRequired === true;
   const requiredPhotoCount = photoRequired
     ? Math.max(1, Math.min(100, Math.trunc(Number(request.data?.requiredPhotoCount || 1))))
@@ -1000,6 +1008,9 @@ exports.createScheduledWorkOrder = onCall({
   }));
 
   if (!name) throw new HttpsError("invalid-argument", "Vui lòng nhập tên Phiếu công việc.");
+  if (requestedEditDeletePolicy != null && !isValidScheduledEditDeletePolicy(requestedEditDeletePolicy)) {
+    throw new HttpsError("invalid-argument", "Quyền Sửa-Xóa lịch không hợp lệ.");
+  }
   if (
     !Number.isInteger(requestedAssignmentCountdownMinutes)
     || requestedAssignmentCountdownMinutes < SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MIN_MINUTES
@@ -1036,6 +1047,7 @@ exports.createScheduledWorkOrder = onCall({
     requiredPhotoCount,
     assignmentCountdownMinutes,
     repeatMode,
+    editDeletePolicy,
     seriesId: scheduleRef.id,
     occurrenceIndex: 0,
     status: "pending",
@@ -1066,6 +1078,7 @@ exports.createScheduledWorkOrder = onCall({
     employeeGroupName,
     assignmentCountdownMinutes,
     repeatMode,
+    editDeletePolicy,
     enqueued
   };
 });
@@ -1087,6 +1100,8 @@ exports.updateScheduledWorkOrder = onCall({
     requestedAssignmentCountdownMinutes
   );
   const repeatMode = normalizeScheduledRepeatMode(request.data?.repeatMode);
+  const requestedEditDeletePolicy = request.data?.editDeletePolicy;
+  const editDeletePolicy = normalizeScheduledEditDeletePolicy(requestedEditDeletePolicy);
   const photoRequired = request.data?.photoRequired === true;
   const requiredPhotoCount = photoRequired
     ? Math.max(1, Math.min(100, Math.trunc(Number(request.data?.requiredPhotoCount || 1))))
@@ -1101,6 +1116,9 @@ exports.updateScheduledWorkOrder = onCall({
     throw new HttpsError("invalid-argument", "Lịch Phiếu công việc không hợp lệ.");
   }
   if (!name) throw new HttpsError("invalid-argument", "Vui lòng nhập tên Phiếu công việc.");
+  if (requestedEditDeletePolicy != null && !isValidScheduledEditDeletePolicy(requestedEditDeletePolicy)) {
+    throw new HttpsError("invalid-argument", "Quyền Sửa-Xóa lịch không hợp lệ.");
+  }
   if (
     !Number.isInteger(requestedAssignmentCountdownMinutes)
     || requestedAssignmentCountdownMinutes < SCHEDULED_GROUP_ASSIGNMENT_TIMEOUT_MIN_MINUTES
@@ -1131,6 +1149,9 @@ exports.updateScheduledWorkOrder = onCall({
     const currentSchedule = scheduleSnapshot.data() || {};
     if (String(currentSchedule.createdByUid || "") !== adminUid) {
       throw new HttpsError("permission-denied", "Bạn không có quyền chỉnh sửa lịch này.");
+    }
+    if (!canModifyScheduledWorkOrder(currentSchedule)) {
+      throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa và không thể chỉnh sửa.");
     }
     previousStatus = String(currentSchedule.status || "pending");
     if (!["pending", "generated", "failed"].includes(previousStatus)) {
@@ -1163,6 +1184,7 @@ exports.updateScheduledWorkOrder = onCall({
       requiredPhotoCount,
       assignmentCountdownMinutes,
       repeatMode,
+      editDeletePolicy,
       updatedAt: Timestamp.now(),
       materializationEnqueuedAt: null,
       queueEnqueueError: FieldValue.delete(),
@@ -1268,6 +1290,7 @@ exports.updateScheduledWorkOrder = onCall({
     employeeGroupName,
     assignmentCountdownMinutes,
     repeatMode,
+    editDeletePolicy,
     enqueued
   };
 });
@@ -1302,6 +1325,7 @@ exports.listScheduledWorkOrders = onCall({
         .filter(Boolean),
       assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(item.assignmentCountdownMinutes),
       repeatMode: normalizeScheduledRepeatMode(item.repeatMode),
+      editDeletePolicy: normalizeScheduledEditDeletePolicy(item.editDeletePolicy),
       seriesId: String(item.seriesId || item.id),
       occurrenceIndex: Math.max(0, Math.trunc(Number(item.occurrenceIndex || 0))),
       status: String(item.status || "pending"),
@@ -1337,6 +1361,9 @@ exports.deleteScheduledWorkOrder = onCall({
     const currentSchedule = scheduleSnapshot.data() || {};
     if (String(currentSchedule.createdByUid || "") !== adminUid) {
       throw new HttpsError("permission-denied", "Bạn không có quyền xóa lịch này.");
+    }
+    if (!canModifyScheduledWorkOrder(currentSchedule)) {
+      throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa và không thể xóa.");
     }
     const deletionPreviousStatus = String(
       currentSchedule.deletionPreviousStatus || currentSchedule.status || "pending"

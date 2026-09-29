@@ -1068,6 +1068,7 @@ const els = {
   scheduledWorkOrderCountdownMinutes: $("#scheduledWorkOrderCountdownMinutes"),
   scheduledWorkOrderCountdownPreview: $("#scheduledWorkOrderCountdownPreview"),
   scheduledWorkOrderRepeatMode: $("#scheduledWorkOrderRepeatMode"),
+  scheduledWorkOrderEditDeletePolicy: $("#scheduledWorkOrderEditDeletePolicy"),
   viewScheduledWorkOrdersBtn: $("#viewScheduledWorkOrdersBtn"),
   scheduleWorkOrderBtn: $("#scheduleWorkOrderBtn"),
   scheduledWorkOrderListModal: $("#scheduledWorkOrderListModal"),
@@ -9231,6 +9232,7 @@ function resetScheduledWorkOrderFormForCreate() {
   if (els.scheduledWorkOrderGroup) els.scheduledWorkOrderGroup.value = "";
   if (els.scheduledWorkOrderCountdownMinutes) els.scheduledWorkOrderCountdownMinutes.value = "10";
   if (els.scheduledWorkOrderRepeatMode) els.scheduledWorkOrderRepeatMode.value = "none";
+  if (els.scheduledWorkOrderEditDeletePolicy) els.scheduledWorkOrderEditDeletePolicy.value = "editable";
   syncScheduledTaskRowDates();
   updateScheduledCountdownPreview();
   if (els.requiredPhotoCount) els.requiredPhotoCount.value = 1;
@@ -9260,7 +9262,12 @@ els.scheduledWorkOrderCountdownMinutes?.addEventListener("input", updateSchedule
 els.scheduledWorkOrderDate?.addEventListener("change", syncScheduledTaskRowDates);
 
 function canEditScheduledWorkOrder(schedule) {
-  return ["pending", "generated", "failed"].includes(String(schedule?.status || "pending"));
+  return schedule?.editDeletePolicy !== "locked"
+    && ["pending", "generated", "failed"].includes(String(schedule?.status || "pending"));
+}
+
+function canDeleteScheduledWorkOrder(schedule) {
+  return schedule?.editDeletePolicy !== "locked";
 }
 
 function openScheduledWorkOrderEditor(scheduleId) {
@@ -9276,7 +9283,9 @@ function openScheduledWorkOrderEditor(scheduleId) {
   }
   if (!canEditScheduledWorkOrder(schedule)) {
     toast(
-      schedule.status === "assigned"
+      schedule.editDeletePolicy === "locked"
+        ? "Lịch này đã khóa Sửa-Xóa và không thể chỉnh sửa."
+        : schedule.status === "assigned"
         ? "Lịch này đã giao việc nên không thể thay đổi dữ liệu công việc đã giao."
         : "Lịch này không còn ở trạng thái có thể chỉnh sửa.",
       "info"
@@ -9307,6 +9316,9 @@ function openScheduledWorkOrderEditor(scheduleId) {
   }
   if (els.scheduledWorkOrderRepeatMode) {
     els.scheduledWorkOrderRepeatMode.value = schedule.repeatMode === "daily" ? "daily" : "none";
+  }
+  if (els.scheduledWorkOrderEditDeletePolicy) {
+    els.scheduledWorkOrderEditDeletePolicy.value = schedule.editDeletePolicy === "locked" ? "locked" : "editable";
   }
 
   const rows = Array.isArray(schedule.rows) ? schedule.rows : [];
@@ -10211,6 +10223,7 @@ async function createScheduledWorkOrder(button) {
     const timeValue = els.scheduledWorkOrderTime?.value || "";
     const assignmentCountdownMinutes = Number(els.scheduledWorkOrderCountdownMinutes?.value || 0);
     const repeatMode = els.scheduledWorkOrderRepeatMode?.value === "daily" ? "daily" : "none";
+    const editDeletePolicy = els.scheduledWorkOrderEditDeletePolicy?.value === "locked" ? "locked" : "editable";
     const selectedGroup = state.employeeGroups.find((group) => group.id === employeeGroupId);
 
     if (!name) throw new Error("Vui lòng nhập tên Phiếu công việc.");
@@ -10265,6 +10278,7 @@ async function createScheduledWorkOrder(button) {
       scheduledForMs: scheduledMoment.getTime(),
       assignmentCountdownMinutes,
       repeatMode,
+      editDeletePolicy,
       photoRequired: photoOptions.photoRequired,
       requiredPhotoCount: photoOptions.requiredPhotoCount,
       rows: payloadRows
@@ -10499,6 +10513,8 @@ function renderScheduledWorkOrderList() {
   }
 
   els.scheduledWorkOrderList.innerHTML = filteredSchedules.map((schedule) => {
+    const editable = canEditScheduledWorkOrder(schedule);
+    const deletable = canDeleteScheduledWorkOrder(schedule);
     const taskNames = Array.isArray(schedule.taskNames) && schedule.taskNames.length
       ? schedule.taskNames.join("; ")
       : "Chưa có tên công việc";
@@ -10507,29 +10523,27 @@ function renderScheduledWorkOrderList() {
     const countdownMinutes = normalizeScheduledCountdownMinutes(schedule.assignmentCountdownMinutes);
     return `
       <article
-        class="scheduled-work-order-list-item${canEditScheduledWorkOrder(schedule) ? " is-editable" : ""}"
-        data-edit-scheduled-work-order="${escapeHtml(schedule.id)}"
-        role="button"
-        tabindex="0"
-        aria-label="${canEditScheduledWorkOrder(schedule) ? "Chỉnh sửa" : "Xem trạng thái"} lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"
+        class="scheduled-work-order-list-item${editable ? " is-editable" : ""}"
+        ${editable ? `data-edit-scheduled-work-order="${escapeHtml(schedule.id)}" role="button" tabindex="0" aria-label="Chỉnh sửa lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"` : ""}
       >
-        <div class="scheduled-work-order-list-row">
+        <div class="scheduled-work-order-list-row${deletable ? "" : " is-locked"}">
           <div class="scheduled-work-order-list-main">
             ${escapeHtml(formatScheduledListDateTime(schedule.scheduledForMs))},
             ${escapeHtml(schedule.employeeGroupName || "Nhóm nhân viên")},
             “${escapeHtml(title)}”
           </div>
-          <button
+          ${deletable ? `<button
             class="btn danger scheduled-work-order-delete-btn"
             type="button"
             data-delete-scheduled-work-order="${escapeHtml(schedule.id)}"
             aria-label="Xóa vĩnh viễn lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"
             title="Xóa vĩnh viễn lịch"
-          >×</button>
+          >×</button>` : ""}
         </div>
         <div class="scheduled-work-order-list-meta">
           <span>${escapeHtml(repeatLabel)}</span>
           <span>Đếm ngược ${countdownMinutes} phút</span>
+          <span>${schedule.editDeletePolicy === "locked" ? "🔒 Không cho Sửa-Xóa" : "Cho phép Sửa-Xóa"}</span>
           <span>${escapeHtml(scheduledWorkOrderStatusLabel(
             schedule.status,
             schedule.assignmentCountdownWaitingForAvailableEmployee === true
@@ -10586,6 +10600,10 @@ async function deleteScheduledWorkOrder(scheduleId, button) {
   const schedule = state.scheduledWorkOrders.find((item) => item.id === scheduleId);
   if (!schedule) {
     toast("Lịch Phiếu công việc không còn tồn tại.", "error");
+    return;
+  }
+  if (!canDeleteScheduledWorkOrder(schedule)) {
+    toast("Lịch này đã khóa Sửa-Xóa và không thể xóa.", "info");
     return;
   }
   const scheduledAt = formatScheduledListDateTime(schedule.scheduledForMs);

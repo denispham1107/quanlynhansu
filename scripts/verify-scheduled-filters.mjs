@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const appSource = readFileSync(resolve(projectRoot, "app.js"), "utf8");
+const pageSource = readFileSync(resolve(projectRoot, "index.html"), "utf8");
 
 function extractFunction(name) {
   const signature = `function ${name}(`;
@@ -38,7 +39,9 @@ const buildHelpers = new Function(`
   ${extractFunction("normalizeScheduledWorkOrderTimeFilter")}
   ${extractFunction("scheduledWorkOrderDateValue")}
   ${extractFunction("scheduledWorkOrderMatchesTimeFilter")}
-  return { state, todayInputValue, yesterdayInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, scheduledWorkOrderMatchesTimeFilter };
+  ${extractFunction("canEditScheduledWorkOrder")}
+  ${extractFunction("canDeleteScheduledWorkOrder")}
+  return { state, todayInputValue, yesterdayInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, scheduledWorkOrderMatchesTimeFilter, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
 `);
 
 const helpers = buildHelpers();
@@ -101,4 +104,11 @@ assert.equal(helpers.getTaskDateValue({
   taskDate: "2026-09-20"
 }), "2026-09-24");
 
-console.log("PASS | Bộ lọc thời gian và trạng thái lịch được kết hợp chính xác.");
+assert.equal(helpers.canEditScheduledWorkOrder({ status: "pending" }), true);
+assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "pending" }), true);
+assert.equal(helpers.canEditScheduledWorkOrder({ status: "generated", editDeletePolicy: "locked" }), false);
+assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "generated", editDeletePolicy: "locked" }), false);
+assert.equal(helpers.canEditScheduledWorkOrder({ status: "assigned", editDeletePolicy: "editable" }), false);
+assert.match(pageSource, /<select id="scheduledWorkOrderEditDeletePolicy">\s*<option value="editable" selected>Cho phép Sửa-Xóa<\/option>\s*<option value="locked">Không cho Sửa-Xóa<\/option>/);
+
+console.log("PASS | Bộ lọc lịch và hai mức quyền Sửa-Xóa: mặc định cho phép, lịch khóa không sửa/xóa.");

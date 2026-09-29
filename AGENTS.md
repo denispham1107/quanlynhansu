@@ -16,3 +16,9 @@
 - Thanh cuộn của modal phải nằm trong phần nội dung của card, không nằm ngoài viền hoặc góc bo. Card phải có giới hạn chiều cao và `overflow: hidden`; vùng nội dung cuộn phải có `min-height: 0`, `overflow-y: auto` và `overflow-x: hidden`.
 - Sau khi sửa modal, phải kiểm tra hình học thực tế để bảo đảm card nằm trong viewport, vùng cuộn nằm trong card và trang phía sau không tạo thêm thanh cuộn.
 - Mọi nút xóa vĩnh viễn trong danh sách phải hỏi xác nhận trước khi gọi máy chủ; phía máy chủ vẫn phải kiểm tra quyền Admin và quyền sở hữu dữ liệu, không chỉ dựa vào giao diện.
+
+## Hoàn tất thay đổi mã
+
+- Khi hoàn tất một yêu cầu sửa mã trong dự án này và các kiểm tra liên quan đã đạt, tự tạo commit Git tại máy rồi đẩy commit đó lên GitHub; không cần chờ yêu cầu “đẩy lên github” riêng.
+- Trong câu trả lời cuối, báo rõ các tệp đã commit, mã commit và kết quả đẩy lên GitHub.
+- Không tự commit/đẩy khi người dùng chỉ yêu cầu kiểm tra, giải thích, hoặc dặn chờ phê duyệt trước khi sửa. Không đưa các thay đổi không thuộc yêu cầu hoặc của người dùng vào commit; nếu không thể tách an toàn thì hỏi trước.

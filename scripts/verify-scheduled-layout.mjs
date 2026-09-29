@@ -278,8 +278,8 @@ for (const profile of profiles) {
   });
   const result = measurement.result.value;
   const passed = result.display === "grid"
-    && result.shells.length === 5
-    && result.controls.length === 5
+    && result.shells.length === 6
+    && result.controls.length === 6
     && result.actionButtons.length === 2
     && result.config.width > 0
     && result.shells.every((rect) => rect.width > 0)

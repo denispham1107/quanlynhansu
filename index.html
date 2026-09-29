@@ -11365,6 +11365,15 @@
                 </select>
               </span>
             </label>
+            <label class="scheduled-work-order-edit-policy-field">
+              <span>Quyền Sửa-Xóa lịch</span>
+              <span class="scheduled-control-shell">
+                <select id="scheduledWorkOrderEditDeletePolicy">
+                  <option value="editable" selected>Cho phép Sửa-Xóa</option>
+                  <option value="locked">Không cho Sửa-Xóa</option>
+                </select>
+              </span>
+            </label>
           </div>
           <p class="small-note scheduled-work-order-note">Sau khi Phiếu xuất hiện, chuông báo sẽ phát và hệ thống đếm ngược <strong id="scheduledWorkOrderCountdownPreview">10 phút</strong>. Phiếu chỉ có thể giao cho đúng một nhân viên đang làm trong nhóm đã chọn.</p>
         </section>
@@ -12083,7 +12092,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260929-gallery-date-filters-v100"></script>
+  <script type="module" src="app.js?v=20260929-schedule-lock-v101"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12734,7 +12743,7 @@
     display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr); gap:12px;
     width:100%; min-width:0; max-width:100%;
   }
-  .scheduled-work-order-repeat-field { grid-column:2 / -1; }
+  .scheduled-work-order-repeat-field { grid-column:auto; }
   .scheduled-work-order-config-grid label {
     display:grid; gap:7px; min-width:0; max-width:100%;
     font-weight:800; color:#172033;
@@ -12854,6 +12863,7 @@
   .scheduled-work-order-list-item.is-editable:hover { border-color:#8b5cf6; box-shadow:0 8px 20px rgba(124,58,237,.12); transform:translateY(-1px); }
   .scheduled-work-order-list-item.is-editable:focus-visible { outline:3px solid rgba(124,58,237,.25); outline-offset:2px; border-color:#7c3aed; }
   .scheduled-work-order-list-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:10px; min-width:0; }
+  .scheduled-work-order-list-row.is-locked { grid-template-columns:minmax(0,1fr); }
   .scheduled-work-order-delete-btn {
     width:38px; height:38px; min-width:38px; padding:0!important; border-radius:12px!important;
     display:inline-flex; align-items:center; justify-content:center; font-size:1rem; line-height:1;
@@ -12872,6 +12882,7 @@
     #taskModal .scheduled-control-shell { contain:inline-size; }
     .scheduled-work-order-group-field { grid-column:1 / -1; }
     .scheduled-work-order-repeat-field { grid-column:auto; }
+    .scheduled-work-order-edit-policy-field { grid-column:1 / -1; }
     #taskModal .scheduled-control-shell > input[type="date"],
     #taskModal .scheduled-control-shell > input[type="time"] {
       font-size:16px !important; overflow:hidden !important; text-overflow:ellipsis;
@@ -12890,7 +12901,8 @@
     .scheduled-work-order-config-grid { grid-template-columns:minmax(0,1fr); gap:11px; }
     .scheduled-work-order-config-grid label,
     .scheduled-work-order-group-field,
-    .scheduled-work-order-repeat-field { grid-column:1 / -1; }
+    .scheduled-work-order-repeat-field,
+    .scheduled-work-order-edit-policy-field { grid-column:1 / -1; }
     #taskModal .scheduled-control-shell { width:100% !important; max-width:100% !important; }
     #scheduledWorkOrderListModal .scheduled-work-order-list-card {
       width:100%; max-width:100%; height:calc(100dvh - 130px);
