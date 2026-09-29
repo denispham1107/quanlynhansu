@@ -10288,17 +10288,19 @@ async function createScheduledWorkOrder(button) {
       : await createScheduledWorkOrderCallable(schedulePayload);
 
     if (editingScheduleId) {
+      const refreshed = await listScheduledWorkOrdersCallable({});
+      const refreshedSchedules = Array.isArray(refreshed?.data?.schedules)
+        ? refreshed.data.schedules
+        : [];
+      const savedSchedule = refreshedSchedules.find((item) => item.id === editingScheduleId);
+      if (!savedSchedule || savedSchedule.editDeletePolicy !== editDeletePolicy) {
+        throw new Error("Máy chủ chưa lưu quyền Sửa-Xóa của lịch. Cần triển khai Firebase Functions mới rồi thử lại.");
+      }
+      state.scheduledWorkOrders = refreshedSchedules;
       state.editingScheduledWorkOrderId = "";
       els.taskModal?.classList.add("hidden");
       resetScheduledWorkOrderFormForCreate();
       els.scheduledWorkOrderListModal?.classList.remove("hidden");
-      if (els.scheduledWorkOrderList) {
-        els.scheduledWorkOrderList.innerHTML = '<div class="empty-state">Đang tải lại danh sách lịch...</div>';
-      }
-      const refreshed = await listScheduledWorkOrdersCallable({});
-      state.scheduledWorkOrders = Array.isArray(refreshed?.data?.schedules)
-        ? refreshed.data.schedules
-        : [];
       renderScheduledWorkOrderList();
       updateScheduledWorkOrderEditorControls();
 
@@ -10308,6 +10310,10 @@ async function createScheduledWorkOrder(button) {
         "success"
       );
       return;
+    }
+
+    if (editDeletePolicy === "locked" && result?.data?.editDeletePolicy !== "locked") {
+      throw new Error("Máy chủ chưa xác nhận khóa Sửa-Xóa cho lịch mới. Cần triển khai Firebase Functions mới; hãy kiểm tra lịch vừa tạo trước khi thử lại.");
     }
 
     closeTaskModal();

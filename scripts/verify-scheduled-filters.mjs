@@ -110,5 +110,12 @@ assert.equal(helpers.canEditScheduledWorkOrder({ status: "generated", editDelete
 assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "generated", editDeletePolicy: "locked" }), false);
 assert.equal(helpers.canEditScheduledWorkOrder({ status: "assigned", editDeletePolicy: "editable" }), false);
 assert.match(pageSource, /<select id="scheduledWorkOrderEditDeletePolicy">\s*<option value="editable" selected>Cho phép Sửa-Xóa<\/option>\s*<option value="locked">Không cho Sửa-Xóa<\/option>/);
+const scheduleSave = appSource.slice(
+  appSource.indexOf("async function createScheduledWorkOrder(button)"),
+  appSource.indexOf("els.createTaskForm.addEventListener", appSource.indexOf("async function createScheduledWorkOrder(button)"))
+);
+assert.ok(scheduleSave.indexOf("const savedSchedule = refreshedSchedules.find") < scheduleSave.indexOf('state.editingScheduledWorkOrderId = ""'));
+assert.match(scheduleSave, /savedSchedule\.editDeletePolicy !== editDeletePolicy/);
+assert.match(scheduleSave, /editDeletePolicy === "locked" && result\?\.data\?\.editDeletePolicy !== "locked"/);
 
-console.log("PASS | Bộ lọc lịch và hai mức quyền Sửa-Xóa: mặc định cho phép, lịch khóa không sửa/xóa.");
+console.log("PASS | Hai mức quyền lịch và kiểm tra máy chủ đã lưu quyền trước khi báo thành công.");
