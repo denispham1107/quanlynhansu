@@ -10436,6 +10436,9 @@
     .image-gallery-toolbar > strong { min-width:0; overflow-wrap:anywhere; }
     .image-gallery-actions { display:flex; flex-wrap:wrap; gap:8px; min-width:0; }
     .image-gallery-actions .btn { min-width:0; white-space:normal; }
+    .image-gallery-actions .image-gallery-download-btn { background:linear-gradient(135deg,#0e7490,#2563eb); color:#fff; box-shadow:0 9px 20px rgba(14,116,144,.2); }
+    .image-gallery-download-icon { display:grid; place-items:center; flex:none; width:27px; height:27px; border:1px solid rgba(255,255,255,.45); border-radius:8px; background:rgba(255,255,255,.16); box-shadow:inset 0 1px 1px rgba(255,255,255,.3); }
+    .image-gallery-download-icon svg { display:block; width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
     .image-gallery-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; min-width:0; }
     .image-gallery-grid.empty-box { display:block; }
     .image-gallery-card { position:relative; min-width:0; overflow:hidden; border:1px solid #dbe7f7; border-radius:16px; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,.05); }
@@ -10457,6 +10460,7 @@
       .image-gallery-hero .btn { width:100%; }
       .image-gallery-controls { grid-template-columns:minmax(0,1fr); }
       .image-gallery-actions { width:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .image-gallery-actions .btn:first-child { grid-column:1 / -1; }
       .image-gallery-actions .btn:last-child { grid-column:1 / -1; }
       .image-gallery-grid { grid-template-columns:minmax(0,1fr); }
     }
@@ -11658,6 +11662,10 @@
           <div class="image-gallery-actions">
             <button id="imageGallerySelectAllBtn" class="btn ghost small" type="button">Chọn tất cả ảnh đang hiển thị</button>
             <button id="imageGalleryClearBtn" class="btn ghost small" type="button" disabled>Bỏ chọn</button>
+            <button id="imageGalleryDownloadBtn" class="btn image-gallery-download-btn small" type="button" aria-label="Tải các ảnh đã chọn dưới dạng ZIP" disabled>
+              <span class="image-gallery-download-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.8v10.4m-4-4 4 4 4-4"/><path d="M4.2 15.3v3.8c0 1.1.9 2 2 2h11.6c1.1 0 2-.9 2-2v-3.8"/><path d="M8.2 18h7.6"/><path d="M4.6 5.4h2.1m10.6 0h2.1"/></svg></span>
+              <span class="image-gallery-download-label">Tải</span>
+            </button>
             <button id="imageGalleryDeleteBtn" class="btn danger small" type="button" disabled>🗑 Xóa ảnh đã chọn</button>
           </div>
         </div>
@@ -12075,7 +12083,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script type="module" src="app.js?v=20260929-photo-compression-v98"></script>
+  <script type="module" src="app.js?v=20260929-gallery-zip-v99"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

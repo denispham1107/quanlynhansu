@@ -276,6 +276,7 @@ const state = {
   imageGalleryUnsub: null,
   imageGalleryReturnScrollY: 0,
   imageGalleryDeleting: false,
+  imageGalleryDownloading: false,
   workPhotoManagerRowId: null,
   workPhotoManagerTaskId: null,
   workPhotoManagerSelectedKeys: new Set(),
@@ -1282,6 +1283,7 @@ const els = {
   imageGallerySummary: $("#imageGallerySummary"),
   imageGallerySelectAllBtn: $("#imageGallerySelectAllBtn"),
   imageGalleryClearBtn: $("#imageGalleryClearBtn"),
+  imageGalleryDownloadBtn: $("#imageGalleryDownloadBtn"),
   imageGalleryDeleteBtn: $("#imageGalleryDeleteBtn"),
   imageGalleryGrid: $("#imageGalleryGrid"),
   backFromPhotoReportBtn: $("#backFromPhotoReportBtn"),
@@ -16693,14 +16695,17 @@ function renderImageGallery() {
         : `${entries.length} ảnh đang hiển thị • ${state.imageGallerySelectedKeys.size} ảnh đã chọn (gồm cả bộ lọc khác)`;
   }
   if (els.imageGallerySelectAllBtn) {
-    els.imageGallerySelectAllBtn.disabled = state.imageGalleryDeleting || !entries.length
+    els.imageGallerySelectAllBtn.disabled = state.imageGalleryDeleting || state.imageGalleryDownloading || !entries.length
       || entries.every((entry) => state.imageGallerySelectedKeys.has(entry.key));
   }
   if (els.imageGalleryClearBtn) {
-    els.imageGalleryClearBtn.disabled = state.imageGalleryDeleting || !state.imageGallerySelectedKeys.size;
+    els.imageGalleryClearBtn.disabled = state.imageGalleryDeleting || state.imageGalleryDownloading || !state.imageGallerySelectedKeys.size;
+  }
+  if (els.imageGalleryDownloadBtn) {
+    els.imageGalleryDownloadBtn.disabled = state.imageGalleryDeleting || state.imageGalleryDownloading || !state.imageGallerySelectedKeys.size;
   }
   if (els.imageGalleryDeleteBtn) {
-    els.imageGalleryDeleteBtn.disabled = state.imageGalleryDeleting || !state.imageGallerySelectedKeys.size;
+    els.imageGalleryDeleteBtn.disabled = state.imageGalleryDeleting || state.imageGalleryDownloading || !state.imageGallerySelectedKeys.size;
   }
 
   els.imageGalleryGrid.classList.toggle("empty-box", !entries.length);
@@ -16721,7 +16726,7 @@ function renderImageGallery() {
             <span>Đăng lúc: ${escapeHtml(entry.uploadedAt ? formatFullDateTime(photo.uploadedAt) : "Không rõ")}</span>
           </span>
         </button>
-        <label class="image-gallery-card-select"><input type="checkbox" data-gallery-select-key="${escapeHtml(key)}" ${selected ? "checked" : ""} aria-label="Chọn ${escapeHtml(kindLabel)} ${escapeHtml(photo.name || String(index + 1))}" /><span>Chọn</span></label>
+        <label class="image-gallery-card-select"><input type="checkbox" data-gallery-select-key="${escapeHtml(key)}" ${selected ? "checked" : ""} ${state.imageGalleryDeleting || state.imageGalleryDownloading ? "disabled" : ""} aria-label="Chọn ${escapeHtml(kindLabel)} ${escapeHtml(photo.name || String(index + 1))}" /><span>Chọn</span></label>
       </article>`;
     }).join("")
     : (invalidRange ? "Vui lòng chọn lại khoảng ngày hợp lệ."
@@ -16785,7 +16790,7 @@ function backFromImageGalleryPage() {
 }
 
 async function deleteSelectedImageGalleryPhotos() {
-  if (!isAdminProfile() || state.imageGalleryDeleting) return;
+  if (!isAdminProfile() || state.imageGalleryDeleting || state.imageGalleryDownloading) return;
   const selected = getImageGalleryEntries()
     .filter((entry) => state.imageGallerySelectedKeys.has(entry.key));
   if (!selected.length) {
@@ -16834,6 +16839,41 @@ async function deleteSelectedImageGalleryPhotos() {
   }
 }
 
+async function downloadSelectedImageGalleryPhotos() {
+  if (!isAdminProfile() || state.imageGalleryDeleting || state.imageGalleryDownloading) return;
+  const selected = getImageGalleryEntries()
+    .filter((entry) => state.imageGallerySelectedKeys.has(entry.key));
+  if (!selected.length) {
+    toast("Vui lòng chọn ít nhất một ảnh còn tồn tại để tải.", "error");
+    return;
+  }
+
+  state.imageGalleryDownloading = true;
+  const button = els.imageGalleryDownloadBtn;
+  const label = button?.querySelector(".image-gallery-download-label");
+  button?.setAttribute("aria-busy", "true");
+  if (label) label.textContent = "Đang chuẩn bị...";
+  renderImageGalleryIfOpen();
+  try {
+    const result = await createPhotoReportZipBlob(null, selected.map((entry) => entry.photo), (message) => {
+      if (label) label.textContent = message;
+    }, "hinh-anh-da-chon");
+    downloadBlobFile(result.zipBlob, result.fileName);
+    toast(
+      `Đã tạo ZIP với ${result.successCount}/${result.totalCount} ảnh đã chọn.`,
+      result.failedPhotos.length ? "warning" : "success"
+    );
+  } catch (error) {
+    console.error("Không tải được ảnh đã chọn trong thư viện:", error);
+    toast(error.message || "Không tạo được ZIP ảnh đã chọn.", "error");
+  } finally {
+    state.imageGalleryDownloading = false;
+    button?.removeAttribute("aria-busy");
+    if (label) label.textContent = "Tải";
+    renderImageGalleryIfOpen();
+  }
+}
+
 els.openImageGalleryBtn?.addEventListener("click", openImageGalleryPage);
 els.backFromImageGalleryBtn?.addEventListener("click", backFromImageGalleryPage);
 els.imageGalleryDateMode?.addEventListener("change", (event) => {
@@ -16866,11 +16906,12 @@ els.imageGalleryClearBtn?.addEventListener("click", () => {
   state.imageGallerySelectedKeys.clear();
   renderImageGallery();
 });
+els.imageGalleryDownloadBtn?.addEventListener("click", downloadSelectedImageGalleryPhotos);
 els.imageGalleryDeleteBtn?.addEventListener("click", deleteSelectedImageGalleryPhotos);
 els.imageGalleryGrid?.addEventListener("change", (event) => {
   const checkbox = event.target instanceof HTMLInputElement
     ? event.target.closest("[data-gallery-select-key]") : null;
-  if (!checkbox || state.imageGalleryDeleting) return;
+  if (!checkbox || state.imageGalleryDeleting || state.imageGalleryDownloading) return;
   if (checkbox.checked) state.imageGallerySelectedKeys.add(checkbox.dataset.gallerySelectKey);
   else state.imageGallerySelectedKeys.delete(checkbox.dataset.gallerySelectKey);
   renderImageGallery();
@@ -17805,19 +17846,19 @@ async function getPhotoBlobForZip(photo) {
 
   throw new Error(errors.join(" | ") || "Không tải được ảnh.");
 }
-function getPhotoReportZipMeta(task) {
-  const folderName = sanitizeStorageFileName(`anh-bao-cao-${task?.title || task?.id || "cong-viec"}`);
+function getPhotoReportZipMeta(task, zipBaseName = "") {
+  const folderName = sanitizeStorageFileName(zipBaseName || `anh-bao-cao-${task?.title || task?.id || "cong-viec"}`);
   const fileName = sanitizeStorageFileName(`${folderName}-${new Date().toISOString().slice(0, 10)}.zip`);
   return { folderName, fileName };
 }
 
-async function createPhotoReportZipBlob(task, photos, onProgress = null) {
+async function createPhotoReportZipBlob(task, photos, onProgress = null, zipBaseName = "") {
   if (!window.JSZip) {
     throw new Error("Chưa tải được thư viện tạo file ZIP. Vui lòng tải lại trang rồi thử lại.");
   }
 
   const zip = new window.JSZip();
-  const { folderName, fileName } = getPhotoReportZipMeta(task);
+  const { folderName, fileName } = getPhotoReportZipMeta(task, zipBaseName);
   const folder = zip.folder(folderName) || zip;
   const usedNames = new Set();
   const failedPhotos = [];

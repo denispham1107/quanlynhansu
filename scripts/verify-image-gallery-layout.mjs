@@ -244,22 +244,27 @@ try {
       const cards = [...document.querySelectorAll(".image-gallery-card")].map(box);
       const selections = [...document.querySelectorAll(".image-gallery-card-select")].map(box);
       const actions = [...document.querySelectorAll(".image-gallery-actions .btn")].map(box);
+      const downloadButton = box(document.getElementById("imageGalleryDownloadBtn"));
+      const downloadIcon = box(document.querySelector("#imageGalleryDownloadBtn .image-gallery-download-icon svg"));
       const toolbar = box(document.querySelector(".image-gallery-toolbar"));
       const overlap = shells.some((a,i) => shells.some((b,j) => j>i && Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1 && Math.min(a.right,b.right)-Math.max(a.left,b.left)>1));
+      const actionsOverlap = actions.some((a,i) => actions.some((b,j) => j>i && Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1 && Math.min(a.right,b.right)-Math.max(a.left,b.left)>1));
       return {
         viewport:document.documentElement.clientWidth, scrollWidth:document.documentElement.scrollWidth,
-        panel, shells, controls, cards, selections, actions, toolbar, overlap,
+        panel, shells, controls, cards, selections, actions, toolbar, overlap, actionsOverlap,
         shellsInside:shells.every((item)=>within(item,panel)),
         controlsInside:controls.every((item,i)=>within(item,shells[i])),
         cardsInside:cards.every((item)=>within(item,panel)),
         selectionsInside:selections.every((item,i)=>within(item,cards[i])),
-        actionsInside:actions.every((item)=>within(item,toolbar))
+        actionsInside:actions.every((item)=>within(item,toolbar)),
+        downloadIconInside:within(downloadIcon,downloadButton) && downloadIcon.top>=downloadButton.top-1 && downloadIcon.bottom<=downloadButton.bottom+1
       };
     })()` });
     const result = measured.result.value;
     const pass = result.scrollWidth <= width && result.shells.length === 5
       && result.controlsInside && result.shellsInside && !result.overlap
-      && result.cardsInside && result.selectionsInside && result.actionsInside;
+      && result.cardsInside && result.selectionsInside && result.actionsInside
+      && result.actions.length === 4 && !result.actionsOverlap && result.downloadIconInside;
     console.log(`${pass ? "PASS" : "FAIL"} | ${width}x${height} | scroll ${result.scrollWidth}/${width}`);
     if (!pass) failures.push({ width, height, result });
   }
