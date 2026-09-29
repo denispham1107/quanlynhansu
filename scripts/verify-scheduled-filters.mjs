@@ -65,6 +65,7 @@ const schedules = [
   { id: "today-unassigned", status: "pending", scheduledForMs: localNoonMilliseconds(today) },
   { id: "today-assigned", status: "assigned", scheduledForMs: localNoonMilliseconds(today) },
   { id: "today-deleted", status: "deleted", scheduledForMs: localNoonMilliseconds(today) },
+  { id: "today-replaced", status: "replaced", scheduledForMs: localNoonMilliseconds(today) },
   { id: "yesterday-assigned", status: "assigned", scheduledForMs: localNoonMilliseconds(yesterday) },
   { id: "older-unassigned", status: "generated", scheduledForMs: localNoonMilliseconds(twoDaysAgo) }
 ];
@@ -79,7 +80,8 @@ function filterIds(timeFilter, statusFilter) {
 assert.deepEqual(filterIds("today", "unassigned"), ["today-unassigned"]);
 assert.deepEqual(filterIds("today", "assigned"), ["today-assigned"]);
 assert.deepEqual(filterIds("today", "deleted"), ["today-deleted"]);
-assert.deepEqual(filterIds("today", "all"), ["today-unassigned", "today-assigned", "today-deleted"]);
+assert.deepEqual(filterIds("today", "replaced"), ["today-replaced"]);
+assert.deepEqual(filterIds("today", "all"), ["today-unassigned", "today-assigned", "today-deleted", "today-replaced"]);
 assert.deepEqual(filterIds("yesterday", "assigned"), ["yesterday-assigned"]);
 
 helpers.state.scheduledWorkOrderDateFilter = twoDaysAgo;
@@ -114,7 +116,10 @@ assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "generated", editDele
 assert.equal(helpers.canEditScheduledWorkOrder({ status: "assigned", editDeletePolicy: "editable" }), false);
 assert.equal(helpers.canEditScheduledWorkOrder({ status: "deleted", editDeletePolicy: "editable" }), false);
 assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "deleted", editDeletePolicy: "editable" }), false);
+assert.equal(helpers.canEditScheduledWorkOrder({ status: "replaced", editDeletePolicy: "editable" }), false);
+assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "replaced", editDeletePolicy: "editable" }), false);
 assert.match(pageSource, /<option value="deleted">Đã xóa<\/option>/);
+assert.match(pageSource, /<option value="replaced">Đã thay thế<\/option>/);
 assert.match(pageSource, /<select id="scheduledWorkOrderEditDeletePolicy">\s*<option value="editable" selected>Cho phép Sửa-Xóa<\/option>\s*<option value="locked">Không cho Sửa-Xóa<\/option>/);
 const scheduleSave = appSource.slice(
   appSource.indexOf("async function createScheduledWorkOrder(button)"),

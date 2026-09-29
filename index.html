@@ -11542,6 +11542,7 @@
                 <option value="unassigned">Chưa giao việc</option>
                 <option value="assigned">Đã giao việc</option>
                 <option value="deleted">Đã xóa</option>
+                <option value="replaced">Đã thay thế</option>
               </select>
             </div>
           </label>
@@ -12159,7 +12160,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260930-scheduled-delete-reason-v110"></script>
+  <script type="module" src="app.js?v=20260930-scheduled-replacement-history-v111"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -12979,6 +12980,12 @@
   }
   .scheduled-work-order-list-item.is-deleted {
     border-color:#fca5a5; background:linear-gradient(135deg,#fff1f2,#fef2f2);
+  }
+  .scheduled-work-order-list-item.is-replaced {
+    border-color:#93c5fd; background:linear-gradient(135deg,#eff6ff,#dbeafe);
+  }
+  .scheduled-work-order-list-item.is-replaced .scheduled-work-order-status-badge {
+    background:#bfdbfe; color:#1d4ed8;
   }
   .scheduled-work-order-list-item.is-deleted .scheduled-work-order-status-badge {
     background:#fee2e2; color:#b91c1c;

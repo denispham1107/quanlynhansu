@@ -421,12 +421,12 @@ await send("Runtime.evaluate", {
     document.getElementById("scheduledWorkOrderDateFromFilter").value = "2026-09-01";
     document.getElementById("scheduledWorkOrderDateToFilter").value = "2026-09-30";
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
-      <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : ""}">
-        <div class="scheduled-work-order-list-row\${index === 23 ? " is-locked" : ""}">
+      <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : ""}">
+        <div class="scheduled-work-order-list-row\${index >= 22 ? " is-locked" : ""}">
           <div class="scheduled-work-order-list-main">22/09/2026, 08:30:00, Nhóm nhân viên, “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
-          \${index === 23 ? "" : '<button class="btn danger scheduled-work-order-delete-btn" type="button">×</button>'}
+          \${index >= 22 ? "" : '<button class="btn danger scheduled-work-order-delete-btn" type="button">×</button>'}
         </div>
-        <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : "Đang chờ đến giờ"}</span></div>
+        <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : index === 22 ? "Đã thay thế" : "Đang chờ đến giờ"}</span></div>
       </article>
     \`).join("");
     return true;
@@ -463,6 +463,7 @@ for (const profile of profiles) {
       const firstRowElement = listElement.querySelector(".scheduled-work-order-list-row");
       const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
       const deletedElement = listElement.querySelector(".scheduled-work-order-list-item.is-deleted");
+      const replacedElement = listElement.querySelector(".scheduled-work-order-list-item.is-replaced");
     const card = box(cardElement);
     const content = box(contentElement);
     const filter = box(filterElement);
@@ -489,6 +490,9 @@ for (const profile of profiles) {
         deletedInsideList: box(deletedElement).left >= list.left - 0.5 && box(deletedElement).right <= list.right + 0.5,
         deletedNoActions: !deletedElement.querySelector("button, [data-edit-scheduled-work-order]"),
         deletedRedBorder: getComputedStyle(deletedElement).borderTopColor === "rgb(252, 165, 165)",
+        replacedInsideList: box(replacedElement).left >= list.left - 0.5 && box(replacedElement).right <= list.right + 0.5,
+        replacedNoActions: !replacedElement.querySelector("button, [data-edit-scheduled-work-order]"),
+        replacedBlueBorder: getComputedStyle(replacedElement).borderTopColor === "rgb(147, 197, 253)",
         contentClientHeight: contentElement.clientHeight,
         contentScrollHeight: contentElement.scrollHeight,
       contentInsideCard: content.left >= card.left - 0.5 && content.right <= card.right + 0.5 && content.top >= card.top - 0.5 && content.bottom <= card.bottom + 0.5,
@@ -535,6 +539,9 @@ for (const profile of profiles) {
     && result.deletedInsideList
     && result.deletedNoActions
     && result.deletedRedBorder
+    && result.replacedInsideList
+    && result.replacedNoActions
+    && result.replacedBlueBorder
     && result.cardInsideViewport
     && result.modalOverflowY === "hidden"
     && result.cardOverflowY === "hidden"

@@ -1148,6 +1148,7 @@ exports.updateScheduledWorkOrder = onCall({
 
   const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
   const groupRef = db.doc(`employeeGroups/${employeeGroupId}`);
+  const replacedHistoryRef = db.collection("replacedScheduledWorkOrders").doc();
   const scheduledAt = Timestamp.fromMillis(Math.trunc(scheduledForMs));
   let employeeGroupName = "Nhóm nhân viên";
   let previousStatus = "pending";
@@ -1189,6 +1190,30 @@ exports.updateScheduledWorkOrder = onCall({
     ).slice(0, 180);
     existingNextScheduleId = String(currentSchedule.nextScheduleId || "").slice(0, 180);
     seriesId = String(currentSchedule.seriesId || scheduleId).slice(0, 180);
+    const updatedAt = Timestamp.now();
+    // Bản lịch cũ chỉ dùng để xem lại. Nó không nằm trong scheduledWorkOrders,
+    // nên không thể kích hoạt bộ đếm hoặc tự tạo Phiếu lần nữa.
+    transaction.set(replacedHistoryRef, {
+      sourceScheduleId: scheduleId,
+      name: String(currentSchedule.name || "Phiếu công việc").slice(0, 180),
+      employeeGroupId: String(currentSchedule.employeeGroupId || "").slice(0, 180),
+      employeeGroupName: String(currentSchedule.employeeGroupName || "Nhóm nhân viên").slice(0, 80),
+      scheduledAt: currentSchedule.scheduledAt || null,
+      taskNames: (Array.isArray(currentSchedule.rows) ? currentSchedule.rows : [])
+        .map((row) => String(row?.title || "").trim().slice(0, 180))
+        .filter(Boolean),
+      assignmentCountdownMinutes: normalizeScheduledAssignmentCountdownMinutes(currentSchedule.assignmentCountdownMinutes),
+      repeatMode: normalizeScheduledRepeatMode(currentSchedule.repeatMode),
+      editDeletePolicy: normalizeScheduledEditDeletePolicy(currentSchedule.editDeletePolicy),
+      seriesId,
+      occurrenceIndex: Math.max(0, Math.trunc(Number(currentSchedule.occurrenceIndex || 0))),
+      status: "replaced",
+      replacementPreviousStatus: previousStatus,
+      createdByUid: adminUid,
+      createdAt: currentSchedule.createdAt || updatedAt,
+      replacedAt: updatedAt,
+      replacedByUid: adminUid
+    });
     const nextScheduleData = {
       name,
       employeeGroupId,
@@ -1202,7 +1227,7 @@ exports.updateScheduledWorkOrder = onCall({
       editDeletePolicy,
       nextScheduleId: FieldValue.delete(),
       nextScheduledAt: FieldValue.delete(),
-      updatedAt: Timestamp.now(),
+      updatedAt,
       materializationEnqueuedAt: null,
       queueEnqueueError: FieldValue.delete(),
       queueEnqueueFailedAt: FieldValue.delete(),
@@ -1312,6 +1337,7 @@ exports.updateScheduledWorkOrder = onCall({
   return {
     updated: true,
     scheduleId,
+    replacedHistoryId: replacedHistoryRef.id,
     scheduledForMs: scheduledAt.toMillis(),
     employeeGroupId,
     employeeGroupName,
@@ -1346,10 +1372,11 @@ exports.listScheduledWorkOrders = onCall({
     await ensureNextDailyScheduledOccurrence(item.id, item.data() || {});
   }
   if (schedulesNeedingNext.length) snapshot = await db.collection("scheduledWorkOrders").get();
-  const deletedSnapshot = await db.collection("deletedScheduledWorkOrders")
-    .where("createdByUid", "==", adminUid)
-    .get();
-  const schedules = [...snapshot.docs, ...deletedSnapshot.docs]
+  const [deletedSnapshot, replacedSnapshot] = await Promise.all([
+    db.collection("deletedScheduledWorkOrders").where("createdByUid", "==", adminUid).get(),
+    db.collection("replacedScheduledWorkOrders").where("createdByUid", "==", adminUid).get()
+  ]);
+  const schedules = [...snapshot.docs, ...deletedSnapshot.docs, ...replacedSnapshot.docs]
     .map((item) => ({ id: item.id, ...item.data() }))
     .filter((item) => String(item.createdByUid || "") === adminUid)
     .sort((left, right) => (
@@ -1382,6 +1409,7 @@ exports.listScheduledWorkOrders = onCall({
       generatedWorkOrderId: String(item.generatedWorkOrderId || ""),
       createdAtMs: firestoreTimestampOrNull(item.createdAt)?.toMillis() || 0,
       deletedAtMs: firestoreTimestampOrNull(item.deletedAt)?.toMillis() || 0,
+      replacedAtMs: firestoreTimestampOrNull(item.replacedAt)?.toMillis() || 0,
       deletionReason: String(item.deletionReason || "")
     }));
 
