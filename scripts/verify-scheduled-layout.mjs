@@ -627,9 +627,9 @@ await send("Runtime.evaluate", {
     ticket.innerHTML = '<div class="ticket-group-toolbar">'
       + '<div class="ticket-group-header"><div><span class="ticket-badge">Chưa giao việc</span><h4>Phiếu được tạo từ lịch - 1 công việc</h4></div></div>'
       + '<div class="ticket-actions">'
-      + '<button class="btn secondary small" type="button">📦 Đã mang đến</button>'
       + '<button class="btn ghost small" type="button">✏️ Chỉnh sửa</button>'
       + '<button class="btn ghost small" type="button">🗓 Dời lịch</button>'
+      + '<button class="btn secondary small" type="button">📦 Đã mang đến</button>'
       + '<button class="btn schedule-work-order-btn small" type="button">👤 Giao cho nhóm</button>'
       + '<button class="btn danger small" type="button">🗑 Xóa phiếu</button>'
       + '</div></div>';

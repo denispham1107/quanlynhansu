@@ -10,10 +10,10 @@ const html = readFileSync(join(root, "index.html"), "utf8");
 
 const ticketActions = app.slice(app.indexOf("function renderTicketGroup("), app.indexOf("function renderTicketGroup(") + 4800);
 assert.ok(ticketActions.indexOf('data-action="convert-scheduled-draft"') >= 0);
-assert.ok(ticketActions.indexOf('data-action="convert-scheduled-draft"') < ticketActions.indexOf('data-action="edit-scheduled-draft"'));
 assert.ok(ticketActions.indexOf('data-action="edit-scheduled-draft"') >= 0);
 assert.ok(ticketActions.indexOf('data-action="edit-scheduled-draft"') < ticketActions.indexOf('data-action="reschedule-scheduled-draft"'));
-assert.ok(ticketActions.indexOf('data-action="reschedule-scheduled-draft"') < ticketActions.indexOf('data-action="open-scheduled-group-assignment"'));
+assert.ok(ticketActions.indexOf('data-action="reschedule-scheduled-draft"') < ticketActions.indexOf('data-action="convert-scheduled-draft"'));
+assert.ok(ticketActions.indexOf('data-action="convert-scheduled-draft"') < ticketActions.indexOf('data-action="open-scheduled-group-assignment"'));
 assert.match(ticketActions, /scheduledEditDeletePolicy !== "locked"/);
 assert.match(app, /if \(action === "reschedule-scheduled-draft"\) \{\s*await openScheduledWorkOrderEditorFromTicket/);
 assert.match(app, /if \(state\.scheduledEditorReturnToDashboard\) \{\s*closeTaskModal\(\);/);

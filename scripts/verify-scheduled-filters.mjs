@@ -36,12 +36,13 @@ const buildHelpers = new Function(`
   ${extractFunction("todayInputValue")}
   ${extractFunction("yesterdayInputValue")}
   ${extractFunction("scheduledWorkOrderMatchesStatusFilter")}
+  ${extractFunction("sortScheduledWorkOrdersForDisplay")}
   ${extractFunction("normalizeScheduledWorkOrderTimeFilter")}
   ${extractFunction("scheduledWorkOrderDateValue")}
   ${extractFunction("scheduledWorkOrderMatchesTimeFilter")}
   ${extractFunction("canEditScheduledWorkOrder")}
   ${extractFunction("canDeleteScheduledWorkOrder")}
-  return { state, todayInputValue, yesterdayInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, scheduledWorkOrderMatchesTimeFilter, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
+  return { state, todayInputValue, yesterdayInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderMatchesTimeFilter, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
 `);
 
 const helpers = buildHelpers();
@@ -90,6 +91,24 @@ assert.deepEqual(filterIds("date", "unassigned"), ["older-unassigned"]);
 helpers.state.scheduledWorkOrderDateFromFilter = today;
 helpers.state.scheduledWorkOrderDateToFilter = yesterday;
 assert.deepEqual(filterIds("range", "assigned"), ["today-assigned", "yesterday-assigned"]);
+
+const mixedStatuses = [
+  { id: "recent-deleted", status: "deleted" },
+  { id: "recent-pending", status: "pending" },
+  { id: "middle-replaced", status: "replaced" },
+  { id: "older-assigned", status: "assigned" },
+  { id: "older-converted", status: "converted" },
+  { id: "oldest-deleted", status: "deleted" }
+];
+assert.deepEqual(
+  helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses, "all").map((schedule) => schedule.id),
+  ["recent-pending", "older-assigned", "older-converted", "recent-deleted", "middle-replaced", "oldest-deleted"]
+);
+assert.deepEqual(helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses, "deleted"), mixedStatuses);
+assert.deepEqual(mixedStatuses.map((schedule) => schedule.id), [
+  "recent-deleted", "recent-pending", "middle-replaced", "older-assigned", "older-converted", "oldest-deleted"
+]);
+assert.match(extractFunction("renderScheduledWorkOrderList"), /sortScheduledWorkOrdersForDisplay\(schedules\.filter/);
 
 helpers.state.workOrders = [{
   id: "scheduled-work-order",

@@ -11106,6 +11106,17 @@ function scheduledWorkOrderMatchesStatusFilter(schedule, filterValue = "all") {
   return true;
 }
 
+function sortScheduledWorkOrdersForDisplay(schedules, filterValue = "all") {
+  if (filterValue !== "all") return schedules;
+  // Giữ nguyên thứ tự thời gian trong từng nhóm, chỉ đưa lịch sử xuống cuối.
+  const current = [];
+  const history = [];
+  schedules.forEach((schedule) => {
+    (schedule.status === "deleted" || schedule.status === "replaced" ? history : current).push(schedule);
+  });
+  return [...current, ...history];
+}
+
 function scheduledWorkOrderFilterLabel(filterValue = "all") {
   return ({
     unassigned: "Chưa giao việc",
@@ -11202,10 +11213,10 @@ function renderScheduledWorkOrderList() {
     ? state.scheduledWorkOrderStatusFilter
     : "all";
   const activeTimeFilter = normalizeScheduledWorkOrderTimeFilter(state.scheduledWorkOrderTimeFilter);
-  const filteredSchedules = schedules.filter((schedule) => (
+  const filteredSchedules = sortScheduledWorkOrdersForDisplay(schedules.filter((schedule) => (
     scheduledWorkOrderMatchesStatusFilter(schedule, activeStatusFilter)
     && scheduledWorkOrderMatchesTimeFilter(schedule, activeTimeFilter)
-  ));
+  )), activeStatusFilter);
   if (els.scheduledWorkOrderStatusFilter) {
     els.scheduledWorkOrderStatusFilter.value = activeStatusFilter;
   }
@@ -15388,12 +15399,10 @@ function renderTicketGroup(group, mode = "admin") {
     if (isScheduledGroupPending && group.tasks.length) {
       const cachedSchedule = state.scheduledWorkOrders.find((item) => item.id === workOrder?.scheduleId);
       if (isAdminProfile() && workOrder?.scheduledEditDeletePolicy !== "locked" && cachedSchedule?.editDeletePolicy !== "locked") {
-        if (workOrder?.scheduleId) {
-          actionButtons.push(`<button class="btn secondary small" data-action="convert-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">📦 Đã mang đến</button>`);
-        }
         actionButtons.push(`<button class="btn ghost small" data-action="edit-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Chỉnh sửa</button>`);
         if (workOrder?.scheduleId) {
           actionButtons.push(`<button class="btn ghost small" data-action="reschedule-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">🗓 Dời lịch</button>`);
+          actionButtons.push(`<button class="btn secondary small" data-action="convert-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">📦 Đã mang đến</button>`);
         }
       }
       actionButtons.push(`<button class="btn schedule-work-order-btn small" data-action="open-scheduled-group-assignment" data-work-order-id="${escapeHtml(group.key)}" type="button">👤 Giao cho nhóm</button>`);
