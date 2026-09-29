@@ -291,9 +291,11 @@ exports.saveWorkOrderControlSettings = onCall({
   const rawPreventDispatchedPhotoRequirementEditing = request.data?.preventDispatchedPhotoRequirementEditing;
   const rawHideEndTaskButton = request.data?.hideEndTaskButton;
   const rawAllowAdminHotelTimeEditing = request.data?.allowAdminHotelTimeEditing;
+  const rawAllowEditDeleteLockedSchedules = request.data?.allowEditDeleteLockedSchedules;
   const existingSettingsSnap = rawPreventDispatchedPhotoRequirementEditing === undefined
     || rawHideEndTaskButton === undefined
     || rawAllowAdminHotelTimeEditing === undefined
+    || rawAllowEditDeleteLockedSchedules === undefined
     ? await db.doc("appSettings/workOrderControls").get()
     : null;
   const preventDispatchedPhotoRequirementEditing = rawPreventDispatchedPhotoRequirementEditing === undefined
@@ -305,6 +307,9 @@ exports.saveWorkOrderControlSettings = onCall({
   const allowAdminHotelTimeEditing = rawAllowAdminHotelTimeEditing === undefined
     ? existingSettingsSnap?.data()?.allowAdminHotelTimeEditing === true
     : rawAllowAdminHotelTimeEditing;
+  const allowEditDeleteLockedSchedules = rawAllowEditDeleteLockedSchedules === undefined
+    ? existingSettingsSnap?.data()?.allowEditDeleteLockedSchedules === true
+    : rawAllowEditDeleteLockedSchedules;
   const allowOverdueTimeExtension = request.data?.allowOverdueTimeExtension;
   const rawAllowEditCompletedTaskActualTime = request.data?.allowEditCompletedTaskActualTime;
   const allowEditCompletedTaskActualTime = rawAllowEditCompletedTaskActualTime === undefined
@@ -349,6 +354,9 @@ exports.saveWorkOrderControlSettings = onCall({
   }
   if (typeof allowAdminHotelTimeEditing !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị quyền chỉnh/thêm giờ Phiếu Hotel không hợp lệ.");
+  }
+  if (typeof allowEditDeleteLockedSchedules !== "boolean") {
+    throw new HttpsError("invalid-argument", "Giá trị quyền sửa, xóa lịch đã khóa không hợp lệ.");
   }
   if (typeof workSupervisionEnabled !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị Giám sát công việc không hợp lệ.");
@@ -406,6 +414,7 @@ exports.saveWorkOrderControlSettings = onCall({
     allowOverdueTimeExtension,
     allowEditCompletedTaskActualTime,
     allowAdminHotelTimeEditing,
+    allowEditDeleteLockedSchedules,
     workSupervisionEnabled,
     workSupervisionCountdownMinutes,
     workSupervisionLunchCreditMinutes,
@@ -436,6 +445,7 @@ exports.saveWorkOrderControlSettings = onCall({
       allowOverdueTimeExtension,
       allowEditCompletedTaskActualTime,
       allowAdminHotelTimeEditing,
+      allowEditDeleteLockedSchedules,
       workSupervisionEnabled,
       workSupervisionCountdownMinutes,
       workSupervisionLunchCreditMinutes,
@@ -1155,6 +1165,7 @@ exports.updateScheduledWorkOrder = onCall({
 
   const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
   const groupRef = db.doc(`employeeGroups/${employeeGroupId}`);
+  const settingsRef = db.doc("appSettings/workOrderControls");
   const replacedHistoryRef = db.collection("replacedScheduledWorkOrders").doc();
   const scheduledAt = Timestamp.fromMillis(Math.trunc(scheduledForMs));
   let employeeGroupName = "Nhóm nhân viên";
@@ -1162,9 +1173,13 @@ exports.updateScheduledWorkOrder = onCall({
   let generatedWorkOrderId = "";
   let existingNextScheduleId = "";
   let seriesId = scheduleId;
+  let allowEditDeleteLockedSchedules = false;
 
   await db.runTransaction(async (transaction) => {
-    const [scheduleSnapshot, groupSnapshot] = await transaction.getAll(scheduleRef, groupRef);
+    const [scheduleSnapshot, groupSnapshot, settingsSnapshot] = await transaction.getAll(
+      scheduleRef, groupRef, settingsRef
+    );
+    allowEditDeleteLockedSchedules = settingsSnapshot.data()?.allowEditDeleteLockedSchedules === true;
     if (!scheduleSnapshot.exists) {
       throw new HttpsError("not-found", "Lịch Phiếu công việc không còn tồn tại.");
     }
@@ -1172,7 +1187,7 @@ exports.updateScheduledWorkOrder = onCall({
     if (String(currentSchedule.createdByUid || "") !== adminUid) {
       throw new HttpsError("permission-denied", "Bạn không có quyền chỉnh sửa lịch này.");
     }
-    if (!canModifyScheduledWorkOrder(currentSchedule)) {
+    if (!canModifyScheduledWorkOrder(currentSchedule, allowEditDeleteLockedSchedules)) {
       throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa và không thể chỉnh sửa.");
     }
     previousStatus = String(currentSchedule.status || "pending");
@@ -1318,7 +1333,7 @@ exports.updateScheduledWorkOrder = onCall({
       && String(nextSchedule.previousScheduleId || "") === scheduleId
       && String(nextSchedule.createdByUid || "") === adminUid
       && String(nextSchedule.status || "") === "pending"
-      && canModifyScheduledWorkOrder(nextSchedule);
+      && canModifyScheduledWorkOrder(nextSchedule, allowEditDeleteLockedSchedules);
     if (canUpdateNext) {
       // Lịch kế tiếp đã được tạo sớm: bỏ bản cũ để dữ liệu chỉnh sửa được áp dụng.
       await nextScheduleRef.delete();
@@ -1443,7 +1458,9 @@ exports.deleteScheduledWorkOrder = onCall({
 
   const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
   const schedule = await db.runTransaction(async (transaction) => {
-    const scheduleSnapshot = await transaction.get(scheduleRef);
+    const [scheduleSnapshot, settingsSnapshot] = await transaction.getAll(
+      scheduleRef, db.doc("appSettings/workOrderControls")
+    );
     if (!scheduleSnapshot.exists) {
       throw new HttpsError("not-found", "Lịch Phiếu công việc không còn tồn tại.");
     }
@@ -1451,7 +1468,9 @@ exports.deleteScheduledWorkOrder = onCall({
     if (String(currentSchedule.createdByUid || "") !== adminUid) {
       throw new HttpsError("permission-denied", "Bạn không có quyền xóa lịch này.");
     }
-    if (!canModifyScheduledWorkOrder(currentSchedule)) {
+    if (!canModifyScheduledWorkOrder(
+      currentSchedule, settingsSnapshot.data()?.allowEditDeleteLockedSchedules === true
+    )) {
       throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa và không thể xóa.");
     }
     const deletionPreviousStatus = String(
@@ -2343,12 +2362,20 @@ exports.getScheduledGeneratedWorkOrderForEdit = onCall({
     || workOrder.status !== "draft" || workOrder.scheduledGroupAssignmentPending !== true) {
     throw new HttpsError("failed-precondition", "Phiếu này không còn chờ giao cho nhóm.");
   }
-  const [scheduleSnapshot, taskSnapshot] = await Promise.all([
+  const [scheduleSnapshot, taskSnapshot, settingsSnapshot] = await Promise.all([
     db.doc(`scheduledWorkOrders/${scheduleId}`).get(),
-    db.collection("tasks").where("workOrderId", "==", workOrderId).get()
+    db.collection("tasks").where("workOrderId", "==", workOrderId).get(),
+    db.doc("appSettings/workOrderControls").get()
   ]);
   const schedule = scheduleSnapshot.data() || {};
-  if (!scheduleSnapshot.exists || schedule.status !== "generated" || !canModifyScheduledWorkOrder(schedule)) {
+  if (String(workOrder.createdByUid || "") !== adminUid
+    || String(schedule.createdByUid || "") !== adminUid) {
+    throw new HttpsError("permission-denied", "Bạn không có quyền chỉnh sửa Phiếu này.");
+  }
+  const allowLockedSchedules = settingsSnapshot.data()?.allowEditDeleteLockedSchedules === true;
+  if (!scheduleSnapshot.exists || schedule.status !== "generated"
+    || !canModifyScheduledWorkOrder(schedule, allowLockedSchedules)
+    || !canModifyScheduledWorkOrder({ editDeletePolicy: workOrder.scheduledEditDeletePolicy }, allowLockedSchedules)) {
     throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa hoặc không còn chờ giao.");
   }
   const tasks = taskSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
@@ -2423,12 +2450,20 @@ exports.updateScheduledGeneratedWorkOrder = onCall({
       throw new HttpsError("aborted", "Phiếu đã thay đổi trong lúc chỉnh sửa; vui lòng mở lại.");
     }
     const scheduleRef = db.doc(`scheduledWorkOrders/${scheduleId}`);
-    const [scheduleSnapshot, taskSnapshot] = await Promise.all([
+    const [scheduleSnapshot, taskSnapshot, settingsSnapshot] = await Promise.all([
       transaction.get(scheduleRef),
-      transaction.get(db.collection("tasks").where("workOrderId", "==", workOrderId))
+      transaction.get(db.collection("tasks").where("workOrderId", "==", workOrderId)),
+      transaction.get(db.doc("appSettings/workOrderControls"))
     ]);
     const schedule = scheduleSnapshot.data() || {};
-    if (!scheduleSnapshot.exists || schedule.status !== "generated" || !canModifyScheduledWorkOrder(schedule)) {
+    if (String(workOrder.createdByUid || "") !== adminUid
+      || String(schedule.createdByUid || "") !== adminUid) {
+      throw new HttpsError("permission-denied", "Bạn không có quyền chỉnh sửa Phiếu này.");
+    }
+    const allowLockedSchedules = settingsSnapshot.data()?.allowEditDeleteLockedSchedules === true;
+    if (!scheduleSnapshot.exists || schedule.status !== "generated"
+      || !canModifyScheduledWorkOrder(schedule, allowLockedSchedules)
+      || !canModifyScheduledWorkOrder({ editDeletePolicy: workOrder.scheduledEditDeletePolicy }, allowLockedSchedules)) {
       throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa hoặc không còn chờ giao.");
     }
     const currentTasks = new Map(taskSnapshot.docs.map((item) => [item.id, { ref: item.ref, ...item.data() }]));

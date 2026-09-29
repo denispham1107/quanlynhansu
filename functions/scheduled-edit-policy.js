@@ -14,9 +14,9 @@ function normalizeScheduledEditDeletePolicy(value) {
     : SCHEDULED_EDIT_DELETE_POLICY_EDITABLE;
 }
 
-function canModifyScheduledWorkOrder(schedule) {
+function canModifyScheduledWorkOrder(schedule, allowLockedSchedules = false) {
   return normalizeScheduledEditDeletePolicy(schedule?.editDeletePolicy)
-    !== SCHEDULED_EDIT_DELETE_POLICY_LOCKED;
+    !== SCHEDULED_EDIT_DELETE_POLICY_LOCKED || allowLockedSchedules === true;
 }
 
 module.exports = {

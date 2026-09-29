@@ -15,6 +15,8 @@ assert.ok(ticketActions.indexOf('data-action="edit-scheduled-draft"') < ticketAc
 assert.ok(ticketActions.indexOf('data-action="reschedule-scheduled-draft"') < ticketActions.indexOf('data-action="convert-scheduled-draft"'));
 assert.ok(ticketActions.indexOf('data-action="convert-scheduled-draft"') < ticketActions.indexOf('data-action="open-scheduled-group-assignment"'));
 assert.match(ticketActions, /scheduledEditDeletePolicy !== "locked"/);
+assert.match(ticketActions, /scheduleOriginallyEditable \|\| canOverrideLockedScheduledWorkOrder\(\)/);
+assert.match(ticketActions, /if \(scheduleOriginallyEditable\) \{\s*actionButtons\.push\(`<button class="btn secondary small" data-action="convert-scheduled-draft"/);
 assert.match(app, /if \(action === "reschedule-scheduled-draft"\) \{\s*await openScheduledWorkOrderEditorFromTicket/);
 assert.match(app, /if \(state\.scheduledEditorReturnToDashboard\) \{\s*closeTaskModal\(\);/);
 assert.match(app, /state\.scheduledEditorReturnToDashboard \? "← Quay lại trang quản lý"/);
@@ -35,7 +37,9 @@ assert.ok(saveStart >= 0 && saveEnd > saveStart);
 const save = server.slice(saveStart, saveEnd);
 assert.match(save, /await assertAdmin\(adminUid\)/);
 assert.match(save, /scheduledGroupAssignmentPending !== true/);
-assert.match(save, /!canModifyScheduledWorkOrder\(schedule\)/);
+assert.match(save, /const allowLockedSchedules = settingsSnapshot\.data\(\)\?\.allowEditDeleteLockedSchedules === true/);
+assert.match(save, /!canModifyScheduledWorkOrder\(schedule, allowLockedSchedules\)/);
+assert.match(save, /!canModifyScheduledWorkOrder\(\{ editDeletePolicy: workOrder\.scheduledEditDeletePolicy \}, allowLockedSchedules\)/);
 assert.match(save, /expectedRevision/);
 assert.match(save, /expectedGeneratedAtMs/);
 assert.match(save, /const taskDate = String\(workOrder\.scheduledTaskDate/);
@@ -43,6 +47,9 @@ assert.match(save, /transaction\.update\(workOrderRef, \{/);
 assert.doesNotMatch(save, /transaction\.delete\(workOrderRef\)/);
 assert.doesNotMatch(save, /assignedToUid: String\(requestedRows/);
 assert.ok(server.includes("Number(freshWorkOrder.scheduledDraftRevision || 0) !== Number(workOrder.scheduledDraftRevision || 0)"));
+const getEdit = server.slice(server.indexOf("exports.getScheduledGeneratedWorkOrderForEdit ="), saveStart);
+assert.match(getEdit, /settingsSnapshot\.data\(\)\?\.allowEditDeleteLockedSchedules === true/);
+assert.match(getEdit, /!canModifyScheduledWorkOrder\(\{ editDeletePolicy: workOrder\.scheduledEditDeletePolicy \}, allowLockedSchedules\)/);
 
 function extractFunction(name) {
   const start = app.indexOf(`async function ${name}(`);
@@ -67,16 +74,19 @@ const navigation = new Function(`
   const window = { scrollY: 225 };
   const calls = [];
   const console = { error() {} };
+  let settingsEnabled = false;
   let returnedSchedules = [{ id: "schedule-1", status: "generated", generatedWorkOrderId: "ticket-1",
     editDeletePolicy: "editable" }];
   const isAdminProfile = () => true;
   const toast = (message) => calls.push(["toast", message]);
   const setButtonLoading = (_, loading) => calls.push(["loading", loading]);
   const listScheduledWorkOrdersCallable = async () => ({ data: { schedules: returnedSchedules } });
-  const canEditScheduledWorkOrder = (schedule) => schedule.editDeletePolicy !== "locked";
+  const canOverrideLockedScheduledWorkOrder = () => settingsEnabled;
+  const canEditScheduledWorkOrder = (schedule) => schedule.editDeletePolicy !== "locked" || settingsEnabled;
   const openScheduledWorkOrderEditor = (id, options) => calls.push(["open", id, options]);
   ${extractFunction("openScheduledWorkOrderEditorFromTicket")}
   return { state, button, calls, setSchedules: (schedules) => { returnedSchedules = schedules; },
+    setSettingsEnabled: (enabled) => { settingsEnabled = enabled; },
     openScheduledWorkOrderEditorFromTicket };
 `)();
 await navigation.openScheduledWorkOrderEditorFromTicket("ticket-1", navigation.button);
@@ -93,6 +103,14 @@ assert.equal(navigation.calls.some((call) => call[0] === "open"), false);
 assert.equal(navigation.calls.some((call) => call[0] === "toast"), true);
 
 navigation.calls.length = 0;
+navigation.setSettingsEnabled(true);
+navigation.setSchedules([{ id: "schedule-1", status: "generated", generatedWorkOrderId: "ticket-1",
+  editDeletePolicy: "locked" }]);
+await navigation.openScheduledWorkOrderEditorFromTicket("ticket-1", navigation.button);
+assert.equal(navigation.calls.some((call) => call[0] === "open"), true);
+
+navigation.calls.length = 0;
+navigation.setSettingsEnabled(false);
 navigation.state.workOrders[0].scheduledEditDeletePolicy = "locked";
 await navigation.openScheduledWorkOrderEditorFromTicket("ticket-1", navigation.button);
 assert.equal(navigation.calls.some((call) => call[0] === "loading"), false);

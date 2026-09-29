@@ -307,6 +307,7 @@ const state = {
     allowOverdueTimeExtension: false,
     allowEditCompletedTaskActualTime: false,
     allowAdminHotelTimeEditing: false,
+    allowEditDeleteLockedSchedules: false,
     workSupervisionEnabled: false,
     workSupervisionCountdownMinutes: 5,
     workSupervisionLunchCreditMinutes: 5,
@@ -878,6 +879,7 @@ function normalizeWorkOrderControlSettings(value = {}) {
     allowOverdueTimeExtension: input.allowOverdueTimeExtension === true,
     allowEditCompletedTaskActualTime: input.allowEditCompletedTaskActualTime === true,
     allowAdminHotelTimeEditing: input.allowAdminHotelTimeEditing === true,
+    allowEditDeleteLockedSchedules: input.allowEditDeleteLockedSchedules === true,
     workSupervisionEnabled: input.workSupervisionEnabled === true,
     workSupervisionCountdownMinutes: Number.isInteger(Number(input.workSupervisionCountdownMinutes))
       && Number(input.workSupervisionCountdownMinutes) >= 1
@@ -1179,6 +1181,7 @@ const els = {
   allowOverdueTimeExtension: $("#allowOverdueTimeExtension"),
   allowEditCompletedTaskActualTime: $("#allowEditCompletedTaskActualTime"),
   allowAdminHotelTimeEditing: $("#allowAdminHotelTimeEditing"),
+  allowEditDeleteLockedSchedules: $("#allowEditDeleteLockedSchedules"),
   enableWorkSupervision: $("#enableWorkSupervision"),
   workSupervisionSettingControls: $("#workSupervisionSettingControls"),
   workSupervisionCountdownMinutes: $("#workSupervisionCountdownMinutes"),
@@ -6365,10 +6368,12 @@ function setupAdminDashboard() {
       applyManagementPermissionUI();
       scheduleAdminTasksRender();
       updateExtendTimeLimitUI();
+      if (!els.scheduledWorkOrderListModal?.classList.contains("hidden")) renderScheduledWorkOrderList();
     },
     (error) => {
       console.error(error);
       state.workOrderControlSettingsReady = false;
+      if (!els.scheduledWorkOrderListModal?.classList.contains("hidden")) renderScheduledWorkOrderList();
       toast("Không đọc được Cài đặt Phiếu công việc. Hãy deploy Firestore Rules mới nhất.", "error");
     }
   );
@@ -9661,13 +9666,18 @@ els.openScheduledWorkOrderBtn?.addEventListener("click", openScheduledWorkOrderM
 els.scheduledWorkOrderCountdownMinutes?.addEventListener("input", updateScheduledCountdownPreview);
 els.scheduledWorkOrderDate?.addEventListener("change", syncScheduledTaskRowDates);
 
+function canOverrideLockedScheduledWorkOrder() {
+  return isAdminProfile() && state.workOrderControlSettingsReady === true
+    && getWorkOrderControlSettings().allowEditDeleteLockedSchedules === true;
+}
+
 function canEditScheduledWorkOrder(schedule) {
-  return schedule?.editDeletePolicy !== "locked"
+  return (schedule?.editDeletePolicy !== "locked" || canOverrideLockedScheduledWorkOrder())
     && ["pending", "generated", "failed"].includes(String(schedule?.status || "pending"));
 }
 
 function canDeleteScheduledWorkOrder(schedule) {
-  return schedule?.editDeletePolicy !== "locked"
+  return (schedule?.editDeletePolicy !== "locked" || canOverrideLockedScheduledWorkOrder())
     && !["deleted", "replaced"].includes(String(schedule?.status || "pending"));
 }
 
@@ -9685,7 +9695,7 @@ function openScheduledWorkOrderEditor(scheduleId, { returnToDashboard = false } 
   }
   if (!canEditScheduledWorkOrder(schedule)) {
     toast(
-      schedule.editDeletePolicy === "locked"
+      schedule.editDeletePolicy === "locked" && !canOverrideLockedScheduledWorkOrder()
         ? "Lịch này đã khóa Sửa-Xóa và không thể chỉnh sửa."
         : schedule.status === "assigned"
         ? "Lịch này đã giao việc nên không thể thay đổi dữ liệu công việc đã giao."
@@ -9777,7 +9787,7 @@ async function openScheduledWorkOrderEditorFromTicket(workOrderId, button) {
     toast("Phiếu này không còn là Phiếu chưa giao việc được tạo từ lịch.", "error");
     return;
   }
-  if (workOrder.scheduledEditDeletePolicy === "locked") {
+  if (workOrder.scheduledEditDeletePolicy === "locked" && !canOverrideLockedScheduledWorkOrder()) {
     toast("Lịch này đã khóa Sửa-Xóa và không thể dời lịch.", "info");
     return;
   }
@@ -12604,6 +12614,9 @@ function openWorkOrderSettingsModal() {
   if (els.allowAdminHotelTimeEditing) {
     els.allowAdminHotelTimeEditing.checked = settings.allowAdminHotelTimeEditing;
   }
+  if (els.allowEditDeleteLockedSchedules) {
+    els.allowEditDeleteLockedSchedules.checked = settings.allowEditDeleteLockedSchedules;
+  }
   if (els.enableWorkSupervision) {
     els.enableWorkSupervision.checked = settings.workSupervisionEnabled;
   }
@@ -12804,6 +12817,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       allowOverdueTimeExtension: els.allowOverdueTimeExtension?.checked === true,
       allowEditCompletedTaskActualTime: els.allowEditCompletedTaskActualTime?.checked === true,
       allowAdminHotelTimeEditing: els.allowAdminHotelTimeEditing?.checked === true,
+      allowEditDeleteLockedSchedules: els.allowEditDeleteLockedSchedules?.checked === true,
       workSupervisionEnabled: supervisionEnabled,
       workSupervisionCountdownMinutes: supervisionCountdownMinutes,
       workSupervisionLunchCreditMinutes: supervisionLunchCreditMinutes,
@@ -15398,11 +15412,15 @@ function renderTicketGroup(group, mode = "admin") {
   if (mode === "admin" && isDraft) {
     if (isScheduledGroupPending && group.tasks.length) {
       const cachedSchedule = state.scheduledWorkOrders.find((item) => item.id === workOrder?.scheduleId);
-      if (isAdminProfile() && workOrder?.scheduledEditDeletePolicy !== "locked" && cachedSchedule?.editDeletePolicy !== "locked") {
+      const scheduleOriginallyEditable = workOrder?.scheduledEditDeletePolicy !== "locked"
+        && cachedSchedule?.editDeletePolicy !== "locked";
+      if (isAdminProfile() && (scheduleOriginallyEditable || canOverrideLockedScheduledWorkOrder())) {
         actionButtons.push(`<button class="btn ghost small" data-action="edit-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Chỉnh sửa</button>`);
         if (workOrder?.scheduleId) {
           actionButtons.push(`<button class="btn ghost small" data-action="reschedule-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">🗓 Dời lịch</button>`);
-          actionButtons.push(`<button class="btn secondary small" data-action="convert-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">📦 Đã mang đến</button>`);
+          if (scheduleOriginallyEditable) {
+            actionButtons.push(`<button class="btn secondary small" data-action="convert-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">📦 Đã mang đến</button>`);
+          }
         }
       }
       actionButtons.push(`<button class="btn schedule-work-order-btn small" data-action="open-scheduled-group-assignment" data-work-order-id="${escapeHtml(group.key)}" type="button">👤 Giao cho nhóm</button>`);

@@ -18,7 +18,7 @@ const list = backend.slice(
 );
 assert.match(update, /assertAdmin\(adminUid\)/);
 assert.match(update, /String\(currentSchedule\.createdByUid \|\| ""\) !== adminUid/);
-assert.match(update, /!canModifyScheduledWorkOrder\(currentSchedule\)/);
+assert.match(update, /!canModifyScheduledWorkOrder\(currentSchedule, allowEditDeleteLockedSchedules\)/);
 assert.match(update, /const replacedHistoryRef = db\.collection\("replacedScheduledWorkOrders"\)\.doc\(\)/);
 assert.match(update, /transaction\.set\(replacedHistoryRef, \{/);
 assert.match(update, /name: String\(currentSchedule\.name \|\| "Phiếu công việc"\)/);

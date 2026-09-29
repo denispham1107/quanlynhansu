@@ -11979,6 +11979,17 @@
           <p class="work-order-setting-help">Không ảnh hưởng nút “Hoàn thành” của nhân viên hoặc nút “Xác nhận hoàn thành” khi duyệt kết quả.</p>
         </section>
 
+        <section class="work-order-setting-section is-time-setting">
+          <label class="work-order-setting-toggle-row" for="allowEditDeleteLockedSchedules">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Cho phép xóa các lịch có Quyền không cho Sửa-Xóa</strong>
+              <span>Khi bật, Admin cũng có thể chỉnh sửa hoặc xóa các lịch đang đặt quyền “Không cho Sửa-Xóa”.</span>
+            </span>
+            <input id="allowEditDeleteLockedSchedules" type="checkbox" />
+          </label>
+          <p class="work-order-setting-help">Mặc định tắt. Lịch đã giao việc, đã xóa hoặc đã thay thế vẫn giữ giới hạn theo trạng thái.</p>
+        </section>
+
         <section class="work-order-setting-section is-danger-setting">
           <label class="work-order-setting-toggle-row" for="preventWorkOrderDeletion">
             <span class="work-order-setting-toggle-copy">
@@ -12161,7 +12172,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260930-scheduled-list-order-v115"></script>
+  <script type="module" src="app.js?v=20260930-locked-schedule-override-v116"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

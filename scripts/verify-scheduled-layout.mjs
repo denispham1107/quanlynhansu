@@ -674,6 +674,58 @@ for (const profile of profiles) {
   if (!passed) failures.push({ profile: `Nút Đã mang đến ${profile.name}`, result });
 }
 
+await send("Runtime.evaluate", {
+  expression: `(() => {
+    document.getElementById("scheduledRescheduleLayoutFixture")?.remove();
+    document.getElementById("adminView")?.classList.add("hidden");
+    document.getElementById("workOrderSettingsModal")?.classList.remove("hidden");
+    document.body.classList.add("work-order-settings-open");
+  })()`
+});
+
+for (const profile of profiles) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: profile.width,
+    height: profile.height,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
+    screenWidth: profile.width,
+    screenHeight: profile.height,
+  });
+  await delay(80);
+  const measurement = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const modal = document.getElementById("workOrderSettingsModal");
+      const card = modal.querySelector(".work-order-settings-card");
+      const scroll = modal.querySelector(".work-order-settings-scroll");
+      const toggle = document.getElementById("allowEditDeleteLockedSchedules");
+      toggle.scrollIntoView({ block: "center" });
+      const cardBox = card.getBoundingClientRect();
+      const scrollBox = scroll.getBoundingClientRect();
+      const sectionBox = toggle.closest(".work-order-setting-section").getBoundingClientRect();
+      return {
+        cardInsideViewport: cardBox.left >= -0.5 && cardBox.right <= innerWidth + 0.5
+          && cardBox.top >= -0.5 && cardBox.bottom <= innerHeight + 0.5,
+        scrollInsideCard: scrollBox.left >= cardBox.left - 0.5 && scrollBox.right <= cardBox.right + 0.5
+          && scrollBox.top >= cardBox.top - 0.5 && scrollBox.bottom <= cardBox.bottom + 0.5,
+        toggleInsideScroll: sectionBox.left >= scrollBox.left - 0.5 && sectionBox.right <= scrollBox.right + 0.5
+          && sectionBox.top >= scrollBox.top - 0.5 && sectionBox.bottom <= scrollBox.bottom + 0.5,
+        cardOverflow: getComputedStyle(card).overflow,
+        scrollOverflow: getComputedStyle(scroll).overflowY,
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth
+      };
+    })()`
+  });
+  const result = measurement.result.value;
+  const passed = result.cardInsideViewport && result.scrollInsideCard && result.toggleInsideScroll
+    && result.cardOverflow === "hidden" && ["auto", "scroll"].includes(result.scrollOverflow)
+    && result.scrollWidth <= result.viewportWidth;
+  console.log(`${passed ? "PASS" : "FAIL"} | Cài đặt quyền lịch khóa ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
+  if (!passed) failures.push({ profile: `Cài đặt quyền lịch khóa ${profile.name}`, result });
+}
+
 socket.close();
 browser.kill();
 await Promise.race([

@@ -25,7 +25,7 @@ assert.match(list, /deletionReason: String\(item\.deletionReason \|\| ""\)/);
 
 assert.match(deletion, /assertAdmin\(adminUid\)/);
 assert.match(deletion, /String\(currentSchedule\.createdByUid \|\| ""\) !== adminUid/);
-assert.match(deletion, /!canModifyScheduledWorkOrder\(currentSchedule\)/);
+assert.match(deletion, /!canModifyScheduledWorkOrder\(\s*currentSchedule, settingsSnapshot\.data\(\)\?\.allowEditDeleteLockedSchedules === true\s*\)/);
 assert.match(deletion, /const deletionReason = typeof request\.data\?\.reason === "string" \? request\.data\.reason\.trim\(\) : ""/);
 assert.match(deletion, /!deletionReason \|\| deletionReason\.length > 500/);
 assert.match(deletion, /shouldRemoveGeneratedDraft/);
