@@ -213,6 +213,7 @@ const state = {
   unsubs: [],
   editingWorkOrderId: null,
   editingScheduledWorkOrderId: "",
+  scheduledEditorReturnToDashboard: false,
   editingScheduledDraftWorkOrderId: "",
   editingScheduledDraftRevision: 0,
   editingScheduledDraftGeneratedAtMs: 0,
@@ -9318,7 +9319,7 @@ function updateScheduledWorkOrderEditorControls() {
   }
   if (els.viewScheduledWorkOrdersBtn) {
     els.viewScheduledWorkOrdersBtn.textContent = editingSchedule
-      ? "← Quay lại danh sách"
+      ? (state.scheduledEditorReturnToDashboard ? "← Quay lại trang quản lý" : "← Quay lại danh sách")
       : "📋 Xem lịch";
   }
 }
@@ -9566,6 +9567,7 @@ function closeTaskModal() {
   els.taskModal?.classList.add("hidden");
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = "";
+  state.scheduledEditorReturnToDashboard = false;
   state.editingScheduledDraftWorkOrderId = "";
   state.editingScheduledDraftRevision = 0;
   state.editingScheduledDraftGeneratedAtMs = 0;
@@ -9606,6 +9608,7 @@ function resetScheduledWorkOrderFormForCreate() {
   closeScheduledTimePicker();
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = "";
+  state.scheduledEditorReturnToDashboard = false;
   els.workOrderName.value = "";
   resetTaskRows();
   resetPhotoRequirementControls();
@@ -9667,7 +9670,7 @@ function canDeleteScheduledWorkOrder(schedule) {
     && !["deleted", "replaced"].includes(String(schedule?.status || "pending"));
 }
 
-function openScheduledWorkOrderEditor(scheduleId) {
+function openScheduledWorkOrderEditor(scheduleId, { returnToDashboard = false } = {}) {
   closeScheduledTimePicker();
   if (!isAdminProfile()) {
     toast("Chỉ Admin được chỉnh sửa lịch Phiếu công việc.", "error");
@@ -9699,6 +9702,7 @@ function openScheduledWorkOrderEditor(scheduleId) {
 
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = schedule.id;
+  state.scheduledEditorReturnToDashboard = returnToDashboard;
   els.workOrderName.value = schedule.name || "";
   taskRowWorkPhotos.clear();
   els.taskRowsContainer.innerHTML = "";
@@ -9752,9 +9756,52 @@ function openScheduledWorkOrderEditor(scheduleId) {
   $("#taskModalTitle").textContent = "🗓 Chỉnh sửa lịch Phiếu công việc";
 
   els.scheduledWorkOrderListModal?.classList.add("hidden");
+  if (returnToDashboard) {
+    els.adminView?.classList.add("hidden");
+    els.workTemplateView?.classList.add("hidden");
+    els.employeeManagerView?.classList.add("hidden");
+    els.photoReportView?.classList.add("hidden");
+    els.imageGalleryView?.classList.add("hidden");
+  }
   els.taskModal?.classList.remove("hidden");
   document.body.classList.add("schedule-page-open");
+  setMobileTaskPanelMenuOpen(false);
   window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+async function openScheduledWorkOrderEditorFromTicket(workOrderId, button) {
+  const workOrder = state.workOrders.find((item) => item.id === workOrderId);
+  if (!isAdminProfile() || !workOrder?.scheduleId || workOrder.scheduledWorkOrder !== true
+    || workOrder.status !== "draft" || workOrder.scheduledGroupAssignmentPending !== true) {
+    toast("Phiếu này không còn là Phiếu chưa giao việc được tạo từ lịch.", "error");
+    return;
+  }
+  if (workOrder.scheduledEditDeletePolicy === "locked") {
+    toast("Lịch này đã khóa Sửa-Xóa và không thể dời lịch.", "info");
+    return;
+  }
+  setButtonLoading(button, true, "Đang mở...");
+  try {
+    const result = await listScheduledWorkOrdersCallable({});
+    const schedules = Array.isArray(result?.data?.schedules) ? result.data.schedules : [];
+    const schedule = schedules.find((item) => item.id === workOrder.scheduleId);
+    if (!schedule || schedule.status !== "generated"
+      || schedule.generatedWorkOrderId !== workOrderId) {
+      throw new Error("Lịch tạo ra Phiếu này không còn ở trạng thái có thể dời.");
+    }
+    if (!canEditScheduledWorkOrder(schedule)) {
+      throw new Error("Lịch này đã khóa Sửa-Xóa và không thể dời lịch.");
+    }
+    state.scheduledWorkOrders = schedules;
+    state.schedulePageReturnScrollY = window.scrollY || 0;
+    state.schedulePageScrollY = 0;
+    openScheduledWorkOrderEditor(schedule.id, { returnToDashboard: true });
+  } catch (error) {
+    console.error(error);
+    toast(error?.message || "Không mở được lịch tạo ra Phiếu này.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 async function openScheduledDraftEditor(workOrderId, button) {
@@ -10854,12 +10901,16 @@ async function createScheduledWorkOrder(button) {
           }
         }
       }
-      state.editingScheduledWorkOrderId = "";
-      els.taskModal?.classList.add("hidden");
-      resetScheduledWorkOrderFormForCreate();
-      els.scheduledWorkOrderListModal?.classList.remove("hidden");
-      renderScheduledWorkOrderList();
-      updateScheduledWorkOrderEditorControls();
+      if (state.scheduledEditorReturnToDashboard) {
+        closeTaskModal();
+      } else {
+        state.editingScheduledWorkOrderId = "";
+        els.taskModal?.classList.add("hidden");
+        resetScheduledWorkOrderFormForCreate();
+        els.scheduledWorkOrderListModal?.classList.remove("hidden");
+        renderScheduledWorkOrderList();
+        updateScheduledWorkOrderEditorControls();
+      }
 
       const groupName = result?.data?.employeeGroupName || selectedGroup.name || "Nhóm nhân viên";
       toast(
@@ -11342,7 +11393,8 @@ $$('[data-cancel-scheduled-delete]').forEach((button) => {
 
 els.viewScheduledWorkOrdersBtn?.addEventListener("click", () => {
   if (state.editingScheduledWorkOrderId) {
-    returnToScheduledWorkOrderListFromEditor();
+    if (state.scheduledEditorReturnToDashboard) closeTaskModal();
+    else returnToScheduledWorkOrderListFromEditor();
     return;
   }
   openScheduledWorkOrderListModal();
@@ -15286,6 +15338,9 @@ function renderTicketGroup(group, mode = "admin") {
       const cachedSchedule = state.scheduledWorkOrders.find((item) => item.id === workOrder?.scheduleId);
       if (isAdminProfile() && workOrder?.scheduledEditDeletePolicy !== "locked" && cachedSchedule?.editDeletePolicy !== "locked") {
         actionButtons.push(`<button class="btn ghost small" data-action="edit-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">✏️ Chỉnh sửa</button>`);
+        if (workOrder?.scheduleId) {
+          actionButtons.push(`<button class="btn ghost small" data-action="reschedule-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">🗓 Dời lịch</button>`);
+        }
       }
       actionButtons.push(`<button class="btn schedule-work-order-btn small" data-action="open-scheduled-group-assignment" data-work-order-id="${escapeHtml(group.key)}" type="button">👤 Giao cho nhóm</button>`);
     } else if (hasPermission("editWorkOrder")) {
@@ -16938,6 +16993,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "edit-scheduled-draft") {
     await openScheduledDraftEditor(button.dataset.workOrderId, button);
+  }
+
+  if (action === "reschedule-scheduled-draft") {
+    await openScheduledWorkOrderEditorFromTicket(button.dataset.workOrderId, button);
   }
 
   if (action === "dispatch-work-order") {

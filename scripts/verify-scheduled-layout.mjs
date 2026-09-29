@@ -612,6 +612,67 @@ for (const profile of profiles) {
   if (!passed) failures.push({ profile: `Nhập lý do xóa ${profile.name}`, result });
 }
 
+await send("Runtime.evaluate", {
+  expression: `(() => {
+    document.getElementById("scheduledWorkOrderDeleteModal").classList.add("hidden");
+    document.body.classList.remove("scheduled-delete-dialog-open");
+    const adminView = document.getElementById("adminView");
+    adminView.classList.remove("hidden");
+    const ticket = document.createElement("section");
+    ticket.id = "scheduledRescheduleLayoutFixture";
+    ticket.className = "ticket-group is-draft-ticket is-scheduled-group-ticket";
+    ticket.style.width = "100%";
+    ticket.style.maxWidth = "840px";
+    ticket.style.boxSizing = "border-box";
+    ticket.innerHTML = '<div class="ticket-group-toolbar">'
+      + '<div class="ticket-group-header"><div><span class="ticket-badge">Chưa giao việc</span><h4>Phiếu được tạo từ lịch - 1 công việc</h4></div></div>'
+      + '<div class="ticket-actions">'
+      + '<button class="btn ghost small" type="button">✏️ Chỉnh sửa</button>'
+      + '<button class="btn ghost small" type="button">🗓 Dời lịch</button>'
+      + '<button class="btn schedule-work-order-btn small" type="button">👤 Giao cho nhóm</button>'
+      + '<button class="btn danger small" type="button">🗑 Xóa phiếu</button>'
+      + '</div></div>';
+    adminView.appendChild(ticket);
+    return true;
+  })()`
+});
+
+for (const profile of profiles) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: profile.width,
+    height: profile.height,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
+    screenWidth: profile.width,
+    screenHeight: profile.height,
+  });
+  await delay(80);
+  const measurement = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const ticket = document.getElementById("scheduledRescheduleLayoutFixture");
+      const buttons = [...ticket.querySelectorAll(".ticket-actions .btn")];
+      const card = ticket.getBoundingClientRect();
+      const boxes = buttons.map((button) => button.getBoundingClientRect());
+      return {
+        fourButtons: buttons.length === 4,
+        cardInsideViewport: card.left >= -0.5 && card.right <= innerWidth + 0.5,
+        buttonsInsideCard: boxes.every((box) => box.left >= card.left - 0.5 && box.right <= card.right + 0.5),
+        buttonsDoNotOverlap: boxes.every((box, index) => boxes.every((other, otherIndex) =>
+          index === otherIndex || box.right <= other.left + 0.5 || other.right <= box.left + 0.5
+          || box.bottom <= other.top + 0.5 || other.bottom <= box.top + 0.5)),
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth
+      };
+    })()`
+  });
+  const result = measurement.result.value;
+  const passed = result.fourButtons && result.cardInsideViewport && result.buttonsInsideCard
+    && result.buttonsDoNotOverlap && result.scrollWidth <= result.viewportWidth;
+  console.log(`${passed ? "PASS" : "FAIL"} | Nút Dời lịch ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
+  if (!passed) failures.push({ profile: `Nút Dời lịch ${profile.name}`, result });
+}
+
 socket.close();
 browser.kill();
 await Promise.race([
