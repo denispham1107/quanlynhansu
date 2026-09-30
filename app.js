@@ -11241,9 +11241,15 @@ function scheduledWorkOrderFilterLabel(filterValue = "all") {
 }
 
 function normalizeScheduledWorkOrderTimeFilter(filterValue = "today") {
-  return ["today", "yesterday", "date", "range"].includes(filterValue)
+  return ["today", "yesterday", "this-month", "last-month", "date", "range", "all"].includes(filterValue)
     ? filterValue
     : "today";
+}
+
+function scheduledWorkOrderMonthKey(monthOffset = 0, referenceDate = new Date()) {
+  return toLocalDateInputValue(new Date(
+    referenceDate.getFullYear(), referenceDate.getMonth() + monthOffset, 1
+  )).slice(0, 7);
 }
 
 function scheduledWorkOrderDateValue(schedule) {
@@ -11253,10 +11259,13 @@ function scheduledWorkOrderDateValue(schedule) {
 
 function scheduledWorkOrderMatchesTimeFilter(schedule, filterValue = "today") {
   const activeFilter = normalizeScheduledWorkOrderTimeFilter(filterValue);
+  if (activeFilter === "all") return true;
   const scheduleDate = scheduledWorkOrderDateValue(schedule);
   if (!scheduleDate) return false;
   if (activeFilter === "today") return scheduleDate === todayInputValue();
   if (activeFilter === "yesterday") return scheduleDate === yesterdayInputValue();
+  if (activeFilter === "this-month") return scheduleDate.slice(0, 7) === scheduledWorkOrderMonthKey();
+  if (activeFilter === "last-month") return scheduleDate.slice(0, 7) === scheduledWorkOrderMonthKey(-1);
   if (activeFilter === "date") {
     return Boolean(state.scheduledWorkOrderDateFilter)
       && scheduleDate === state.scheduledWorkOrderDateFilter;
@@ -11272,6 +11281,9 @@ function scheduledWorkOrderMatchesTimeFilter(schedule, filterValue = "today") {
 
 function scheduledWorkOrderTimeFilterLabel(filterValue = "today") {
   const activeFilter = normalizeScheduledWorkOrderTimeFilter(filterValue);
+  if (activeFilter === "this-month") return "Tháng này";
+  if (activeFilter === "last-month") return "Tháng trước";
+  if (activeFilter === "all") return "Tất cả";
   if (activeFilter === "date") {
     return state.scheduledWorkOrderDateFilter
       ? `Ngày ${formatDateOnly(state.scheduledWorkOrderDateFilter)}`

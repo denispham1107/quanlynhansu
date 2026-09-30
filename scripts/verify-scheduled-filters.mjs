@@ -43,12 +43,14 @@ const buildHelpers = new Function(`
   ${extractFunction("scheduledWorkOrderMatchesStatusFilter")}
   ${extractFunction("sortScheduledWorkOrdersForDisplay")}
   ${extractFunction("normalizeScheduledWorkOrderTimeFilter")}
+  ${extractFunction("scheduledWorkOrderMonthKey")}
   ${extractFunction("scheduledWorkOrderDateValue")}
   ${extractFunction("scheduledWorkOrderMatchesTimeFilter")}
+  ${extractFunction("scheduledWorkOrderTimeFilterLabel")}
   ${extractFunction("canOverrideLockedScheduledWorkOrder")}
   ${extractFunction("canEditScheduledWorkOrder")}
   ${extractFunction("canDeleteScheduledWorkOrder")}
-  return { state, setAdmin: (value) => { admin = value; }, todayInputValue, yesterdayInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderMatchesTimeFilter, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
+  return { state, setAdmin: (value) => { admin = value; }, todayInputValue, yesterdayInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderMonthKey, scheduledWorkOrderMatchesTimeFilter, scheduledWorkOrderTimeFilterLabel, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
 `);
 
 const helpers = buildHelpers();
@@ -90,6 +92,28 @@ assert.deepEqual(filterIds("today", "deleted"), ["today-deleted"]);
 assert.deepEqual(filterIds("today", "replaced"), ["today-replaced"]);
 assert.deepEqual(filterIds("today", "all"), ["today-unassigned", "today-assigned", "today-deleted", "today-replaced"]);
 assert.deepEqual(filterIds("yesterday", "assigned"), ["yesterday-assigned"]);
+
+const currentMonth = helpers.scheduledWorkOrderMonthKey();
+const previousMonth = helpers.scheduledWorkOrderMonthKey(-1);
+const nextMonth = helpers.scheduledWorkOrderMonthKey(1);
+const monthSchedules = [
+  { id: "current-month", status: "pending", scheduledForMs: localNoonMilliseconds(`${currentMonth}-01`) },
+  { id: "previous-month", status: "assigned", scheduledForMs: localNoonMilliseconds(`${previousMonth}-01`) },
+  { id: "next-month", status: "deleted", scheduledForMs: localNoonMilliseconds(`${nextMonth}-01`) }
+];
+assert.deepEqual(monthSchedules.filter((schedule) => helpers.scheduledWorkOrderMatchesTimeFilter(schedule, "this-month")).map((schedule) => schedule.id), ["current-month"]);
+assert.deepEqual(monthSchedules.filter((schedule) => helpers.scheduledWorkOrderMatchesTimeFilter(schedule, "last-month")).map((schedule) => schedule.id), ["previous-month"]);
+assert.deepEqual(monthSchedules.filter((schedule) => helpers.scheduledWorkOrderMatchesTimeFilter(schedule, "all")).map((schedule) => schedule.id), ["current-month", "previous-month", "next-month"]);
+assert.deepEqual(monthSchedules.filter((schedule) => helpers.scheduledWorkOrderMatchesTimeFilter(schedule, "all") && helpers.scheduledWorkOrderMatchesStatusFilter(schedule, "assigned")).map((schedule) => schedule.id), ["previous-month"]);
+assert.equal(helpers.scheduledWorkOrderMonthKey(-1, new Date(2026, 0, 15)), "2025-12");
+assert.equal(helpers.scheduledWorkOrderMonthKey(0, new Date(2026, 0, 15)), "2026-01");
+assert.equal(helpers.scheduledWorkOrderTimeFilterLabel("this-month"), "Tháng này");
+assert.equal(helpers.scheduledWorkOrderTimeFilterLabel("last-month"), "Tháng trước");
+assert.equal(helpers.scheduledWorkOrderTimeFilterLabel("all"), "Tất cả");
+const scheduleTimeSelect = pageSource.match(/<select id="scheduledWorkOrderTimeFilter">([\s\S]*?)<\/select>/)?.[1] || "";
+assert.match(scheduleTimeSelect, /<option value="this-month">Tháng này<\/option>/);
+assert.match(scheduleTimeSelect, /<option value="last-month">Tháng trước<\/option>/);
+assert.match(scheduleTimeSelect, /<option value="all">Tất cả<\/option>/);
 
 helpers.state.scheduledWorkOrderDateFilter = twoDaysAgo;
 assert.deepEqual(filterIds("date", "unassigned"), ["older-unassigned"]);
