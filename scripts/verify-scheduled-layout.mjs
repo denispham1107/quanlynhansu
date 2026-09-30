@@ -531,7 +531,7 @@ for (const profile of profiles) {
         deletedRedBorder: getComputedStyle(deletedElement).borderTopColor === "rgb(252, 165, 165)",
         assignedInsideList: box(assignedElement).left >= list.left - 0.5 && box(assignedElement).right <= list.right + 0.5,
         assignedGreenBorder: getComputedStyle(assignedElement).borderTopColor === "rgb(134, 239, 172)",
-        assignedGreenBackground: getComputedStyle(assignedElement).backgroundImage.includes("rgb(240, 253, 244)"),
+        assignedGreenBackground: getComputedStyle(assignedElement).backgroundImage.includes("rgb(220, 252, 231)"),
         replacedInsideList: box(replacedElement).left >= list.left - 0.5 && box(replacedElement).right <= list.right + 0.5,
         replacedNoEdit: !replacedElement.hasAttribute("data-edit-scheduled-work-order"),
         archivedDeleteButtonsInside,

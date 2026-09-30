@@ -117,7 +117,7 @@ assert.deepEqual(mixedStatuses.map((schedule) => schedule.id), [
 assert.match(extractFunction("renderScheduledWorkOrderList"), /sortScheduledWorkOrdersForDisplay\(schedules\.filter/);
 assert.match(extractFunction("renderScheduledWorkOrderList"), /const assigned = schedule\.status === "assigned"/);
 assert.match(extractFunction("renderScheduledWorkOrderList"), /\$\{assigned \? " is-assigned" : ""\}/);
-assert.match(pageSource, /\.scheduled-work-order-list-item\.is-assigned\s*\{[^}]*background:linear-gradient\(135deg,#f0fdf4,#ecfdf5\)/);
+assert.match(pageSource, /\.scheduled-work-order-list-item\.is-assigned\s*\{[^}]*background:linear-gradient\(135deg,#dcfce7,#d1fae5\)/);
 
 helpers.state.workOrders = [{
   id: "scheduled-work-order",
