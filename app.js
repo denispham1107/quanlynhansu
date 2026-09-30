@@ -11332,6 +11332,17 @@ function showScheduledReplacement(scheduleId) {
   });
 }
 
+const scheduledWorkOrderListPageMedia = window.matchMedia("(max-width: 768px), (max-width: 1024px) and (max-height: 500px)");
+
+function syncScheduledWorkOrderListPresentation() {
+  if (!els.scheduledWorkOrderListModal) return;
+  els.scheduledWorkOrderListModal.setAttribute("role", scheduledWorkOrderListPageMedia.matches ? "main" : "dialog");
+  if (scheduledWorkOrderListPageMedia.matches) els.scheduledWorkOrderListModal.removeAttribute("aria-modal");
+  else els.scheduledWorkOrderListModal.setAttribute("aria-modal", "true");
+}
+
+scheduledWorkOrderListPageMedia.addEventListener("change", syncScheduledWorkOrderListPresentation);
+
 async function openScheduledWorkOrderListModal() {
   if (!isAdminProfile()) {
     toast("Chỉ Admin được xem danh sách lịch.", "error");
@@ -11354,7 +11365,10 @@ async function openScheduledWorkOrderListModal() {
   );
   if (state.scheduledListReturnToTaskModal) state.schedulePageScrollY = window.scrollY || 0;
   els.taskModal?.classList.add("hidden");
+  syncScheduledWorkOrderListPresentation();
   els.scheduledWorkOrderListModal?.classList.remove("hidden");
+  const listContent = els.scheduledWorkOrderListModal?.querySelector(".scheduled-work-order-list-content");
+  if (listContent) listContent.scrollTop = 0;
   setButtonLoading(els.viewScheduledWorkOrdersBtn, true, "Đang tải...");
   try {
     const result = await listScheduledWorkOrdersCallable({});

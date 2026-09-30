@@ -471,6 +471,8 @@ for (const profile of profiles) {
     const modal = document.getElementById("scheduledWorkOrderListModal");
     const cardElement = modal.querySelector(".scheduled-work-order-list-card");
     const contentElement = modal.querySelector(".scheduled-work-order-list-content");
+    const headerElement = contentElement.querySelector(".modal-header");
+    const footerElement = cardElement.querySelector(".modal-footer-actions");
     const filterElement = modal.querySelector(".scheduled-work-order-list-filter");
     const filterShellElements = [...modal.querySelectorAll(".scheduled-work-order-filter-shell, .scheduled-work-order-date-shell")]
       .filter((element) => !element.closest(".hidden"));
@@ -484,21 +486,33 @@ for (const profile of profiles) {
     const replacementLinkElement = replacedElement.querySelector(".scheduled-work-order-replacement-link");
     const card = box(cardElement);
     const content = box(contentElement);
+    const header = box(headerElement);
+    const footer = box(footerElement);
     const filter = box(filterElement);
     const filterShells = filterShellElements.map(box);
     const filterControls = filterControlElements.map(box);
     const list = box(listElement);
       const firstRow = box(firstRowElement);
       const firstDeleteButton = box(firstDeleteButtonElement);
+      contentElement.scrollTop = Math.min(contentElement.scrollHeight - contentElement.clientHeight, header.height + 50);
+      const headerScrollDistance = header.top - box(headerElement).top;
+      contentElement.scrollTop = 0;
       return {
         modalOverflowY: getComputedStyle(modal).overflowY,
         cardOverflowY: getComputedStyle(cardElement).overflowY,
         contentOverflowY: getComputedStyle(contentElement).overflowY,
+        bodyOverflowY: getComputedStyle(document.body).overflowY,
+        backdropDisplay: getComputedStyle(modal.querySelector(".modal-backdrop")).display,
         viewportWidth: document.documentElement.clientWidth,
         viewportHeight: document.documentElement.clientHeight,
         scrollWidth: document.documentElement.scrollWidth,
       card,
       content,
+      headerScrollDistance,
+      headerInsideContent: header.left >= content.left - 0.5 && header.right <= content.right + 0.5
+        && header.top >= content.top - 0.5 && header.bottom <= content.bottom + 0.5,
+      footerInsideCard: footer.left >= card.left - 0.5 && footer.right <= card.right + 0.5
+        && footer.top >= card.top - 0.5 && footer.bottom <= card.bottom + 0.5,
       filter,
       filterShells,
       filterControls,
@@ -538,6 +552,7 @@ for (const profile of profiles) {
     })()`
   });
   const result = measurement.result.value;
+  const mobileFullPage = profile.width <= 768 || (profile.width <= 1024 && profile.height <= 500);
   const passed = result.taskModalHidden
     && result.card.width > 0
     && result.card.height > 0
@@ -550,6 +565,9 @@ for (const profile of profiles) {
     && result.filterShells.every((rect) => rect.width > 0)
     && result.filterControls.every((rect) => rect.width > 0)
     && result.contentInsideCard
+    && result.headerInsideContent
+    && result.headerScrollDistance > 20
+    && result.footerInsideCard
     && result.listInsideContentWidth
     && result.filterInsideContentWidth
     && result.controlsInsideShells
@@ -567,6 +585,12 @@ for (const profile of profiles) {
     && result.cardOverflowY === "hidden"
     && ["auto", "scroll"].includes(result.contentOverflowY)
     && result.contentScrollHeight > result.contentClientHeight
+    && result.bodyOverflowY === "hidden"
+    && (mobileFullPage
+      ? result.card.left >= -0.5 && result.card.right >= profile.width - 0.5
+        && result.card.top >= -0.5 && result.card.bottom >= profile.height - 0.5
+        && result.backdropDisplay === "none"
+      : result.backdropDisplay !== "none")
     && result.scrollWidth <= profile.width;
   console.log(`${passed ? "PASS" : "FAIL"} | Danh sách lịch ${profile.name} | content ${result.contentClientHeight}/${result.contentScrollHeight} | scroll ${result.scrollWidth}/${profile.width}`);
   if (!passed) failures.push({ profile: `Danh sách lịch ${profile.name}`, result });
