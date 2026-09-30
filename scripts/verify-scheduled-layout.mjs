@@ -439,9 +439,9 @@ await send("Runtime.evaluate", {
     document.getElementById("scheduledWorkOrderDateToFilter").value = "2026-09-30";
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
       <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : ""}">
-        <div class="scheduled-work-order-list-row\${index >= 22 ? " is-locked" : ""}">
+        <div class="scheduled-work-order-list-row">
           <div class="scheduled-work-order-list-main">22/09/2026, 08:30:00, Nhóm nhân viên, “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
-          \${index >= 22 ? "" : '<button class="btn danger scheduled-work-order-delete-btn" type="button">×</button>'}
+          <button class="btn danger scheduled-work-order-delete-btn" data-delete-scheduled-work-order="test-\${index}" type="button">×</button>
         </div>
         <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : index === 22 ? "Đã thay thế" : "Đang chờ đến giờ"}</span>\${index === 22 ? '<button class="scheduled-work-order-replacement-link" type="button">Lịch mới: 09:45:00 30/09/2026 →</button>' : ""}</div>
       </article>
@@ -494,6 +494,12 @@ for (const profile of profiles) {
     const list = box(listElement);
       const firstRow = box(firstRowElement);
       const firstDeleteButton = box(firstDeleteButtonElement);
+      const archivedDeleteButtonsInside = [deletedElement, replacedElement].every((item) => {
+        const itemRow = box(item.querySelector(".scheduled-work-order-list-row"));
+        const button = box(item.querySelector("[data-delete-scheduled-work-order]"));
+        return button.left >= itemRow.left - 0.5 && button.right <= itemRow.right + 0.5
+          && button.top >= itemRow.top - 0.5 && button.bottom <= itemRow.bottom + 0.5;
+      });
       contentElement.scrollTop = Math.min(contentElement.scrollHeight - contentElement.clientHeight, header.height + 50);
       const headerScrollDistance = header.top - box(headerElement).top;
       contentElement.scrollTop = 0;
@@ -520,10 +526,11 @@ for (const profile of profiles) {
         firstRow,
         firstDeleteButton,
         deletedInsideList: box(deletedElement).left >= list.left - 0.5 && box(deletedElement).right <= list.right + 0.5,
-        deletedNoActions: !deletedElement.querySelector("button, [data-edit-scheduled-work-order]"),
+        deletedNoEdit: !deletedElement.hasAttribute("data-edit-scheduled-work-order"),
         deletedRedBorder: getComputedStyle(deletedElement).borderTopColor === "rgb(252, 165, 165)",
         replacedInsideList: box(replacedElement).left >= list.left - 0.5 && box(replacedElement).right <= list.right + 0.5,
-        replacedNoActions: !replacedElement.querySelector("[data-delete-scheduled-work-order], [data-edit-scheduled-work-order]"),
+        replacedNoEdit: !replacedElement.hasAttribute("data-edit-scheduled-work-order"),
+        archivedDeleteButtonsInside,
         replacedBlueBorder: getComputedStyle(replacedElement).borderTopColor === "rgb(147, 197, 253)",
         replacementLinkInsideRow: box(replacementLinkElement).left >= box(replacedElement).left - 0.5 && box(replacementLinkElement).right <= box(replacedElement).right + 0.5,
         contentClientHeight: contentElement.clientHeight,
@@ -574,10 +581,11 @@ for (const profile of profiles) {
     && result.filterControlsDoNotOverlap
     && result.deleteButtonInsideRow
     && result.deletedInsideList
-    && result.deletedNoActions
+    && result.deletedNoEdit
     && result.deletedRedBorder
     && result.replacedInsideList
-    && result.replacedNoActions
+    && result.replacedNoEdit
+    && result.archivedDeleteButtonsInside
     && result.replacedBlueBorder
     && result.replacementLinkInsideRow
     && result.cardInsideViewport
@@ -629,6 +637,28 @@ for (const profile of profiles) {
       const cardRect = rect(card);
       const contentRect = rect(content);
       const reasonRect = rect(reason);
+      const reasonField = document.getElementById("scheduledWorkOrderDeleteReasonField");
+      const confirmButton = document.getElementById("confirmScheduledWorkOrderDeleteBtn");
+      reasonField.classList.add("hidden");
+      reason.required = false;
+      confirmButton.textContent = "Xác nhận xóa vĩnh viễn";
+      const purgeCardRect = rect(card);
+      const purgeContentRect = rect(content);
+      const purgeCardInsideViewport = purgeCardRect.left >= -0.5 && purgeCardRect.right <= innerWidth + 0.5
+        && purgeCardRect.top >= -0.5 && purgeCardRect.bottom <= innerHeight + 0.5;
+      const purgeContentInsideCard = purgeContentRect.left >= purgeCardRect.left - 0.5
+        && purgeContentRect.right <= purgeCardRect.right + 0.5
+        && purgeContentRect.top >= purgeCardRect.top - 0.5
+        && purgeContentRect.bottom <= purgeCardRect.bottom + 0.5;
+      const purgeActionsInsideCard = actions.every((button) => {
+        const buttonRect = rect(button);
+        return buttonRect.left >= purgeCardRect.left - 0.5 && buttonRect.right <= purgeCardRect.right + 0.5
+          && buttonRect.bottom <= purgeCardRect.bottom + 0.5;
+      });
+      const purgeReasonHidden = getComputedStyle(reasonField).display === "none" && !reason.required;
+      reasonField.classList.remove("hidden");
+      reason.required = true;
+      confirmButton.textContent = "Xác nhận xóa lịch";
       return {
         listHidden: document.getElementById("scheduledWorkOrderListModal").classList.contains("hidden"),
         cardInsideViewport: cardRect.left >= -0.5 && cardRect.right <= innerWidth + 0.5 && cardRect.top >= -0.5 && cardRect.bottom <= innerHeight + 0.5,
@@ -636,6 +666,10 @@ for (const profile of profiles) {
         reasonInsideContent: reasonRect.left >= contentRect.left - 0.5 && reasonRect.right <= contentRect.right + 0.5,
         actionsInsideCard: actions.every((button) => { const buttonRect = rect(button); return buttonRect.left >= cardRect.left - 0.5 && buttonRect.right <= cardRect.right + 0.5 && buttonRect.bottom <= cardRect.bottom + 0.5; }),
         requiredReason: reason.required && reason.maxLength === 500 && !reason.checkValidity(),
+        purgeCardInsideViewport,
+        purgeContentInsideCard,
+        purgeActionsInsideCard,
+        purgeReasonHidden,
         pageScrollLocked: getComputedStyle(document.body).overflowY === "hidden",
         cardOverflow: getComputedStyle(card).overflowY,
         contentOverflow: getComputedStyle(content).overflowY,
@@ -647,6 +681,8 @@ for (const profile of profiles) {
   const result = measurement.result.value;
   const passed = result.listHidden && result.cardInsideViewport && result.contentInsideCard
     && result.reasonInsideContent && result.actionsInsideCard && result.requiredReason && result.pageScrollLocked
+    && result.purgeCardInsideViewport && result.purgeContentInsideCard
+    && result.purgeActionsInsideCard && result.purgeReasonHidden
     && result.cardOverflow === "hidden" && ["auto", "scroll"].includes(result.contentOverflow)
     && result.scrollWidth <= result.viewportWidth;
   console.log(`${passed ? "PASS" : "FAIL"} | Nhập lý do xóa ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
@@ -740,18 +776,22 @@ for (const profile of profiles) {
       const modal = document.getElementById("workOrderSettingsModal");
       const card = modal.querySelector(".work-order-settings-card");
       const scroll = modal.querySelector(".work-order-settings-scroll");
-      const toggle = document.getElementById("allowEditDeleteLockedSchedules");
-      toggle.scrollIntoView({ block: "center" });
+      const toggleSectionsInsideScroll = ["allowEditDeleteLockedSchedules", "allowDeleteArchivedSchedules"].every((id) => {
+        const toggle = document.getElementById(id);
+        toggle.scrollIntoView({ block: "center" });
+        const scrollRect = scroll.getBoundingClientRect();
+        const sectionBox = toggle.closest(".work-order-setting-section").getBoundingClientRect();
+        return sectionBox.left >= scrollRect.left - 0.5 && sectionBox.right <= scrollRect.right + 0.5
+          && sectionBox.top >= scrollRect.top - 0.5 && sectionBox.bottom <= scrollRect.bottom + 0.5;
+      });
       const cardBox = card.getBoundingClientRect();
       const scrollBox = scroll.getBoundingClientRect();
-      const sectionBox = toggle.closest(".work-order-setting-section").getBoundingClientRect();
       return {
         cardInsideViewport: cardBox.left >= -0.5 && cardBox.right <= innerWidth + 0.5
           && cardBox.top >= -0.5 && cardBox.bottom <= innerHeight + 0.5,
         scrollInsideCard: scrollBox.left >= cardBox.left - 0.5 && scrollBox.right <= cardBox.right + 0.5
           && scrollBox.top >= cardBox.top - 0.5 && scrollBox.bottom <= cardBox.bottom + 0.5,
-        toggleInsideScroll: sectionBox.left >= scrollBox.left - 0.5 && sectionBox.right <= scrollBox.right + 0.5
-          && sectionBox.top >= scrollBox.top - 0.5 && sectionBox.bottom <= scrollBox.bottom + 0.5,
+        toggleSectionsInsideScroll,
         cardOverflow: getComputedStyle(card).overflow,
         scrollOverflow: getComputedStyle(scroll).overflowY,
         scrollWidth: document.documentElement.scrollWidth,
@@ -760,11 +800,11 @@ for (const profile of profiles) {
     })()`
   });
   const result = measurement.result.value;
-  const passed = result.cardInsideViewport && result.scrollInsideCard && result.toggleInsideScroll
+  const passed = result.cardInsideViewport && result.scrollInsideCard && result.toggleSectionsInsideScroll
     && result.cardOverflow === "hidden" && ["auto", "scroll"].includes(result.scrollOverflow)
     && result.scrollWidth <= result.viewportWidth;
-  console.log(`${passed ? "PASS" : "FAIL"} | Cài đặt quyền lịch khóa ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
-  if (!passed) failures.push({ profile: `Cài đặt quyền lịch khóa ${profile.name}`, result });
+  console.log(`${passed ? "PASS" : "FAIL"} | Cài đặt quyền lịch ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
+  if (!passed) failures.push({ profile: `Cài đặt quyền lịch ${profile.name}`, result });
 }
 
 socket.close();

@@ -157,6 +157,7 @@ const createScheduledWorkOrderCallable = httpsCallable(functions, "createSchedul
 const updateScheduledWorkOrderCallable = httpsCallable(functions, "updateScheduledWorkOrder");
 const listScheduledWorkOrdersCallable = httpsCallable(functions, "listScheduledWorkOrders");
 const deleteScheduledWorkOrderCallable = httpsCallable(functions, "deleteScheduledWorkOrder");
+const purgeScheduledWorkOrderHistoryCallable = httpsCallable(functions, "purgeScheduledWorkOrderHistory");
 const assignScheduledWorkOrderToGroupEmployeeCallable = httpsCallable(
   functions,
   "assignScheduledWorkOrderToGroupEmployee"
@@ -308,6 +309,7 @@ const state = {
     allowEditCompletedTaskActualTime: false,
     allowAdminHotelTimeEditing: false,
     allowEditDeleteLockedSchedules: false,
+    allowDeleteArchivedSchedules: false,
     workSupervisionEnabled: false,
     workSupervisionCountdownMinutes: 5,
     workSupervisionLunchCreditMinutes: 5,
@@ -880,6 +882,7 @@ function normalizeWorkOrderControlSettings(value = {}) {
     allowEditCompletedTaskActualTime: input.allowEditCompletedTaskActualTime === true,
     allowAdminHotelTimeEditing: input.allowAdminHotelTimeEditing === true,
     allowEditDeleteLockedSchedules: input.allowEditDeleteLockedSchedules === true,
+    allowDeleteArchivedSchedules: input.allowDeleteArchivedSchedules === true,
     workSupervisionEnabled: input.workSupervisionEnabled === true,
     workSupervisionCountdownMinutes: Number.isInteger(Number(input.workSupervisionCountdownMinutes))
       && Number(input.workSupervisionCountdownMinutes) >= 1
@@ -1147,8 +1150,11 @@ const els = {
   scheduledWorkOrderDeleteModal: $("#scheduledWorkOrderDeleteModal"),
   scheduledWorkOrderDeleteForm: $("#scheduledWorkOrderDeleteForm"),
   scheduledWorkOrderDeleteSummary: $("#scheduledWorkOrderDeleteSummary"),
+  scheduledWorkOrderDeleteTitle: $("#scheduledWorkOrderDeleteTitle"),
+  scheduledWorkOrderDeleteReasonField: $("#scheduledWorkOrderDeleteReasonField"),
   scheduledWorkOrderDeleteReason: $("#scheduledWorkOrderDeleteReason"),
   scheduledWorkOrderDeleteError: $("#scheduledWorkOrderDeleteError"),
+  scheduledWorkOrderDeleteWarning: $("#scheduledWorkOrderDeleteWarning"),
   confirmScheduledWorkOrderDeleteBtn: $("#confirmScheduledWorkOrderDeleteBtn"),
   scheduledWorkOrderStatusFilter: $("#scheduledWorkOrderStatusFilter"),
   scheduledWorkOrderTimeFilter: $("#scheduledWorkOrderTimeFilter"),
@@ -1183,6 +1189,7 @@ const els = {
   allowEditCompletedTaskActualTime: $("#allowEditCompletedTaskActualTime"),
   allowAdminHotelTimeEditing: $("#allowAdminHotelTimeEditing"),
   allowEditDeleteLockedSchedules: $("#allowEditDeleteLockedSchedules"),
+  allowDeleteArchivedSchedules: $("#allowDeleteArchivedSchedules"),
   enableWorkSupervision: $("#enableWorkSupervision"),
   workSupervisionSettingControls: $("#workSupervisionSettingControls"),
   workSupervisionCountdownMinutes: $("#workSupervisionCountdownMinutes"),
@@ -9679,6 +9686,10 @@ function canEditScheduledWorkOrder(schedule) {
 }
 
 function canDeleteScheduledWorkOrder(schedule) {
+  if (["deleted", "replaced"].includes(String(schedule?.status || ""))) {
+    return isAdminProfile() && state.workOrderControlSettingsReady === true
+      && getWorkOrderControlSettings().allowDeleteArchivedSchedules === true;
+  }
   return (schedule?.editDeletePolicy !== "locked" || canOverrideLockedScheduledWorkOrder())
     && !["deleted", "replaced"].includes(String(schedule?.status || "pending"));
 }
@@ -11275,8 +11286,8 @@ function renderScheduledWorkOrderList() {
             class="btn danger scheduled-work-order-delete-btn"
             type="button"
             data-delete-scheduled-work-order="${escapeHtml(schedule.id)}"
-            aria-label="Xóa lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"
-            title="Xóa lịch"
+            aria-label="${deleted || replaced ? "Xóa vĩnh viễn lịch sử" : "Xóa lịch"} ${escapeHtml(schedule.name || "Phiếu công việc")}"
+            title="${deleted || replaced ? "Xóa vĩnh viễn dòng lịch sử" : "Xóa lịch"}"
           >×</button>` : ""}
         </div>
         <div class="scheduled-work-order-list-meta">
@@ -11410,29 +11421,51 @@ function openScheduledWorkOrderDeleteModal(scheduleId) {
     return;
   }
   if (!canDeleteScheduledWorkOrder(schedule)) {
-    toast("Lịch này đã khóa Sửa-Xóa và không thể xóa.", "info");
+    toast(["deleted", "replaced"].includes(schedule.status)
+      ? "Hãy bật quyền xóa Lịch Đã xóa và Đã thay thế trong Cài đặt trước."
+      : "Lịch này đã khóa Sửa-Xóa và không thể xóa.", "info");
     return;
   }
+  const deletingHistory = ["deleted", "replaced"].includes(schedule.status);
   state.deletingScheduledWorkOrderId = scheduleId;
   state.scheduledDeleteListScrollTop = els.scheduledWorkOrderListModal
     ?.querySelector(".scheduled-work-order-list-content")?.scrollTop || 0;
   if (els.scheduledWorkOrderDeleteSummary) {
     els.scheduledWorkOrderDeleteSummary.textContent = `“${schedule.name || "Phiếu công việc"}” • ${formatScheduledListDateTime(schedule.scheduledForMs)}`;
   }
-  if (els.scheduledWorkOrderDeleteReason) els.scheduledWorkOrderDeleteReason.value = "";
+  if (els.scheduledWorkOrderDeleteTitle) {
+    els.scheduledWorkOrderDeleteTitle.textContent = deletingHistory ? "Xóa vĩnh viễn dòng lịch sử?" : "Lý do xóa lịch";
+  }
+  els.scheduledWorkOrderDeleteReasonField?.classList.toggle("hidden", deletingHistory);
+  if (els.scheduledWorkOrderDeleteReason) {
+    els.scheduledWorkOrderDeleteReason.value = "";
+    els.scheduledWorkOrderDeleteReason.required = !deletingHistory;
+  }
+  if (els.scheduledWorkOrderDeleteWarning) {
+    els.scheduledWorkOrderDeleteWarning.textContent = deletingHistory
+      ? "Dòng lịch sử này sẽ bị xóa vĩnh viễn và không thể khôi phục. Lịch mới thay thế và các Phiếu đã giao không bị xóa."
+      : "Lịch sẽ ngừng hoạt động và chỉ còn dòng lịch sử màu hồng. Nếu Phiếu chưa giao việc đã được tạo từ lịch này, Phiếu đó cũng sẽ bị xóa. Không thể hoàn tác.";
+  }
+  if (els.confirmScheduledWorkOrderDeleteBtn) {
+    els.confirmScheduledWorkOrderDeleteBtn.textContent = deletingHistory ? "Xác nhận xóa vĩnh viễn" : "Xác nhận xóa lịch";
+  }
   els.scheduledWorkOrderDeleteError?.classList.add("hidden");
   els.scheduledWorkOrderListModal?.classList.add("hidden");
   els.scheduledWorkOrderDeleteModal?.classList.remove("hidden");
   document.body.classList.add("scheduled-delete-dialog-open");
-  requestAnimationFrame(() => els.scheduledWorkOrderDeleteReason?.focus());
+  requestAnimationFrame(() => (deletingHistory
+    ? els.confirmScheduledWorkOrderDeleteBtn
+    : els.scheduledWorkOrderDeleteReason)?.focus());
 }
 
 async function deleteScheduledWorkOrder(event) {
   event.preventDefault();
   if (state.scheduledDeleteSubmitting) return;
   const scheduleId = state.deletingScheduledWorkOrderId;
+  const schedule = state.scheduledWorkOrders.find((item) => item.id === scheduleId);
+  const deletingHistory = ["deleted", "replaced"].includes(schedule?.status);
   const reason = String(els.scheduledWorkOrderDeleteReason?.value || "").trim();
-  if (!reason || reason.length > 500) {
+  if (!deletingHistory && (!reason || reason.length > 500)) {
     if (els.scheduledWorkOrderDeleteError) {
       els.scheduledWorkOrderDeleteError.textContent = "Vui lòng nhập lý do xóa lịch (tối đa 500 ký tự).";
       els.scheduledWorkOrderDeleteError.classList.remove("hidden");
@@ -11440,7 +11473,6 @@ async function deleteScheduledWorkOrder(event) {
     els.scheduledWorkOrderDeleteReason?.focus();
     return;
   }
-  const schedule = state.scheduledWorkOrders.find((item) => item.id === scheduleId);
   if (!isAdminProfile() || !schedule || !canDeleteScheduledWorkOrder(schedule)) {
     closeScheduledWorkOrderDeleteModal();
     toast("Lịch này không còn có thể xóa.", "error");
@@ -11448,16 +11480,25 @@ async function deleteScheduledWorkOrder(event) {
   }
 
   state.scheduledDeleteSubmitting = true;
-  setButtonLoading(els.confirmScheduledWorkOrderDeleteBtn, true, "Đang xóa...");
+  setButtonLoading(els.confirmScheduledWorkOrderDeleteBtn, true, deletingHistory ? "Đang xóa vĩnh viễn..." : "Đang xóa...");
   try {
-    await deleteScheduledWorkOrderCallable({ scheduleId, reason });
-    state.scheduledWorkOrders = state.scheduledWorkOrders.map((item) => item.id === scheduleId
-      ? { ...item, status: "deleted", deletionReason: reason, deletedAtMs: Date.now() }
-      : item);
+    if (deletingHistory) {
+      await purgeScheduledWorkOrderHistoryCallable({ scheduleId, historyStatus: schedule.status });
+      state.scheduledWorkOrders = state.scheduledWorkOrders.filter((item) => (
+        item.id !== scheduleId || item.status !== schedule.status
+      ));
+    } else {
+      await deleteScheduledWorkOrderCallable({ scheduleId, reason });
+      state.scheduledWorkOrders = state.scheduledWorkOrders.map((item) => item.id === scheduleId
+        ? { ...item, status: "deleted", deletionReason: reason, deletedAtMs: Date.now() }
+        : item);
+    }
     renderScheduledWorkOrderList();
     state.scheduledDeleteSubmitting = false;
     closeScheduledWorkOrderDeleteModal();
-    toast(`Đã xóa lịch “${schedule.name || "Phiếu công việc"}”; dòng lịch sử vẫn được giữ lại.`, "success");
+    toast(deletingHistory
+      ? `Đã xóa vĩnh viễn dòng lịch sử “${schedule.name || "Phiếu công việc"}”.`
+      : `Đã xóa lịch “${schedule.name || "Phiếu công việc"}”; dòng lịch sử vẫn được giữ lại.`, "success");
   } catch (error) {
     console.error(error);
     if (els.scheduledWorkOrderDeleteError) {
@@ -12636,6 +12677,9 @@ function openWorkOrderSettingsModal() {
   if (els.allowEditDeleteLockedSchedules) {
     els.allowEditDeleteLockedSchedules.checked = settings.allowEditDeleteLockedSchedules;
   }
+  if (els.allowDeleteArchivedSchedules) {
+    els.allowDeleteArchivedSchedules.checked = settings.allowDeleteArchivedSchedules;
+  }
   if (els.enableWorkSupervision) {
     els.enableWorkSupervision.checked = settings.workSupervisionEnabled;
   }
@@ -12837,6 +12881,7 @@ els.workOrderSettingsForm?.addEventListener("submit", async (event) => {
       allowEditCompletedTaskActualTime: els.allowEditCompletedTaskActualTime?.checked === true,
       allowAdminHotelTimeEditing: els.allowAdminHotelTimeEditing?.checked === true,
       allowEditDeleteLockedSchedules: els.allowEditDeleteLockedSchedules?.checked === true,
+      allowDeleteArchivedSchedules: els.allowDeleteArchivedSchedules?.checked === true,
       workSupervisionEnabled: supervisionEnabled,
       workSupervisionCountdownMinutes: supervisionCountdownMinutes,
       workSupervisionLunchCreditMinutes: supervisionLunchCreditMinutes,

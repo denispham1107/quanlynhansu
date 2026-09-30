@@ -29,7 +29,7 @@ const buildHelpers = new Function(`
     scheduledWorkOrderDateFromFilter: "",
     scheduledWorkOrderDateToFilter: "",
     workOrderControlSettingsReady: true,
-    workOrderControlSettings: { allowEditDeleteLockedSchedules: false }
+    workOrderControlSettings: { allowEditDeleteLockedSchedules: false, allowDeleteArchivedSchedules: false }
   };
   let admin = true;
   const isAdminProfile = () => admin;
@@ -156,12 +156,26 @@ assert.equal(helpers.canEditScheduledWorkOrder({ status: "deleted", editDeletePo
 assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "deleted", editDeletePolicy: "editable" }), false);
 assert.equal(helpers.canEditScheduledWorkOrder({ status: "replaced", editDeletePolicy: "editable" }), false);
 assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "replaced", editDeletePolicy: "editable" }), false);
+helpers.state.workOrderControlSettings.allowDeleteArchivedSchedules = true;
+assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "deleted", editDeletePolicy: "locked" }), true);
+assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "replaced", editDeletePolicy: "locked" }), true);
+assert.equal(helpers.canEditScheduledWorkOrder({ status: "replaced", editDeletePolicy: "editable" }), false);
+helpers.setAdmin(false);
+assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "deleted" }), false);
+helpers.setAdmin(true);
+helpers.state.workOrderControlSettingsReady = false;
+assert.equal(helpers.canDeleteScheduledWorkOrder({ status: "replaced" }), false);
+helpers.state.workOrderControlSettingsReady = true;
+helpers.state.workOrderControlSettings.allowDeleteArchivedSchedules = false;
 assert.match(pageSource, /<option value="deleted">Đã xóa<\/option>/);
 assert.match(pageSource, /<option value="replaced">Đã thay thế<\/option>/);
 assert.match(pageSource, /<strong>Cho phép xóa các lịch có Quyền không cho Sửa-Xóa<\/strong>/);
 assert.match(pageSource, /<input id="allowEditDeleteLockedSchedules" type="checkbox"/);
 assert.match(appSource, /allowEditDeleteLockedSchedules: input\.allowEditDeleteLockedSchedules === true/);
 assert.match(appSource, /allowEditDeleteLockedSchedules: els\.allowEditDeleteLockedSchedules\?\.checked === true/);
+assert.match(pageSource, /<input id="allowDeleteArchivedSchedules" type="checkbox"/);
+assert.match(appSource, /allowDeleteArchivedSchedules: input\.allowDeleteArchivedSchedules === true/);
+assert.match(appSource, /allowDeleteArchivedSchedules: els\.allowDeleteArchivedSchedules\?\.checked === true/);
 assert.match(pageSource, /<select id="scheduledWorkOrderEditDeletePolicy">\s*<option value="editable" selected>Cho phép Sửa-Xóa<\/option>\s*<option value="locked">Không cho Sửa-Xóa<\/option>/);
 const scheduleSave = appSource.slice(
   appSource.indexOf("async function createScheduledWorkOrder(button)"),
@@ -171,4 +185,4 @@ assert.ok(scheduleSave.indexOf("const savedSchedule = refreshedSchedules.find") 
 assert.match(scheduleSave, /savedSchedule\.editDeletePolicy !== editDeletePolicy/);
 assert.match(scheduleSave, /editDeletePolicy === "locked" && result\?\.data\?\.editDeletePolicy !== "locked"/);
 
-console.log("PASS | Hai mức quyền lịch và kiểm tra máy chủ đã lưu quyền trước khi báo thành công.");
+console.log("PASS | Quyền lịch khóa và quyền xóa vĩnh viễn lịch sử được tách riêng, chỉ Admin có quyền.");

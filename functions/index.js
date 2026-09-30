@@ -293,10 +293,12 @@ exports.saveWorkOrderControlSettings = onCall({
   const rawHideEndTaskButton = request.data?.hideEndTaskButton;
   const rawAllowAdminHotelTimeEditing = request.data?.allowAdminHotelTimeEditing;
   const rawAllowEditDeleteLockedSchedules = request.data?.allowEditDeleteLockedSchedules;
+  const rawAllowDeleteArchivedSchedules = request.data?.allowDeleteArchivedSchedules;
   const existingSettingsSnap = rawPreventDispatchedPhotoRequirementEditing === undefined
     || rawHideEndTaskButton === undefined
     || rawAllowAdminHotelTimeEditing === undefined
     || rawAllowEditDeleteLockedSchedules === undefined
+    || rawAllowDeleteArchivedSchedules === undefined
     ? await db.doc("appSettings/workOrderControls").get()
     : null;
   const preventDispatchedPhotoRequirementEditing = rawPreventDispatchedPhotoRequirementEditing === undefined
@@ -311,6 +313,9 @@ exports.saveWorkOrderControlSettings = onCall({
   const allowEditDeleteLockedSchedules = rawAllowEditDeleteLockedSchedules === undefined
     ? existingSettingsSnap?.data()?.allowEditDeleteLockedSchedules === true
     : rawAllowEditDeleteLockedSchedules;
+  const allowDeleteArchivedSchedules = rawAllowDeleteArchivedSchedules === undefined
+    ? existingSettingsSnap?.data()?.allowDeleteArchivedSchedules === true
+    : rawAllowDeleteArchivedSchedules;
   const allowOverdueTimeExtension = request.data?.allowOverdueTimeExtension;
   const rawAllowEditCompletedTaskActualTime = request.data?.allowEditCompletedTaskActualTime;
   const allowEditCompletedTaskActualTime = rawAllowEditCompletedTaskActualTime === undefined
@@ -358,6 +363,9 @@ exports.saveWorkOrderControlSettings = onCall({
   }
   if (typeof allowEditDeleteLockedSchedules !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị quyền sửa, xóa lịch đã khóa không hợp lệ.");
+  }
+  if (typeof allowDeleteArchivedSchedules !== "boolean") {
+    throw new HttpsError("invalid-argument", "Giá trị quyền xóa lịch sử lịch không hợp lệ.");
   }
   if (typeof workSupervisionEnabled !== "boolean") {
     throw new HttpsError("invalid-argument", "Giá trị Giám sát công việc không hợp lệ.");
@@ -433,6 +441,7 @@ exports.saveWorkOrderControlSettings = onCall({
     allowEditCompletedTaskActualTime,
     allowAdminHotelTimeEditing,
     allowEditDeleteLockedSchedules,
+    allowDeleteArchivedSchedules,
     workSupervisionEnabled,
     workSupervisionCountdownMinutes,
     workSupervisionLunchCreditMinutes,
@@ -465,6 +474,7 @@ exports.saveWorkOrderControlSettings = onCall({
       allowEditCompletedTaskActualTime,
       allowAdminHotelTimeEditing,
       allowEditDeleteLockedSchedules,
+      allowDeleteArchivedSchedules,
       workSupervisionEnabled,
       workSupervisionCountdownMinutes,
       workSupervisionLunchCreditMinutes,
@@ -1585,6 +1595,49 @@ exports.deleteScheduledWorkOrder = onCall({
     deletedGeneratedDraft: shouldRemoveGeneratedDraft,
     deletedDocumentCount: refs.length + 1
   };
+});
+
+exports.purgeScheduledWorkOrderHistory = onCall({
+  region: REGION,
+  timeoutSeconds: 30,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  await assertAdmin(adminUid);
+  const scheduleId = String(request.data?.scheduleId || "").trim();
+  const historyStatus = String(request.data?.historyStatus || "").trim();
+  if (!scheduleId || scheduleId.includes("/") || scheduleId.length > 180) {
+    throw new HttpsError("invalid-argument", "Lịch Phiếu công việc không hợp lệ.");
+  }
+  if (historyStatus !== "deleted" && historyStatus !== "replaced") {
+    throw new HttpsError("invalid-argument", "Chỉ được xóa lịch sử Đã xóa hoặc Đã thay thế.");
+  }
+  const historyCollection = historyStatus === "deleted"
+    ? "deletedScheduledWorkOrders"
+    : "replacedScheduledWorkOrders";
+
+  const historyRef = db.doc(`${historyCollection}/${scheduleId}`);
+  const settingsRef = db.doc("appSettings/workOrderControls");
+  await db.runTransaction(async (transaction) => {
+    const [historySnapshot, settingsSnapshot] = await transaction.getAll(historyRef, settingsRef);
+    if (settingsSnapshot.data()?.allowDeleteArchivedSchedules !== true) {
+      throw new HttpsError("failed-precondition", "Cài đặt xóa lịch Đã xóa và Đã thay thế chưa được bật.");
+    }
+    if (!historySnapshot.exists) {
+      throw new HttpsError("not-found", "Dòng lịch sử này không còn tồn tại.");
+    }
+    const history = historySnapshot.data() || {};
+    if (String(history.createdByUid || "") !== adminUid) {
+      throw new HttpsError("permission-denied", "Bạn không có quyền xóa dòng lịch sử này.");
+    }
+    if (String(history.status || "") !== historyStatus) {
+      throw new HttpsError("failed-precondition", "Trạng thái dòng lịch sử đã thay đổi.");
+    }
+    transaction.delete(historyRef);
+  });
+
+  return { deleted: true, scheduleId, historyStatus };
 });
 
 exports.convertScheduledGeneratedWorkOrderToDraft = onCall({

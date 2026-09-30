@@ -47,4 +47,4 @@ assert.match(page, /\.scheduled-work-order-list-item\.is-deleted\s*\{[^}]*backgr
 assert.match(page, /<textarea id="scheduledWorkOrderDeleteReason"[^>]*maxlength="500" required/);
 assert.match(page, /id="confirmScheduledWorkOrderDeleteBtn"[^>]*type="submit">Xác nhận xóa lịch/);
 
-console.log("PASS | Xóa lịch lưu dấu vết riêng, xóa lịch hoạt động và hiển thị dòng đỏ không có thao tác.");
+console.log("PASS | Xóa lịch hoạt động giữ dòng lịch sử màu đỏ; quyền xóa vĩnh viễn được kiểm tra riêng.");

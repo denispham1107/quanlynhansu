@@ -11602,10 +11602,12 @@
       </div>
       <form id="scheduledWorkOrderDeleteForm" class="scheduled-work-order-delete-form">
         <div class="scheduled-work-order-delete-content">
-          <label for="scheduledWorkOrderDeleteReason">Lý do xóa <span aria-hidden="true">*</span></label>
-          <textarea id="scheduledWorkOrderDeleteReason" rows="4" maxlength="500" required placeholder="Nhập lý do xóa lịch..."></textarea>
+          <div id="scheduledWorkOrderDeleteReasonField" class="scheduled-work-order-delete-reason-field">
+            <label for="scheduledWorkOrderDeleteReason">Lý do xóa <span aria-hidden="true">*</span></label>
+            <textarea id="scheduledWorkOrderDeleteReason" rows="4" maxlength="500" required placeholder="Nhập lý do xóa lịch..."></textarea>
+          </div>
           <p id="scheduledWorkOrderDeleteError" class="scheduled-work-order-delete-error hidden" role="alert"></p>
-          <p class="scheduled-work-order-delete-warning">Lịch sẽ ngừng hoạt động và chỉ còn dòng lịch sử màu hồng. Nếu Phiếu chưa giao việc đã được tạo từ lịch này, Phiếu đó cũng sẽ bị xóa. Không thể hoàn tác.</p>
+          <p id="scheduledWorkOrderDeleteWarning" class="scheduled-work-order-delete-warning">Lịch sẽ ngừng hoạt động và chỉ còn dòng lịch sử màu hồng. Nếu Phiếu chưa giao việc đã được tạo từ lịch này, Phiếu đó cũng sẽ bị xóa. Không thể hoàn tác.</p>
         </div>
         <div class="modal-footer-actions">
           <button class="btn ghost" type="button" data-cancel-scheduled-delete>Hủy</button>
@@ -11997,7 +11999,18 @@
             </span>
             <input id="allowEditDeleteLockedSchedules" type="checkbox" />
           </label>
-          <p class="work-order-setting-help">Mặc định tắt. Lịch đã giao việc, đã xóa hoặc đã thay thế vẫn giữ giới hạn theo trạng thái.</p>
+          <p class="work-order-setting-help">Mặc định tắt. Lịch đã giao việc vẫn giữ giới hạn theo trạng thái; lịch sử Đã xóa và Đã thay thế có lựa chọn riêng bên dưới.</p>
+        </section>
+
+        <section class="work-order-setting-section is-danger-setting">
+          <label class="work-order-setting-toggle-row" for="allowDeleteArchivedSchedules">
+            <span class="work-order-setting-toggle-copy">
+              <strong>Cho phép xóa các Lịch Đã xóa và Đã thay thế</strong>
+              <span>Khi bật, Admin có thể xóa vĩnh viễn các dòng lịch sử màu đỏ nhạt và xanh dương nhạt trong Danh sách lịch Phiếu công việc.</span>
+            </span>
+            <input id="allowDeleteArchivedSchedules" type="checkbox" />
+          </label>
+          <p class="work-order-setting-warning">Mặc định tắt. Xóa vĩnh viễn dòng lịch sử không thể hoàn tác; lịch mới và Phiếu đã giao không bị xóa theo.</p>
         </section>
 
         <section class="work-order-setting-section is-danger-setting">
@@ -12182,7 +12195,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20260930-schedule-list-full-page-v119"></script>
+  <script type="module" src="app.js?v=20260930-archive-schedule-purge-v120"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -13065,7 +13078,11 @@
     display:grid; gap:9px; min-width:0; min-height:0; padding:0 2px 8px;
     overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
   }
-  #scheduledWorkOrderDeleteModal .scheduled-work-order-delete-content > label { font-weight:850; }
+  #scheduledWorkOrderDeleteModal .scheduled-work-order-delete-reason-field {
+    display:grid; gap:9px; min-width:0;
+  }
+  #scheduledWorkOrderDeleteModal .scheduled-work-order-delete-reason-field > label { font-weight:850; }
+  #scheduledWorkOrderDeleteModal .scheduled-work-order-delete-reason-field.hidden { display:none!important; }
   #scheduledWorkOrderDeleteModal #scheduledWorkOrderDeleteReason {
     display:block; width:100%; min-width:0; max-width:100%; min-height:92px;
     padding:12px; box-sizing:border-box; resize:vertical; border:1px solid #fda4af;
