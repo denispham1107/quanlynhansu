@@ -715,7 +715,7 @@ await send("Runtime.evaluate", {
     ticket.style.maxWidth = "840px";
     ticket.style.boxSizing = "border-box";
     ticket.innerHTML = '<div class="ticket-group-toolbar">'
-      + '<div class="ticket-group-header"><div><span class="ticket-badge">Chưa giao việc</span><h4>Phiếu được tạo từ lịch - 1 công việc</h4></div></div>'
+      + '<div class="ticket-group-header"><div><span class="ticket-badge">Chưa giao việc</span><h4><button class="scheduled-ticket-source-link" type="button">Phiếu được tạo từ lịch - 1 công việc</button></h4></div></div>'
       + '<div class="ticket-actions">'
       + '<button class="btn ghost small" type="button">✏️ Chỉnh sửa</button>'
       + '<button class="btn ghost small" type="button">🗓 Dời lịch</button>'
@@ -743,11 +743,13 @@ for (const profile of profiles) {
     expression: `(() => {
       const ticket = document.getElementById("scheduledRescheduleLayoutFixture");
       const buttons = [...ticket.querySelectorAll(".ticket-actions .btn")];
+      const sourceLink = ticket.querySelector(".scheduled-ticket-source-link").getBoundingClientRect();
       const card = ticket.getBoundingClientRect();
       const boxes = buttons.map((button) => button.getBoundingClientRect());
       return {
         fiveButtons: buttons.length === 5,
         cardInsideViewport: card.left >= -0.5 && card.right <= innerWidth + 0.5,
+        sourceLinkInsideCard: sourceLink.left >= card.left - 0.5 && sourceLink.right <= card.right + 0.5,
         buttonsInsideCard: boxes.every((box) => box.left >= card.left - 0.5 && box.right <= card.right + 0.5),
         buttonsDoNotOverlap: boxes.every((box, index) => boxes.every((other, otherIndex) =>
           index === otherIndex || box.right <= other.left + 0.5 || other.right <= box.left + 0.5
@@ -758,7 +760,7 @@ for (const profile of profiles) {
     })()`
   });
   const result = measurement.result.value;
-  const passed = result.fiveButtons && result.cardInsideViewport && result.buttonsInsideCard
+  const passed = result.fiveButtons && result.cardInsideViewport && result.sourceLinkInsideCard && result.buttonsInsideCard
     && result.buttonsDoNotOverlap && result.scrollWidth <= result.viewportWidth;
   console.log(`${passed ? "PASS" : "FAIL"} | Nút Đã mang đến ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
   if (!passed) failures.push({ profile: `Nút Đã mang đến ${profile.name}`, result });
@@ -766,6 +768,53 @@ for (const profile of profiles) {
 
 await send("Runtime.evaluate", {
   expression: `(() => {
+    document.getElementById("scheduledArrivalModal").classList.remove("hidden");
+    document.body.classList.add("destructive-confirm-open");
+    return true;
+  })()`
+});
+
+for (const profile of profiles) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: profile.width,
+    height: profile.height,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
+    screenWidth: profile.width,
+    screenHeight: profile.height,
+  });
+  await delay(80);
+  const measurement = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const modal = document.getElementById("scheduledArrivalModal");
+      const card = modal.querySelector(".scheduled-arrival-card");
+      const options = [...modal.querySelectorAll(".scheduled-arrival-option")];
+      const cardBox = card.getBoundingClientRect();
+      const optionBoxes = options.map((option) => option.getBoundingClientRect());
+      return {
+        twoOptions: options.length === 2,
+        cardInsideViewport: cardBox.left >= -0.5 && cardBox.right <= innerWidth + 0.5
+          && cardBox.top >= -0.5 && cardBox.bottom <= innerHeight + 0.5,
+        optionsInsideCard: optionBoxes.every((box) => box.left >= cardBox.left - 0.5 && box.right <= cardBox.right + 0.5),
+        optionsDoNotOverlap: optionBoxes.length === 2 && optionBoxes[0].bottom <= optionBoxes[1].top + 0.5,
+        pageScrollLocked: getComputedStyle(document.body).overflow === "hidden",
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth
+      };
+    })()`
+  });
+  const result = measurement.result.value;
+  const passed = result.twoOptions && result.cardInsideViewport && result.optionsInsideCard
+    && result.optionsDoNotOverlap && result.pageScrollLocked && result.scrollWidth <= result.viewportWidth;
+  console.log(`${passed ? "PASS" : "FAIL"} | Chọn Spa hoặc Hotel ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
+  if (!passed) failures.push({ profile: `Chọn Spa hoặc Hotel ${profile.name}`, result });
+}
+
+await send("Runtime.evaluate", {
+  expression: `(() => {
+    document.getElementById("scheduledArrivalModal")?.classList.add("hidden");
+    document.body.classList.remove("destructive-confirm-open");
     document.getElementById("scheduledRescheduleLayoutFixture")?.remove();
     document.getElementById("adminView")?.classList.add("hidden");
     document.getElementById("workOrderSettingsModal")?.classList.remove("hidden");

@@ -8,6 +8,7 @@ const {
   ordinaryDraftTaskUpdate,
   isScheduledDraftConversionUpdate,
   convertedScheduleUpdate,
+  hotelDeliveredScheduleUpdate,
   linkedLunchCompletionUpdate
 } = require("./scheduled-conversion");
 
@@ -39,6 +40,14 @@ assert.equal(schedulePatch.generatedWorkOrderId, "");
 assert.equal(schedulePatch.assignmentDeadlineAt, null);
 assert.equal(schedulePatch.timeoutProcessedAt, now);
 
+const hotelPatch = hotelDeliveredScheduleUpdate(now, "admin-1");
+assert.equal(hotelPatch.status, "assigned");
+assert.equal(hotelPatch.hotelDelivered, true);
+assert.equal(hotelPatch.hotelDeliveredAt, now);
+assert.equal(hotelPatch.hotelDeliveredByUid, "admin-1");
+assert.equal(hotelPatch.generatedWorkOrderId, "");
+assert.equal(hotelPatch.assignmentDeadlineAt, null);
+
 const lunch = linkedLunchCompletionUpdate({
   queueStartAt: new Date("2026-09-30T08:05:00.000Z"),
   accumulatedWorkedMs: 0,
@@ -52,7 +61,7 @@ assert.equal(lunch.autoCompletedByScheduledConversion, true);
 assert.equal(lunch.convertedScheduledWorkOrderId, "ticket-1");
 
 const server = readFileSync(join(__dirname, "index.js"), "utf8");
-const start = server.indexOf("exports.convertScheduledGeneratedWorkOrderToDraft = onCall(");
+const start = server.indexOf("async function processScheduledGeneratedWorkOrderArrival(");
 const end = server.indexOf("async function materializeScheduledWorkOrderById(", start);
 assert.ok(start >= 0 && end > start);
 const conversion = server.slice(start, end);
@@ -66,10 +75,15 @@ assert.match(conversion, /tasks\.length !== Number\(workOrder\.taskCount \|\| 0\
 assert.match(conversion, /transaction\.update\(scheduleRef, convertedScheduleUpdate/);
 assert.match(conversion, /transaction\.update\(workOrderRef, ordinaryDraftWorkOrderUpdate/);
 assert.match(conversion, /transaction\.update\(item\.ref, ordinaryDraftTaskUpdate/);
+assert.match(conversion, /arrivalType === "hotel"/);
+assert.match(conversion, /transaction\.update\(scheduleRef, hotelDeliveredScheduleUpdate/);
+assert.match(conversion, /transaction\.delete\(workOrderRef\)/);
+assert.match(conversion, /tasks\.forEach\(\(item\) => transaction\.delete\(item\.ref\)\)/);
 assert.match(conversion, /linkedLunchCompletionUpdate/);
 assert.match(conversion, /await ensureNextDailyScheduledOccurrence\(conversion\.scheduleId, conversion\)/);
-assert.doesNotMatch(conversion, /transaction\.delete\(/);
+assert.match(conversion, /exports\.convertScheduledGeneratedWorkOrderToDraft = onCall\([\s\S]*?processScheduledGeneratedWorkOrderArrival\(request, "spa"\)/);
+assert.match(conversion, /exports\.markScheduledHotelDelivered = onCall\([\s\S]*?processScheduledGeneratedWorkOrderArrival\(request, "hotel"\)/);
 assert.match(server, /\["assigned", "cancelled", "converted", "deleting", "updating"\]/);
 assert.match(server, /if \(isScheduledDraftConversionUpdate\(beforeTask, afterTask\)\) return;/);
 
-console.log("PASS | Chuyển Phiếu giữ nguyên nội dung, dừng bộ đếm lịch và chỉ kết thúc nghỉ trưa tự động liên quan.");
+console.log("PASS | Spa giữ Phiếu thường; Hotel xóa Phiếu chờ, đánh dấu lịch đã giao và lưu Hotel đã mang đến.");

@@ -9,20 +9,26 @@ const server = readFileSync(join(root, "functions", "index.js"), "utf8");
 const html = readFileSync(join(root, "index.html"), "utf8");
 
 const ticketActions = app.slice(app.indexOf("function renderTicketGroup("), app.indexOf("function renderTicketGroup(") + 4800);
-assert.ok(ticketActions.indexOf('data-action="convert-scheduled-draft"') >= 0);
+assert.ok(ticketActions.indexOf('data-action="open-scheduled-arrival-choice"') >= 0);
+assert.ok(ticketActions.indexOf('data-action="open-scheduled-source"') >= 0);
 assert.ok(ticketActions.indexOf('data-action="edit-scheduled-draft"') >= 0);
 assert.ok(ticketActions.indexOf('data-action="edit-scheduled-draft"') < ticketActions.indexOf('data-action="reschedule-scheduled-draft"'));
-assert.ok(ticketActions.indexOf('data-action="reschedule-scheduled-draft"') < ticketActions.indexOf('data-action="convert-scheduled-draft"'));
-assert.ok(ticketActions.indexOf('data-action="convert-scheduled-draft"') < ticketActions.indexOf('data-action="open-scheduled-group-assignment"'));
+assert.ok(ticketActions.indexOf('data-action="reschedule-scheduled-draft"') < ticketActions.indexOf('data-action="open-scheduled-arrival-choice"'));
+assert.ok(ticketActions.indexOf('data-action="open-scheduled-arrival-choice"') < ticketActions.indexOf('data-action="open-scheduled-group-assignment"'));
 assert.match(ticketActions, /scheduledEditDeletePolicy !== "locked"/);
 assert.match(ticketActions, /scheduleOriginallyEditable \|\| canOverrideLockedScheduledWorkOrder\(\)/);
-assert.match(ticketActions, /if \(scheduleOriginallyEditable\) \{\s*actionButtons\.push\(`<button class="btn secondary small" data-action="convert-scheduled-draft"/);
+assert.match(ticketActions, /if \(scheduleOriginallyEditable\) \{\s*actionButtons\.push\(`<button class="btn secondary small" data-action="open-scheduled-arrival-choice"/);
 assert.match(app, /if \(action === "reschedule-scheduled-draft"\) \{\s*await openScheduledWorkOrderEditorFromTicket/);
-assert.match(app, /if \(state\.scheduledEditorReturnToDashboard\) \{\s*closeTaskModal\(\);/);
+assert.match(app, /if \(state\.scheduledEditorReturnToDashboard\) closeTaskModal\(\);/);
 assert.match(app, /state\.scheduledEditorReturnToDashboard \? "← Quay lại trang quản lý"/);
-assert.match(app, /if \(action === "convert-scheduled-draft"\) \{\s*await convertScheduledTicketToOrdinaryDraft/);
+assert.match(app, /if \(action === "open-scheduled-arrival-choice"\) \{\s*openScheduledArrivalChoice/);
+assert.match(app, /if \(action === "open-scheduled-source"\) \{\s*await openScheduledWorkOrderListFromTicket/);
 assert.match(app, /converted: "Đã chuyển thành Phiếu thường"/);
 assert.match(html, /<option value="converted">Đã chuyển thành Phiếu thường<\/option>/);
+assert.match(html, /data-scheduled-arrival-choice="spa"/);
+assert.match(html, /data-scheduled-arrival-choice="hotel"/);
+assert.match(app, /schedule\.hotelDelivered === true[\s\S]*?Hotel đã mang đến/);
+assert.match(server, /hotelDelivered: item\.hotelDelivered === true/);
 
 assert.match(html, /id="cancelScheduledDraftEditBtn"[^>]*>Hủy<\/button>/);
 assert.match(html, /id="saveScheduledDraftEditBtn"[^>]*>💾 Lưu<\/button>/);
@@ -116,6 +122,28 @@ await navigation.openScheduledWorkOrderEditorFromTicket("ticket-1", navigation.b
 assert.equal(navigation.calls.some((call) => call[0] === "loading"), false);
 assert.equal(navigation.calls.some((call) => call[0] === "open"), false);
 
+const sourceNavigation = new Function(`
+  const state = {
+    workOrders: [{ id: "ticket-1", scheduleId: "schedule-1", scheduledWorkOrder: true,
+      status: "draft", scheduledGroupAssignmentPending: true }]
+  };
+  const button = {};
+  const calls = [];
+  const window = { scrollY: 310 };
+  const isAdminProfile = () => true;
+  const toast = (message) => calls.push(["toast", message]);
+  const setButtonLoading = (_, loading) => calls.push(["loading", loading]);
+  const openScheduledWorkOrderListModal = async (options) => calls.push(["list", options]);
+  ${extractFunction("openScheduledWorkOrderListFromTicket")}
+  return { state, button, calls, openScheduledWorkOrderListFromTicket };
+`)();
+await sourceNavigation.openScheduledWorkOrderListFromTicket("ticket-1", sourceNavigation.button);
+assert.deepEqual(sourceNavigation.calls.find((call) => call[0] === "list"), ["list", {
+  focusScheduleId: "schedule-1",
+  focusMissingMessage: "Không còn tìm thấy lịch đã tạo ra Phiếu này."
+}]);
+assert.equal(sourceNavigation.state.schedulePageReturnScrollY, 310);
+
 const conversion = new Function(`
   const state = {
     workOrders: [{ id: "ticket-1", name: "Phiếu thử", scheduleId: "schedule-1", scheduledWorkOrder: true,
@@ -132,7 +160,11 @@ const conversion = new Function(`
   const requestDestructiveConfirmation = async () => allow;
   const setButtonLoading = (_, loading) => calls.push(["loading", loading]);
   const convertScheduledGeneratedWorkOrderToDraftCallable = async (payload) => {
-    calls.push(["call", payload]);
+    calls.push(["spa-call", payload]);
+    return { data: { converted: true } };
+  };
+  const markScheduledHotelDeliveredCallable = async (payload) => {
+    calls.push(["hotel-call", payload]);
     return { data: { converted: true } };
   };
   const renderAdminTasks = () => calls.push(["render"]);
@@ -141,11 +173,11 @@ const conversion = new Function(`
     convertScheduledTicketToOrdinaryDraft };
 `)();
 await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button);
-assert.equal(conversion.calls.some((call) => call[0] === "call"), false);
+assert.equal(conversion.calls.some((call) => call[0].endsWith("call")), false);
 assert.equal(conversion.state.workOrders[0].scheduledWorkOrder, true);
 conversion.setAllowed(true);
 await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button);
-assert.deepEqual(conversion.calls.find((call) => call[0] === "call"), ["call", { workOrderId: "ticket-1" }]);
+assert.deepEqual(conversion.calls.find((call) => call[0] === "spa-call"), ["spa-call", { workOrderId: "ticket-1" }]);
 assert.equal(conversion.state.workOrders[0].scheduledWorkOrder, false);
 assert.equal(conversion.state.tasks[0].scheduledWorkOrder, false);
 assert.equal(conversion.state.scheduledWorkOrders[0].status, "converted");
@@ -154,6 +186,16 @@ conversion.calls.length = 0;
 conversion.state.workOrders[0] = { ...conversion.state.workOrders[0], scheduleId: "schedule-1",
   scheduledWorkOrder: true, scheduledGroupAssignmentPending: true, scheduledEditDeletePolicy: "locked" };
 await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button);
-assert.equal(conversion.calls.some((call) => call[0] === "call"), false);
+assert.equal(conversion.calls.some((call) => call[0].endsWith("call")), false);
 
-console.log("PASS | Nút Đã mang đến chỉ chuyển sau xác nhận, giữ Phiếu và chặn lịch khóa; Dời lịch vẫn mở đúng lịch.");
+conversion.calls.length = 0;
+conversion.state.workOrders[0] = { ...conversion.state.workOrders[0], scheduledEditDeletePolicy: "editable" };
+conversion.state.tasks[0] = { ...conversion.state.tasks[0], scheduledWorkOrder: true, scheduleId: "schedule-1" };
+await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button, "hotel");
+assert.deepEqual(conversion.calls.find((call) => call[0] === "hotel-call"), ["hotel-call", { workOrderId: "ticket-1" }]);
+assert.equal(conversion.state.workOrders.length, 0);
+assert.equal(conversion.state.tasks.length, 0);
+assert.equal(conversion.state.scheduledWorkOrders[0].status, "assigned");
+assert.equal(conversion.state.scheduledWorkOrders[0].hotelDelivered, true);
+
+console.log("PASS | Tiêu đề mở đúng lịch; Đã mang đến cho chọn Spa/Hotel, chặn lịch khóa và xử lý đúng từng loại.");

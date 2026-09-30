@@ -51,6 +51,24 @@ function convertedScheduleUpdate(now, adminUid, workOrderId) {
   };
 }
 
+function hotelDeliveredScheduleUpdate(now, adminUid) {
+  return {
+    status: "assigned",
+    assignedAt: now,
+    assignedToUid: "",
+    assignedToName: "Hotel",
+    hotelDelivered: true,
+    hotelDeliveredAt: now,
+    hotelDeliveredByUid: adminUid,
+    generatedWorkOrderId: "",
+    assignmentDeadlineAt: null,
+    assignmentCountdownStartedAt: null,
+    assignmentCountdownWaitingForAvailableEmployee: false,
+    timeoutProcessedAt: now,
+    updatedAt: now
+  };
+}
+
 function timestampMs(value) {
   if (value && typeof value.toMillis === "function") return value.toMillis();
   if (value instanceof Date) return value.getTime();
@@ -91,5 +109,6 @@ module.exports = {
   ordinaryDraftTaskUpdate,
   isScheduledDraftConversionUpdate,
   convertedScheduleUpdate,
+  hotelDeliveredScheduleUpdate,
   linkedLunchCompletionUpdate
 };

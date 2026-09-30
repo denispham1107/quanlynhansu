@@ -41,7 +41,7 @@ assert.match(save, /await openScheduledWorkOrderListModal\(\{ focusScheduleId: c
 assert.ok(save.indexOf("resetScheduledWorkOrderFormForCreate();") < save.indexOf("focusScheduleId: createdScheduleId"));
 assert.doesNotMatch(save, /closeTaskModal\(\);[\s\S]{0,300}Đã lên lịch Phiếu/);
 
-assert.match(openList, /function openScheduledWorkOrderListModal\(\{ focusScheduleId = "" \} = \{\}\)/);
+assert.match(openList, /function openScheduledWorkOrderListModal\(\{ focusScheduleId = "", focusMissingMessage = "" \} = \{\}\)/);
 assert.match(openList, /state\.scheduledWorkOrders = Array\.isArray\(result\?\.data\?\.schedules\)/);
 assert.match(openList, /if \(focusScheduleId\) \{\s*showScheduledWorkOrderInList\(focusScheduleId/);
 assert.ok(openList.indexOf("state.scheduledWorkOrders =") < openList.indexOf("showScheduledWorkOrderInList(focusScheduleId"));

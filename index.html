@@ -6984,6 +6984,80 @@
       box-shadow: 0 12px 26px rgba(220, 38, 38, 0.22);
     }
 
+    .scheduled-arrival-card {
+      border-color: rgba(20, 184, 166, 0.34);
+    }
+
+    .scheduled-arrival-icon {
+      background: #ccfbf1;
+      color: #0f766e;
+    }
+
+    .scheduled-arrival-card .destructive-confirm-kicker {
+      color: #0f766e;
+    }
+
+    .scheduled-arrival-options {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+      min-width: 0;
+      margin-top: 18px;
+    }
+
+    .scheduled-arrival-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid #bae6fd;
+      border-radius: 16px;
+      background: #f0f9ff;
+      color: #0f172a;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .scheduled-arrival-option.is-hotel {
+      border-color: #c4b5fd;
+      background: #f5f3ff;
+    }
+
+    .scheduled-arrival-option:hover,
+    .scheduled-arrival-option:focus-visible {
+      border-color: #0d9488;
+      outline: 3px solid rgba(20, 184, 166, 0.18);
+    }
+
+    .scheduled-arrival-option > span:first-child {
+      font-size: 25px;
+    }
+
+    .scheduled-arrival-option > span:last-child {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .scheduled-arrival-option strong {
+      font-size: 16px;
+    }
+
+    .scheduled-arrival-option small {
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+
+    .scheduled-arrival-actions {
+      grid-template-columns: minmax(0, 1fr);
+      margin-top: 14px;
+    }
+
     @media (max-width: 480px) {
       .destructive-confirm-card {
         padding: 20px 16px 16px;
@@ -10522,6 +10596,47 @@
     </section>
   </div>
 
+  <div
+    id="scheduledArrivalModal"
+    class="destructive-confirm-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-hidden="true"
+    aria-labelledby="scheduledArrivalTitle"
+    aria-describedby="scheduledArrivalSummary"
+  >
+    <button
+      id="scheduledArrivalBackdrop"
+      class="destructive-confirm-backdrop"
+      type="button"
+      tabindex="-1"
+      aria-label="Đóng lựa chọn Đã mang đến"
+    ></button>
+    <section class="destructive-confirm-card scheduled-arrival-card">
+      <div class="destructive-confirm-heading">
+        <span class="destructive-confirm-icon scheduled-arrival-icon" aria-hidden="true">📦</span>
+        <div>
+          <p class="destructive-confirm-kicker">Đã mang đến</p>
+          <h3 id="scheduledArrivalTitle">Chọn loại Phiếu</h3>
+        </div>
+      </div>
+      <p id="scheduledArrivalSummary" class="destructive-confirm-message">Chọn cách ghi nhận Phiếu công việc.</p>
+      <div class="scheduled-arrival-options" role="group" aria-label="Loại Phiếu đã mang đến">
+        <button class="scheduled-arrival-option is-spa" type="button" data-scheduled-arrival-choice="spa">
+          <span aria-hidden="true">🌿</span>
+          <span><strong>Spa</strong><small>Giữ Phiếu và chuyển thành Phiếu Chưa giao việc bình thường.</small></span>
+        </button>
+        <button class="scheduled-arrival-option is-hotel" type="button" data-scheduled-arrival-choice="hotel">
+          <span aria-hidden="true">🏨</span>
+          <span><strong>Hotel</strong><small>Xóa Phiếu chờ và ghi lịch là Đã giao việc · Hotel đã mang đến.</small></span>
+        </button>
+      </div>
+      <div class="destructive-confirm-actions scheduled-arrival-actions">
+        <button id="scheduledArrivalCancelBtn" class="btn ghost" type="button">Hủy</button>
+      </div>
+    </section>
+  </div>
+
   <!-- Chỉ hiện form đăng nhập sau khi Firebase xác nhận không còn phiên đăng nhập. -->
   <section id="startupView" class="login-view" role="status" aria-live="polite">
     <div class="login-card startup-card">
@@ -12195,7 +12310,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20261001-schedule-save-jump-v124"></script>
+  <script type="module" src="app.js?v=20261001-scheduled-arrival-v125"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -13019,6 +13134,9 @@
   .scheduled-work-order-list-item.is-assigned {
     border-color:#86efac; background:linear-gradient(135deg,#dcfce7,#d1fae5);
   }
+  .scheduled-work-order-list-meta .scheduled-work-order-hotel-delivered-badge {
+    background:#bbf7d0; color:#166534;
+  }
   .scheduled-work-order-list-item.is-deleted {
     border-color:#fca5a5; background:linear-gradient(135deg,#fff1f2,#fef2f2);
   }
@@ -13063,6 +13181,14 @@
   .scheduled-work-order-replacement-link:focus-visible {
     background:#bfdbfe; border-color:#3b82f6; text-decoration:underline;
   }
+  .scheduled-ticket-source-link {
+    display:block; min-width:0; max-width:100%; margin:0; padding:0; border:0;
+    background:transparent; color:inherit; font:inherit; font-weight:inherit;
+    line-height:inherit; text-align:left; overflow:hidden; text-overflow:ellipsis;
+    white-space:inherit; cursor:pointer;
+  }
+  .scheduled-ticket-source-link:hover { color:#5b21b6; text-decoration:underline; }
+  .scheduled-ticket-source-link:focus-visible { outline:2px solid #7c3aed; outline-offset:3px; border-radius:4px; }
   .scheduled-work-order-list .empty-state { margin:0; }
   body.scheduled-delete-dialog-open { overflow:hidden!important; }
   #scheduledWorkOrderDeleteModal:not(.hidden) {

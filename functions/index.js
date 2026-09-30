@@ -25,6 +25,7 @@ const {
   ordinaryDraftTaskUpdate,
   isScheduledDraftConversionUpdate,
   convertedScheduleUpdate,
+  hotelDeliveredScheduleUpdate,
   linkedLunchCompletionUpdate
 } = require("./scheduled-conversion");
 const { initializeApp } = require("firebase-admin/app");
@@ -1459,6 +1460,8 @@ exports.listScheduledWorkOrders = onCall({
       assignmentCountdownStartedAtMs: firestoreTimestampOrNull(item.assignmentCountdownStartedAt)?.toMillis() || 0,
       assignmentDeadlineAtMs: firestoreTimestampOrNull(item.assignmentDeadlineAt)?.toMillis() || 0,
       generatedWorkOrderId: String(item.generatedWorkOrderId || ""),
+      hotelDelivered: item.hotelDelivered === true,
+      hotelDeliveredAtMs: firestoreTimestampOrNull(item.hotelDeliveredAt)?.toMillis() || 0,
       createdAtMs: firestoreTimestampOrNull(item.createdAt)?.toMillis() || 0,
       deletedAtMs: firestoreTimestampOrNull(item.deletedAt)?.toMillis() || 0,
       replacedAtMs: firestoreTimestampOrNull(item.replacedAt)?.toMillis() || 0,
@@ -1640,17 +1643,15 @@ exports.purgeScheduledWorkOrderHistory = onCall({
   return { deleted: true, scheduleId, historyStatus };
 });
 
-exports.convertScheduledGeneratedWorkOrderToDraft = onCall({
-  region: REGION,
-  timeoutSeconds: 120,
-  memory: "256MiB",
-  maxInstances: 20
-}, async (request) => {
+async function processScheduledGeneratedWorkOrderArrival(request, arrivalType) {
   const adminUid = assertAuthenticated(request);
   await assertAdmin(adminUid);
   const workOrderId = String(request.data?.workOrderId || "").trim();
   if (!workOrderId || workOrderId.includes("/") || workOrderId.length > 180) {
     throw new HttpsError("invalid-argument", "Phiếu công việc không hợp lệ.");
+  }
+  if (!["spa", "hotel"].includes(arrivalType)) {
+    throw new HttpsError("invalid-argument", "Lựa chọn Đã mang đến không hợp lệ.");
   }
 
   const workOrderRef = db.doc(`workOrders/${workOrderId}`);
@@ -1703,9 +1704,15 @@ exports.convertScheduledGeneratedWorkOrderToDraft = onCall({
 
     const now = Timestamp.now();
     const deletionMarker = FieldValue.delete();
-    transaction.update(scheduleRef, convertedScheduleUpdate(now, adminUid, workOrderId));
-    transaction.update(workOrderRef, ordinaryDraftWorkOrderUpdate(now, deletionMarker));
-    tasks.forEach((item) => transaction.update(item.ref, ordinaryDraftTaskUpdate(deletionMarker)));
+    if (arrivalType === "hotel") {
+      transaction.update(scheduleRef, hotelDeliveredScheduleUpdate(now, adminUid));
+      transaction.delete(workOrderRef);
+      tasks.forEach((item) => transaction.delete(item.ref));
+    } else {
+      transaction.update(scheduleRef, convertedScheduleUpdate(now, adminUid, workOrderId));
+      transaction.update(workOrderRef, ordinaryDraftWorkOrderUpdate(now, deletionMarker));
+      tasks.forEach((item) => transaction.update(item.ref, ordinaryDraftTaskUpdate(deletionMarker)));
+    }
     const activeLunchTasks = lunchSnapshot.docs.filter((item) =>
       ["lunch_break", "overdue"].includes(String(item.data()?.status || ""))
     );
@@ -1715,6 +1722,7 @@ exports.convertScheduledGeneratedWorkOrderToDraft = onCall({
 
     return {
       converted: true,
+      arrivalType,
       workOrderId,
       scheduleId,
       taskCount: tasks.length,
@@ -1735,7 +1743,24 @@ exports.convertScheduledGeneratedWorkOrderToDraft = onCall({
   }
   const { repeatMode, seriesId, scheduledAt, ...result } = conversion;
   return { ...result, recurrenceVerified };
-});
+}
+
+const scheduledArrivalCallableOptions = {
+  region: REGION,
+  timeoutSeconds: 120,
+  memory: "256MiB",
+  maxInstances: 20
+};
+
+exports.convertScheduledGeneratedWorkOrderToDraft = onCall(
+  scheduledArrivalCallableOptions,
+  async (request) => processScheduledGeneratedWorkOrderArrival(request, "spa")
+);
+
+exports.markScheduledHotelDelivered = onCall(
+  scheduledArrivalCallableOptions,
+  async (request) => processScheduledGeneratedWorkOrderArrival(request, "hotel")
+);
 
 async function materializeScheduledWorkOrderById(scheduleIdInput) {
   const scheduleId = String(scheduleIdInput || "").trim();

@@ -165,6 +165,7 @@ const assignScheduledWorkOrderToGroupEmployeeCallable = httpsCallable(
 const getScheduledGeneratedWorkOrderForEditCallable = httpsCallable(functions, "getScheduledGeneratedWorkOrderForEdit");
 const updateScheduledGeneratedWorkOrderCallable = httpsCallable(functions, "updateScheduledGeneratedWorkOrder");
 const convertScheduledGeneratedWorkOrderToDraftCallable = httpsCallable(functions, "convertScheduledGeneratedWorkOrderToDraft");
+const markScheduledHotelDeliveredCallable = httpsCallable(functions, "markScheduledHotelDelivered");
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -1223,6 +1224,10 @@ const els = {
   destructiveConfirmDetails: $("#destructiveConfirmDetails"),
   destructiveConfirmCancelBtn: $("#destructiveConfirmCancelBtn"),
   destructiveConfirmAcceptBtn: $("#destructiveConfirmAcceptBtn"),
+  scheduledArrivalModal: $("#scheduledArrivalModal"),
+  scheduledArrivalBackdrop: $("#scheduledArrivalBackdrop"),
+  scheduledArrivalSummary: $("#scheduledArrivalSummary"),
+  scheduledArrivalCancelBtn: $("#scheduledArrivalCancelBtn"),
   mobileTaskPanelMenuBtn: $("#mobileTaskPanelMenuBtn"),
   mobileTaskPanelMenu: $("#mobileTaskPanelMenu"),
   adminMobileEmployeeStatusToggle: $("#adminMobileEmployeeStatusToggle"),
@@ -1472,6 +1477,50 @@ function requestDestructiveConfirmation({
   });
 }
 
+let scheduledArrivalChoiceWorkOrderId = "";
+let scheduledArrivalChoicePreviousFocus = null;
+
+function closeScheduledArrivalChoice({ restoreFocus = true } = {}) {
+  if (!els.scheduledArrivalModal || els.scheduledArrivalModal.classList.contains("hidden")) return;
+  els.scheduledArrivalModal.classList.add("hidden");
+  els.scheduledArrivalModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("destructive-confirm-open");
+  scheduledArrivalChoiceWorkOrderId = "";
+  const previousFocus = scheduledArrivalChoicePreviousFocus;
+  scheduledArrivalChoicePreviousFocus = null;
+  if (restoreFocus && previousFocus instanceof HTMLElement && document.contains(previousFocus)) {
+    requestAnimationFrame(() => previousFocus.focus({ preventScroll: true }));
+  }
+}
+
+function openScheduledArrivalChoice(workOrderId, triggerButton) {
+  const workOrder = state.workOrders.find((item) => item.id === workOrderId);
+  if (!isAdminProfile() || !workOrder?.scheduleId || workOrder.scheduledWorkOrder !== true
+    || workOrder.status !== "draft" || workOrder.scheduledGroupAssignmentPending !== true) {
+    toast("Phiếu này không còn là Phiếu chưa giao việc được tạo từ lịch.", "error");
+    return;
+  }
+  if (workOrder.scheduledEditDeletePolicy === "locked") {
+    toast("Lịch này đã khóa Sửa-Xóa và không thể chuyển Phiếu.", "info");
+    return;
+  }
+  if (!els.scheduledArrivalModal) {
+    void convertScheduledTicketToOrdinaryDraft(workOrderId, triggerButton, "spa");
+    return;
+  }
+  scheduledArrivalChoiceWorkOrderId = workOrderId;
+  scheduledArrivalChoicePreviousFocus = triggerButton || document.activeElement;
+  if (els.scheduledArrivalSummary) {
+    els.scheduledArrivalSummary.textContent = `Chọn cách ghi nhận cho Phiếu “${workOrder.name || "Phiếu công việc"}”.`;
+  }
+  els.scheduledArrivalModal.classList.remove("hidden");
+  els.scheduledArrivalModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("destructive-confirm-open");
+  requestAnimationFrame(() => {
+    els.scheduledArrivalModal?.querySelector('[data-scheduled-arrival-choice="spa"]')?.focus({ preventScroll: true });
+  });
+}
+
 els.destructiveConfirmCancelBtn?.addEventListener("click", () => {
   closeDestructiveConfirmModal(false);
 });
@@ -1484,7 +1533,27 @@ els.destructiveConfirmBackdrop?.addEventListener("click", () => {
   closeDestructiveConfirmModal(false);
 });
 
+els.scheduledArrivalCancelBtn?.addEventListener("click", closeScheduledArrivalChoice);
+els.scheduledArrivalBackdrop?.addEventListener("click", closeScheduledArrivalChoice);
+els.scheduledArrivalModal?.addEventListener("click", async (event) => {
+  const choiceButton = event.target.closest("[data-scheduled-arrival-choice]");
+  if (!choiceButton) return;
+  const workOrderId = scheduledArrivalChoiceWorkOrderId;
+  const triggerButton = scheduledArrivalChoicePreviousFocus;
+  const arrivalType = choiceButton.dataset.scheduledArrivalChoice === "hotel" ? "hotel" : "spa";
+  closeScheduledArrivalChoice({ restoreFocus: false });
+  if (triggerButton instanceof HTMLElement && document.contains(triggerButton)) {
+    triggerButton.focus({ preventScroll: true });
+  }
+  await convertScheduledTicketToOrdinaryDraft(workOrderId, triggerButton, arrivalType);
+});
+
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.scheduledArrivalModal?.classList.contains("hidden")) {
+    event.preventDefault();
+    closeScheduledArrivalChoice();
+    return;
+  }
   if (event.key !== "Escape" || !isDestructiveConfirmOpen()) return;
   event.preventDefault();
   closeDestructiveConfirmModal(false);
@@ -9828,7 +9897,26 @@ async function openScheduledWorkOrderEditorFromTicket(workOrderId, button) {
   }
 }
 
-async function convertScheduledTicketToOrdinaryDraft(workOrderId, button) {
+async function openScheduledWorkOrderListFromTicket(workOrderId, button) {
+  const workOrder = state.workOrders.find((item) => item.id === workOrderId);
+  if (!isAdminProfile() || !workOrder?.scheduleId || workOrder.scheduledWorkOrder !== true
+    || workOrder.status !== "draft" || workOrder.scheduledGroupAssignmentPending !== true) {
+    toast("Phiếu này không còn liên kết với lịch Phiếu công việc.", "error");
+    return;
+  }
+  setButtonLoading(button, true, "Đang mở lịch...");
+  try {
+    state.schedulePageReturnScrollY = window.scrollY || 0;
+    await openScheduledWorkOrderListModal({
+      focusScheduleId: workOrder.scheduleId,
+      focusMissingMessage: "Không còn tìm thấy lịch đã tạo ra Phiếu này."
+    });
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function convertScheduledTicketToOrdinaryDraft(workOrderId, button, arrivalType = "spa") {
   const workOrder = state.workOrders.find((item) => item.id === workOrderId);
   if (!isAdminProfile() || !workOrder?.scheduleId || workOrder.scheduledWorkOrder !== true
     || workOrder.status !== "draft" || workOrder.scheduledGroupAssignmentPending !== true) {
@@ -9839,37 +9927,59 @@ async function convertScheduledTicketToOrdinaryDraft(workOrderId, button) {
     toast("Lịch này đã khóa Sửa-Xóa và không thể chuyển Phiếu.", "info");
     return;
   }
-  const confirmed = await requestDestructiveConfirmation({
+  const hotelArrival = arrivalType === "hotel";
+  const confirmed = await requestDestructiveConfirmation(hotelArrival ? {
+    title: "Xác nhận Hotel đã mang đến?",
+    message: `Phiếu “${workOrder.name || "Phiếu công việc"}” sẽ biến mất khỏi danh sách Chưa giao việc và lịch được đánh dấu Đã giao việc.`,
+    details: "Danh sách lịch sẽ ghi thêm trạng thái “Hotel đã mang đến”. Thao tác này không thể hoàn tác.",
+    confirmLabel: "Xác nhận Hotel"
+  } : {
     title: "Chuyển thành Phiếu chưa giao việc thông thường?",
     message: `Giữ nguyên Phiếu “${workOrder.name || "Phiếu công việc"}” và các công việc bên trong, nhưng ngừng bộ đếm giao theo lịch.`,
     details: "Nếu lịch này đã tạo Phiếu nghỉ trưa tự động vì quá giờ, chỉ các Phiếu nghỉ trưa liên quan sẽ được kết thúc. Lịch lặp của ngày khác không thay đổi.",
-    confirmLabel: "Đã mang đến"
+    confirmLabel: "Xác nhận Spa"
   });
   if (!confirmed) return;
 
-  setButtonLoading(button, true, "Đang chuyển...");
+  setButtonLoading(button, true, hotelArrival ? "Đang ghi nhận Hotel..." : "Đang chuyển...");
   try {
-    const result = await convertScheduledGeneratedWorkOrderToDraftCallable({ workOrderId });
+    const result = hotelArrival
+      ? await markScheduledHotelDeliveredCallable({ workOrderId })
+      : await convertScheduledGeneratedWorkOrderToDraftCallable({ workOrderId });
     if (result?.data?.converted !== true) throw new Error("Máy chủ chưa xác nhận chuyển Phiếu.");
-    state.workOrders = state.workOrders.map((item) => item.id === workOrderId
-      ? { ...item, scheduledWorkOrder: false, scheduledGroupAssignmentPending: false, scheduleId: "" }
-      : item);
-    state.tasks = state.tasks.map((item) => item.workOrderId === workOrderId
-      ? { ...item, scheduledWorkOrder: false, scheduledPhotoRequirementLocked: false, scheduleId: "" }
-      : item);
-    state.scheduledWorkOrders = state.scheduledWorkOrders.map((item) => item.id === workOrder.scheduleId
-      ? { ...item, status: "converted", generatedWorkOrderId: "" }
-      : item);
+    if (hotelArrival) {
+      state.workOrders = state.workOrders.filter((item) => item.id !== workOrderId);
+      state.tasks = state.tasks.filter((item) => item.workOrderId !== workOrderId);
+      state.scheduledWorkOrders = state.scheduledWorkOrders.map((item) => item.id === workOrder.scheduleId
+        ? { ...item, status: "assigned", hotelDelivered: true, hotelDeliveredAtMs: Date.now(), generatedWorkOrderId: "" }
+        : item);
+    } else {
+      state.workOrders = state.workOrders.map((item) => item.id === workOrderId
+        ? { ...item, scheduledWorkOrder: false, scheduledGroupAssignmentPending: false, scheduleId: "" }
+        : item);
+      state.tasks = state.tasks.map((item) => item.workOrderId === workOrderId
+        ? { ...item, scheduledWorkOrder: false, scheduledPhotoRequirementLocked: false, scheduleId: "" }
+        : item);
+      state.scheduledWorkOrders = state.scheduledWorkOrders.map((item) => item.id === workOrder.scheduleId
+        ? { ...item, status: "converted", generatedWorkOrderId: "" }
+        : item);
+    }
     renderAdminTasks();
-    toast("Đã chuyển thành Phiếu chưa giao việc thông thường. Bạn có thể Sửa phiếu hoặc Giao việc như bình thường.", "success");
+    toast(hotelArrival
+      ? "Đã ghi nhận Hotel mang đến, xóa Phiếu chờ và chuyển lịch sang Đã giao việc."
+      : "Đã chuyển thành Phiếu chưa giao việc thông thường. Bạn có thể Sửa phiếu hoặc Giao việc như bình thường.", "success");
     if (result.data.recurrenceVerified === false) {
       toast("Phiếu đã chuyển, nhưng chưa xác nhận được lịch lặp ngày tiếp theo. Hãy kiểm tra Danh sách lịch.", "error");
     }
   } catch (error) {
     console.error(error);
     toast(error?.code === "functions/not-found"
-      ? "Máy chủ Firebase chưa triển khai chức năng chuyển Phiếu."
-      : error?.message || "Không chuyển được Phiếu thành Phiếu thông thường.", "error");
+      ? (hotelArrival
+        ? "Máy chủ Firebase chưa triển khai chức năng Hotel đã mang đến."
+        : "Máy chủ Firebase chưa triển khai chức năng chuyển Phiếu.")
+      : error?.message || (hotelArrival
+        ? "Không ghi nhận được trạng thái Hotel đã mang đến."
+        : "Không chuyển được Phiếu thành Phiếu thông thường."), "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -11277,6 +11387,9 @@ function renderScheduledWorkOrderList() {
             schedule.status,
             schedule.assignmentCountdownWaitingForAvailableEmployee === true
           ))}</span>
+          ${assigned && schedule.hotelDelivered === true
+            ? '<span class="scheduled-work-order-hotel-delivered-badge">Hotel đã mang đến</span>'
+            : ""}
           ${replacementTarget ? `<button
             class="scheduled-work-order-replacement-link"
             type="button"
@@ -11339,7 +11452,7 @@ function syncScheduledWorkOrderListPresentation() {
 
 scheduledWorkOrderListPageMedia.addEventListener("change", syncScheduledWorkOrderListPresentation);
 
-async function openScheduledWorkOrderListModal({ focusScheduleId = "" } = {}) {
+async function openScheduledWorkOrderListModal({ focusScheduleId = "", focusMissingMessage = "" } = {}) {
   if (!isAdminProfile()) {
     toast("Chỉ Admin được xem danh sách lịch.", "error");
     return;
@@ -11372,7 +11485,8 @@ async function openScheduledWorkOrderListModal({ focusScheduleId = "" } = {}) {
     renderScheduledWorkOrderList();
     if (focusScheduleId) {
       showScheduledWorkOrderInList(focusScheduleId, {
-        missingMessage: "Đã lưu lịch nhưng chưa tìm thấy lịch đó trong danh sách vừa tải. Vui lòng mở lại Danh sách lịch."
+        missingMessage: focusMissingMessage
+          || "Đã lưu lịch nhưng chưa tìm thấy lịch đó trong danh sách vừa tải. Vui lòng mở lại Danh sách lịch."
       });
     }
   } catch (error) {
@@ -15467,6 +15581,9 @@ function renderTicketGroup(group, mode = "admin") {
   const taskCount = Number(group.totalTaskCount || group.tasks.length || 0);
   const createdTimeText = formatTimeWithSeconds(group.createdAtMs);
   const ticketTitle = `${group.name}${createdTimeText ? ` • ${createdTimeText}` : ""} - ${taskCount} công việc`;
+  const ticketTitleHtml = isScheduledGroupPending && workOrder?.scheduleId && mode === "admin"
+    ? `<button class="scheduled-ticket-source-link" data-action="open-scheduled-source" data-work-order-id="${escapeHtml(group.key)}" type="button" title="Xem lịch đã tạo ra Phiếu này">${escapeHtml(ticketTitle)}</button>`
+    : escapeHtml(ticketTitle);
   const actionButtons = [];
 
   if (mode === "admin" && isDraft) {
@@ -15479,7 +15596,7 @@ function renderTicketGroup(group, mode = "admin") {
         if (workOrder?.scheduleId) {
           actionButtons.push(`<button class="btn ghost small" data-action="reschedule-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">🗓 Dời lịch</button>`);
           if (scheduleOriginallyEditable) {
-            actionButtons.push(`<button class="btn secondary small" data-action="convert-scheduled-draft" data-work-order-id="${escapeHtml(group.key)}" type="button">📦 Đã mang đến</button>`);
+            actionButtons.push(`<button class="btn secondary small" data-action="open-scheduled-arrival-choice" data-work-order-id="${escapeHtml(group.key)}" type="button" aria-haspopup="dialog" aria-controls="scheduledArrivalModal">📦 Đã mang đến</button>`);
           }
         }
       }
@@ -15512,7 +15629,7 @@ function renderTicketGroup(group, mode = "admin") {
         <div class="ticket-group-header">
           <div>
             <span class="ticket-badge ${isDraft ? "is-draft-badge" : ""}">${isDraft ? "Chưa giao việc" : "Phiếu công việc"}</span>
-            <h4 title="${escapeHtml(ticketTitle)}">${escapeHtml(ticketTitle)}</h4>
+            <h4 title="${escapeHtml(ticketTitle)}">${ticketTitleHtml}</h4>
             ${hasSubmittedTask ? '<span class="admin-confirm-attention-badge">Chờ xác nhận hoàn thành</span>' : ""}
             ${isScheduledGroupPending ? `
               <div class="scheduled-group-ticket-status">
@@ -17136,8 +17253,12 @@ document.addEventListener("click", async (event) => {
     await openScheduledDraftEditor(button.dataset.workOrderId, button);
   }
 
-  if (action === "convert-scheduled-draft") {
-    await convertScheduledTicketToOrdinaryDraft(button.dataset.workOrderId, button);
+  if (action === "open-scheduled-source") {
+    await openScheduledWorkOrderListFromTicket(button.dataset.workOrderId, button);
+  }
+
+  if (action === "open-scheduled-arrival-choice") {
+    openScheduledArrivalChoice(button.dataset.workOrderId, button);
   }
 
   if (action === "reschedule-scheduled-draft") {
