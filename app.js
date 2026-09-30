@@ -9964,6 +9964,7 @@ async function convertScheduledTicketToOrdinaryDraft(workOrderId, button, arriva
         ? { ...item, status: "converted", generatedWorkOrderId: "" }
         : item);
     }
+    state.workOrderById = new Map(state.workOrders.map((item) => [item.id, item]));
     renderAdminTasks();
     toast(hotelArrival
       ? "Đã ghi nhận Hotel mang đến, xóa Phiếu chờ và chuyển lịch sang Đã giao việc."
@@ -9973,13 +9974,14 @@ async function convertScheduledTicketToOrdinaryDraft(workOrderId, button, arriva
     }
   } catch (error) {
     console.error(error);
-    toast(error?.code === "functions/not-found"
+    const serverMessage = String(error?.message || "").trim();
+    const genericServerError = !serverMessage
+      || ["internal", "not-found", "not found"].includes(serverMessage.toLowerCase());
+    toast(genericServerError
       ? (hotelArrival
-        ? "Máy chủ Firebase chưa triển khai chức năng Hotel đã mang đến."
-        : "Máy chủ Firebase chưa triển khai chức năng chuyển Phiếu.")
-      : error?.message || (hotelArrival
-        ? "Không ghi nhận được trạng thái Hotel đã mang đến."
-        : "Không chuyển được Phiếu thành Phiếu thông thường."), "error");
+        ? "Máy chủ chưa xử lý được Hotel đã mang đến. Phiếu và lịch chưa thay đổi; vui lòng kiểm tra Cloud Functions."
+        : "Máy chủ chưa xử lý được thao tác chuyển Phiếu. Phiếu và lịch chưa thay đổi; vui lòng kiểm tra Cloud Functions.")
+      : serverMessage, "error");
   } finally {
     setButtonLoading(button, false);
   }

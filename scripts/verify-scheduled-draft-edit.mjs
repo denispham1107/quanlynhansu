@@ -149,12 +149,14 @@ const conversion = new Function(`
     workOrders: [{ id: "ticket-1", name: "Phiếu thử", scheduleId: "schedule-1", scheduledWorkOrder: true,
       status: "draft", scheduledGroupAssignmentPending: true, scheduledEditDeletePolicy: "editable" }],
     tasks: [{ id: "task-1", workOrderId: "ticket-1", scheduledWorkOrder: true, status: "draft", title: "Công việc" }],
-    scheduledWorkOrders: [{ id: "schedule-1", status: "generated", generatedWorkOrderId: "ticket-1" }]
+    scheduledWorkOrders: [{ id: "schedule-1", status: "generated", generatedWorkOrderId: "ticket-1" }],
+    workOrderById: new Map()
   };
   const button = {};
   const calls = [];
   const console = { error() {} };
   let allow = false;
+  let failHotel = false;
   const isAdminProfile = () => true;
   const toast = (message) => calls.push(["toast", message]);
   const requestDestructiveConfirmation = async () => allow;
@@ -165,11 +167,13 @@ const conversion = new Function(`
   };
   const markScheduledHotelDeliveredCallable = async (payload) => {
     calls.push(["hotel-call", payload]);
+    if (failHotel) throw { code: "functions/internal", message: "internal" };
     return { data: { converted: true } };
   };
   const renderAdminTasks = () => calls.push(["render"]);
   ${extractFunction("convertScheduledTicketToOrdinaryDraft")}
   return { state, button, calls, setAllowed: (value) => { allow = value; },
+    setHotelFailure: (value) => { failHotel = value; },
     convertScheduledTicketToOrdinaryDraft };
 `)();
 await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button);
@@ -191,10 +195,21 @@ assert.equal(conversion.calls.some((call) => call[0].endsWith("call")), false);
 conversion.calls.length = 0;
 conversion.state.workOrders[0] = { ...conversion.state.workOrders[0], scheduledEditDeletePolicy: "editable" };
 conversion.state.tasks[0] = { ...conversion.state.tasks[0], scheduledWorkOrder: true, scheduleId: "schedule-1" };
+conversion.state.workOrderById.set("ticket-1", conversion.state.workOrders[0]);
+conversion.setHotelFailure(true);
+await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button, "hotel");
+assert.equal(conversion.state.workOrders.length, 1);
+assert.equal(conversion.state.tasks.length, 1);
+assert.equal(conversion.state.scheduledWorkOrders[0].status, "converted");
+assert.equal(conversion.calls.some((call) => call[0] === "render"), false);
+assert.match(conversion.calls.find((call) => call[0] === "toast")?.[1] || "", /Máy chủ chưa xử lý được Hotel/);
+conversion.setHotelFailure(false);
+conversion.calls.length = 0;
 await conversion.convertScheduledTicketToOrdinaryDraft("ticket-1", conversion.button, "hotel");
 assert.deepEqual(conversion.calls.find((call) => call[0] === "hotel-call"), ["hotel-call", { workOrderId: "ticket-1" }]);
 assert.equal(conversion.state.workOrders.length, 0);
 assert.equal(conversion.state.tasks.length, 0);
+assert.equal(conversion.state.workOrderById.has("ticket-1"), false);
 assert.equal(conversion.state.scheduledWorkOrders[0].status, "assigned");
 assert.equal(conversion.state.scheduledWorkOrders[0].hotelDelivered, true);
 
