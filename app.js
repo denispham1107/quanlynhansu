@@ -1138,6 +1138,7 @@ const els = {
   scheduledWorkOrderRepeatMode: $("#scheduledWorkOrderRepeatMode"),
   scheduledWorkOrderEditDeletePolicy: $("#scheduledWorkOrderEditDeletePolicy"),
   viewScheduledWorkOrdersBtn: $("#viewScheduledWorkOrdersBtn"),
+  viewScheduledWorkOrdersHeaderBtn: $("#viewScheduledWorkOrdersHeaderBtn"),
   scheduleWorkOrderBtn: $("#scheduleWorkOrderBtn"),
   cancelScheduledDraftEditBtn: $("#cancelScheduledDraftEditBtn"),
   saveScheduledDraftEditBtn: $("#saveScheduledDraftEditBtn"),
@@ -9328,6 +9329,7 @@ function updateScheduledWorkOrderEditorControls() {
       ? (state.scheduledEditorReturnToDashboard ? "← Quay lại trang quản lý" : "← Quay lại danh sách")
       : "📋 Xem lịch";
   }
+  els.viewScheduledWorkOrdersHeaderBtn?.classList.toggle("hidden", state.taskModalMode !== "schedule" || editingSchedule);
 }
 
 function setTaskModalMode(mode = "create") {
@@ -11470,6 +11472,9 @@ els.viewScheduledWorkOrdersBtn?.addEventListener("click", () => {
     return;
   }
   openScheduledWorkOrderListModal();
+});
+els.viewScheduledWorkOrdersHeaderBtn?.addEventListener("click", () => {
+  els.viewScheduledWorkOrdersBtn?.click();
 });
 els.scheduledWorkOrderStatusFilter?.addEventListener("change", () => {
   const nextFilter = els.scheduledWorkOrderStatusFilter?.value || "all";

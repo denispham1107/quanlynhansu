@@ -215,6 +215,7 @@ const prepareExpression = `(() => {
   document.getElementById("saveDraftBtn")?.classList.add("hidden");
   document.getElementById("createTaskBtn")?.classList.add("hidden");
   document.getElementById("viewScheduledWorkOrdersBtn")?.classList.remove("hidden");
+  document.getElementById("viewScheduledWorkOrdersHeaderBtn")?.classList.remove("hidden");
   document.getElementById("scheduleWorkOrderBtn")?.classList.remove("hidden");
   document.getElementById("scheduledWorkOrderDate").value = "2026-09-20";
   document.getElementById("scheduledWorkOrderTime").value = "22:57:30";
@@ -251,6 +252,10 @@ for (const profile of profiles) {
       const actions = box(document.querySelector(".task-create-actions"));
       const page = box(document.getElementById("taskModal"));
       const card = box(document.querySelector("#taskModal .task-create-modal-card"));
+      const header = box(document.querySelector("#taskModal .task-create-modal-header"));
+      const heading = box(document.querySelector("#taskModal .task-create-heading"));
+      const headerCalendar = box(document.getElementById("viewScheduledWorkOrdersHeaderBtn"));
+      const headerBack = box(document.querySelector("#taskModal .task-create-close-btn"));
       const shells = [...document.querySelectorAll(".scheduled-control-shell")].map(box);
       const controls = [...document.querySelectorAll(".scheduled-control-shell > input, .scheduled-control-shell > select")].map(box);
       const timeInput = document.getElementById("scheduledWorkOrderTime");
@@ -292,6 +297,16 @@ for (const profile of profiles) {
         dashboardHidden: document.getElementById("adminView").classList.contains("hidden"),
         page,
         card,
+        headerActionsInside: heading.left >= header.left - 0.5
+          && heading.right <= headerCalendar.left + 0.5
+          && headerCalendar.left >= header.left - 0.5
+          && headerCalendar.right <= headerBack.left + 0.5
+          && headerBack.right <= header.right + 0.5
+          && headerCalendar.top >= header.top - 0.5
+          && headerCalendar.bottom <= header.bottom + 0.5
+          && headerBack.top >= header.top - 0.5
+          && headerBack.bottom <= header.bottom + 0.5,
+        headerCalendarHasIcon: Boolean(document.querySelector("#viewScheduledWorkOrdersHeaderBtn svg rect")),
         config,
         actions,
         shells,
@@ -329,6 +344,8 @@ for (const profile of profiles) {
     && result.page.right <= profile.width + 0.5
     && result.card.left >= result.page.left - 0.5
     && result.card.right <= result.page.right + 0.5
+    && result.headerActionsInside
+    && result.headerCalendarHasIcon
     && result.shells.length === 6
     && result.controls.length === 5
     && result.timeType === "hidden"
