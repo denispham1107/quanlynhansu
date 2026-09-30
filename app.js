@@ -11261,6 +11261,7 @@ function renderScheduledWorkOrderList() {
   els.scheduledWorkOrderList.innerHTML = filteredSchedules.map((schedule) => {
     const editable = canEditScheduledWorkOrder(schedule);
     const deletable = canDeleteScheduledWorkOrder(schedule);
+    const assigned = schedule.status === "assigned";
     const deleted = schedule.status === "deleted";
     const replaced = schedule.status === "replaced";
     const replacementTarget = replaced ? replacementTargets.get(schedule.id) : null;
@@ -11272,7 +11273,7 @@ function renderScheduledWorkOrderList() {
     const countdownMinutes = normalizeScheduledCountdownMinutes(schedule.assignmentCountdownMinutes);
     return `
       <article
-        class="scheduled-work-order-list-item${editable ? " is-editable" : ""}${deleted ? " is-deleted" : ""}${replaced ? " is-replaced" : ""}"
+        class="scheduled-work-order-list-item${editable ? " is-editable" : ""}${assigned ? " is-assigned" : ""}${deleted ? " is-deleted" : ""}${replaced ? " is-replaced" : ""}"
         data-scheduled-list-item-id="${escapeHtml(schedule.id)}"
         ${editable ? `data-edit-scheduled-work-order="${escapeHtml(schedule.id)}" role="button" tabindex="0" aria-label="Chỉnh sửa lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"` : ""}
       >

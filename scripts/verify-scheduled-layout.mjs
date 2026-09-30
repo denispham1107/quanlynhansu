@@ -438,12 +438,12 @@ await send("Runtime.evaluate", {
     document.getElementById("scheduledWorkOrderDateFromFilter").value = "2026-09-01";
     document.getElementById("scheduledWorkOrderDateToFilter").value = "2026-09-30";
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
-      <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : ""}">
+      <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : index === 21 ? " is-assigned" : ""}">
         <div class="scheduled-work-order-list-row">
           <div class="scheduled-work-order-list-main">22/09/2026, 08:30:00, Nhóm nhân viên, “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
           <button class="btn danger scheduled-work-order-delete-btn" data-delete-scheduled-work-order="test-\${index}" type="button">×</button>
         </div>
-        <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : index === 22 ? "Đã thay thế" : "Đang chờ đến giờ"}</span>\${index === 22 ? '<button class="scheduled-work-order-replacement-link" type="button">Lịch mới: 09:45:00 30/09/2026 →</button>' : ""}</div>
+        <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : index === 22 ? "Đã thay thế" : index === 21 ? "Đã giao việc" : "Đang chờ đến giờ"}</span>\${index === 22 ? '<button class="scheduled-work-order-replacement-link" type="button">Lịch mới: 09:45:00 30/09/2026 →</button>' : ""}</div>
       </article>
     \`).join("");
     return true;
@@ -483,6 +483,7 @@ for (const profile of profiles) {
       const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
       const deletedElement = listElement.querySelector(".scheduled-work-order-list-item.is-deleted");
       const replacedElement = listElement.querySelector(".scheduled-work-order-list-item.is-replaced");
+      const assignedElement = listElement.querySelector(".scheduled-work-order-list-item.is-assigned");
     const replacementLinkElement = replacedElement.querySelector(".scheduled-work-order-replacement-link");
     const card = box(cardElement);
     const content = box(contentElement);
@@ -528,6 +529,9 @@ for (const profile of profiles) {
         deletedInsideList: box(deletedElement).left >= list.left - 0.5 && box(deletedElement).right <= list.right + 0.5,
         deletedNoEdit: !deletedElement.hasAttribute("data-edit-scheduled-work-order"),
         deletedRedBorder: getComputedStyle(deletedElement).borderTopColor === "rgb(252, 165, 165)",
+        assignedInsideList: box(assignedElement).left >= list.left - 0.5 && box(assignedElement).right <= list.right + 0.5,
+        assignedGreenBorder: getComputedStyle(assignedElement).borderTopColor === "rgb(134, 239, 172)",
+        assignedGreenBackground: getComputedStyle(assignedElement).backgroundImage.includes("rgb(240, 253, 244)"),
         replacedInsideList: box(replacedElement).left >= list.left - 0.5 && box(replacedElement).right <= list.right + 0.5,
         replacedNoEdit: !replacedElement.hasAttribute("data-edit-scheduled-work-order"),
         archivedDeleteButtonsInside,
@@ -583,6 +587,9 @@ for (const profile of profiles) {
     && result.deletedInsideList
     && result.deletedNoEdit
     && result.deletedRedBorder
+    && result.assignedInsideList
+    && result.assignedGreenBorder
+    && result.assignedGreenBackground
     && result.replacedInsideList
     && result.replacedNoEdit
     && result.archivedDeleteButtonsInside
