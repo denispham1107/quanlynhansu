@@ -57,7 +57,7 @@ async function fetchThroughWorker(url) {
   return { response, elapsed, waits };
 }
 
-const url = "https://example.com/app.js?v=20260930-schedule-list-expanded-v123";
+const url = "https://example.com/app.js?v=20261001-schedule-save-jump-v124";
 stored.set(url, new Response("cached"));
 const cachedResult = await fetchThroughWorker(url);
 assert.equal(await cachedResult.response.text(), "cached");

@@ -10955,33 +10955,9 @@ async function createScheduledWorkOrder(button) {
         throw new Error("Máy chủ chưa trả về lịch sử của lịch cũ. Vui lòng kiểm tra bản cập nhật Firebase Functions.");
       }
       state.scheduledWorkOrders = refreshedSchedules;
-      state.scheduledWorkOrderStatusFilter = "all";
-      const activeTimeFilter = normalizeScheduledWorkOrderTimeFilter(state.scheduledWorkOrderTimeFilter);
-      if (!scheduledWorkOrderMatchesTimeFilter(replacedHistory, activeTimeFilter)
-        || !scheduledWorkOrderMatchesTimeFilter(savedSchedule, activeTimeFilter)) {
-        const oldDate = scheduledWorkOrderDateValue(replacedHistory);
-        const newDate = scheduledWorkOrderDateValue(savedSchedule);
-        if (oldDate && newDate) {
-          if (oldDate === newDate) {
-            state.scheduledWorkOrderTimeFilter = "date";
-            state.scheduledWorkOrderDateFilter = oldDate;
-          } else {
-            state.scheduledWorkOrderTimeFilter = "range";
-            state.scheduledWorkOrderDateFromFilter = oldDate < newDate ? oldDate : newDate;
-            state.scheduledWorkOrderDateToFilter = oldDate < newDate ? newDate : oldDate;
-          }
-        }
-      }
-      if (state.scheduledEditorReturnToDashboard) {
-        closeTaskModal();
-      } else {
-        state.editingScheduledWorkOrderId = "";
-        els.taskModal?.classList.add("hidden");
-        resetScheduledWorkOrderFormForCreate();
-        els.scheduledWorkOrderListModal?.classList.remove("hidden");
-        renderScheduledWorkOrderList();
-        updateScheduledWorkOrderEditorControls();
-      }
+      state.editingScheduledWorkOrderId = "";
+      resetScheduledWorkOrderFormForCreate();
+      await openScheduledWorkOrderListModal({ focusScheduleId: savedSchedule.id });
 
       const groupName = result?.data?.employeeGroupName || selectedGroup.name || "Nhóm nhân viên";
       toast(
@@ -10995,10 +10971,12 @@ async function createScheduledWorkOrder(button) {
       throw new Error("Máy chủ chưa xác nhận khóa Sửa-Xóa cho lịch mới. Cần triển khai Firebase Functions mới; hãy kiểm tra lịch vừa tạo trước khi thử lại.");
     }
 
-    closeTaskModal();
-    els.workOrderName.value = "";
-    resetTaskRows();
-    resetPhotoRequirementControls();
+    const createdScheduleId = String(result?.data?.scheduleId || "").trim();
+    if (!createdScheduleId) {
+      throw new Error("Máy chủ chưa trả về mã lịch vừa tạo. Vui lòng tải lại Danh sách lịch để kiểm tra.");
+    }
+    resetScheduledWorkOrderFormForCreate();
+    await openScheduledWorkOrderListModal({ focusScheduleId: createdScheduleId });
 
     const groupName = result?.data?.employeeGroupName || selectedGroup.name || "Nhóm nhân viên";
     const repeatText = repeatMode === "daily" ? " và sẽ lặp lại hằng ngày" : "";
@@ -11314,10 +11292,10 @@ function renderScheduledWorkOrderList() {
   }).join("");
 }
 
-function showScheduledReplacement(scheduleId) {
+function showScheduledWorkOrderInList(scheduleId, { missingMessage = "Không còn tìm thấy lịch. Vui lòng tải lại danh sách." } = {}) {
   const target = state.scheduledWorkOrders.find((schedule) => schedule.id === scheduleId);
   if (!target) {
-    toast("Không còn tìm thấy lịch đã thay thế. Vui lòng tải lại danh sách.", "error");
+    toast(missingMessage, "error");
     return;
   }
   const targetDate = scheduledWorkOrderDateValue(target);
@@ -11344,6 +11322,12 @@ function showScheduledReplacement(scheduleId) {
   });
 }
 
+function showScheduledReplacement(scheduleId) {
+  showScheduledWorkOrderInList(scheduleId, {
+    missingMessage: "Không còn tìm thấy lịch đã thay thế. Vui lòng tải lại danh sách."
+  });
+}
+
 const scheduledWorkOrderListPageMedia = window.matchMedia("(max-width: 768px), (max-width: 1024px) and (max-height: 500px)");
 
 function syncScheduledWorkOrderListPresentation() {
@@ -11355,7 +11339,7 @@ function syncScheduledWorkOrderListPresentation() {
 
 scheduledWorkOrderListPageMedia.addEventListener("change", syncScheduledWorkOrderListPresentation);
 
-async function openScheduledWorkOrderListModal() {
+async function openScheduledWorkOrderListModal({ focusScheduleId = "" } = {}) {
   if (!isAdminProfile()) {
     toast("Chỉ Admin được xem danh sách lịch.", "error");
     return;
@@ -11386,6 +11370,11 @@ async function openScheduledWorkOrderListModal() {
     const result = await listScheduledWorkOrdersCallable({});
     state.scheduledWorkOrders = Array.isArray(result?.data?.schedules) ? result.data.schedules : [];
     renderScheduledWorkOrderList();
+    if (focusScheduleId) {
+      showScheduledWorkOrderInList(focusScheduleId, {
+        missingMessage: "Đã lưu lịch nhưng chưa tìm thấy lịch đó trong danh sách vừa tải. Vui lòng mở lại Danh sách lịch."
+      });
+    }
   } catch (error) {
     console.error(error);
     if (els.scheduledWorkOrderList) {

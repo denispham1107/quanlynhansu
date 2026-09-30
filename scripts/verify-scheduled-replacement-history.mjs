@@ -35,9 +35,7 @@ assert.match(list, /sourceScheduleId: String\(item\.sourceScheduleId \|\| ""\)/)
 
 assert.match(frontend, /savedSchedule = refreshedSchedules\.find\(\(item\) => item\.id === editingScheduleId\)/);
 assert.match(frontend, /replacedHistory = refreshedSchedules\.find\(\(item\) => item\.id === replacedHistoryId && item\.status === "replaced"\)/);
-assert.match(frontend, /state\.scheduledWorkOrderStatusFilter = "all";\s*const activeTimeFilter/);
-assert.match(frontend, /!scheduledWorkOrderMatchesTimeFilter\(replacedHistory, activeTimeFilter\)[\s\S]*?!scheduledWorkOrderMatchesTimeFilter\(savedSchedule, activeTimeFilter\)/);
-assert.match(frontend, /state\.scheduledWorkOrderTimeFilter = "range"/);
+assert.match(frontend, /await openScheduledWorkOrderListModal\(\{ focusScheduleId: savedSchedule\.id \}\)/);
 assert.match(frontend, /\["deleted", "replaced"\]\.includes/);
 assert.match(frontend, /replaced: "Đã thay thế"/);
 assert.match(frontend, /replaced \? " is-replaced"/);
@@ -51,7 +49,18 @@ assert.match(page, /\.scheduled-work-order-replacement-link\s*\{/);
 function extractFunction(name) {
   const start = frontend.indexOf(`function ${name}(`);
   if (start < 0) throw new Error(`Không tìm thấy ${name}.`);
-  const bodyStart = frontend.indexOf("{", start);
+  const parametersStart = frontend.indexOf("(", start);
+  let parentheses = 0;
+  let bodyStart = -1;
+  for (let index = parametersStart; index < frontend.length; index += 1) {
+    if (frontend[index] === "(") parentheses += 1;
+    if (frontend[index] === ")") parentheses -= 1;
+    if (parentheses === 0) {
+      bodyStart = frontend.indexOf("{", index);
+      break;
+    }
+  }
+  if (bodyStart < 0) throw new Error(`Không tìm thấy thân hàm ${name}.`);
   let depth = 0;
   for (let index = bodyStart; index < frontend.length; index += 1) {
     if (frontend[index] === "{") depth += 1;
@@ -111,6 +120,7 @@ const navigation = new Function(`
   const requestAnimationFrame = (callback) => callback();
   const setTimeout = () => 1;
   const toast = (message) => { error = message; };
+  ${extractFunction("showScheduledWorkOrderInList")}
   ${extractFunction("showScheduledReplacement")}
   showScheduledReplacement("v2");
   return { state, row, content, renderCount, error };
