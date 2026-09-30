@@ -15,6 +15,7 @@ const browserPath = browserCandidates.find(existsSync);
 if (!browserPath) throw new Error("Không tìm thấy Chrome hoặc Edge để kiểm tra responsive.");
 
 const profiles = [
+  { name: "Desktop ảnh tham chiếu 1919", width: 1919, height: 867, mobile: false },
   { name: "Desktop 1440", width: 1440, height: 900, mobile: false },
   { name: "iPhone 320 dọc", width: 320, height: 700 },
   { name: "iPhone 375 dọc", width: 375, height: 812 },
@@ -536,6 +537,7 @@ for (const profile of profiles) {
         replacedNoEdit: !replacedElement.hasAttribute("data-edit-scheduled-work-order"),
         archivedDeleteButtonsInside,
         replacedBlueBorder: getComputedStyle(replacedElement).borderTopColor === "rgb(147, 197, 253)",
+        replacedBlueBackground: getComputedStyle(replacedElement).backgroundImage.includes("rgb(219, 234, 254)"),
         replacementLinkInsideRow: box(replacementLinkElement).left >= box(replacedElement).left - 0.5 && box(replacementLinkElement).right <= box(replacedElement).right + 0.5,
         contentClientHeight: contentElement.clientHeight,
         contentScrollHeight: contentElement.scrollHeight,
@@ -564,6 +566,8 @@ for (const profile of profiles) {
   });
   const result = measurement.result.value;
   const mobileFullPage = profile.width <= 768 || (profile.width <= 1024 && profile.height <= 500);
+  const referencePopupSize = profile.width !== 1919
+    || (Math.abs(result.card.width - 1400) <= 1 && Math.abs(result.card.height - 837) <= 1);
   const passed = result.taskModalHidden
     && result.card.width > 0
     && result.card.height > 0
@@ -594,8 +598,10 @@ for (const profile of profiles) {
     && result.replacedNoEdit
     && result.archivedDeleteButtonsInside
     && result.replacedBlueBorder
+    && result.replacedBlueBackground
     && result.replacementLinkInsideRow
     && result.cardInsideViewport
+    && referencePopupSize
     && result.modalOverflowY === "hidden"
     && result.cardOverflowY === "hidden"
     && ["auto", "scroll"].includes(result.contentOverflowY)

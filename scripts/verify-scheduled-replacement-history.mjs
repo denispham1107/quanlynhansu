@@ -45,7 +45,7 @@ assert.match(frontend, /data-show-scheduled-replacement="\$\{escapeHtml\(replace
 assert.match(frontend, /const replacementLink = event\.target\.closest\("\[data-show-scheduled-replacement\]"\)/);
 assert.match(frontend, /state\.scheduledWorkOrderTimeFilter = "date";\s*state\.scheduledWorkOrderDateFilter = targetDate/);
 assert.match(frontend, /content\.scrollTop \+= rowRect\.top - contentRect\.top/);
-assert.match(page, /\.scheduled-work-order-list-item\.is-replaced\s*\{[^}]*background:linear-gradient\(135deg,#eff6ff,#dbeafe\)/);
+assert.match(page, /\.scheduled-work-order-list-item\.is-replaced\s*\{[^}]*background:linear-gradient\(135deg,#dbeafe,#bfdbfe\)/);
 assert.match(page, /\.scheduled-work-order-replacement-link\s*\{/);
 
 function extractFunction(name) {

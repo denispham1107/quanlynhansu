@@ -1,11 +1,11 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20260930-assigned-schedule-green-v122";
+const CACHE_NAME = "culao-task-shell-v20260930-schedule-list-expanded-v123";
 const APP_SHELL_NETWORK_TIMEOUT_MS = 1800;
 const APP_SHELL_BACKGROUND_TIMEOUT_MS = 15000;
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./app.js?v=20260930-assigned-schedule-green-v122",
+  "./app.js?v=20260930-schedule-list-expanded-v123",
   "./styles.css"
 ];
 const OPTIONAL_SHELL = [
