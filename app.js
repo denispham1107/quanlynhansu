@@ -11392,16 +11392,18 @@ function sortScheduledWorkOrdersForDisplay(schedules, filterValue = "all") {
     Number(left.scheduledForMs || 0) - Number(right.scheduledForMs || 0)
   ));
   if (filterValue !== "all" && filterValue !== "locked") return chronological;
-  // Giữ thứ tự thời gian trong từng nhóm: đang chờ, đã giao/chuyển đổi, rồi lịch sử.
+  // Giữ thứ tự thời gian trong từng nhóm; lịch đã xóa luôn nằm cuối.
   const current = [];
   const completed = [];
-  const history = [];
+  const replaced = [];
+  const deleted = [];
   chronological.forEach((schedule) => {
-    if (schedule.status === "deleted" || schedule.status === "replaced") history.push(schedule);
+    if (schedule.status === "deleted") deleted.push(schedule);
+    else if (schedule.status === "replaced") replaced.push(schedule);
     else if (schedule.status === "assigned" || schedule.status === "converted") completed.push(schedule);
     else current.push(schedule);
   });
-  return [...current, ...completed, ...history];
+  return [...current, ...completed, ...replaced, ...deleted];
 }
 
 function scheduledWorkOrderFilterLabel(filterValue = "all") {

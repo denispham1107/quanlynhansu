@@ -195,11 +195,11 @@ const mixedStatuses = [
 ];
 assert.deepEqual(
   helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses, "all").map((schedule) => schedule.id),
-  ["oldest-generated", "recent-pending", "older-converted", "older-assigned", "oldest-deleted", "middle-replaced", "recent-deleted"]
+  ["oldest-generated", "recent-pending", "older-converted", "older-assigned", "middle-replaced", "oldest-deleted", "recent-deleted"]
 );
 assert.deepEqual(
   helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses, "locked").map((schedule) => schedule.id),
-  ["oldest-generated", "recent-pending", "older-converted", "older-assigned", "oldest-deleted", "middle-replaced", "recent-deleted"]
+  ["oldest-generated", "recent-pending", "older-converted", "older-assigned", "middle-replaced", "oldest-deleted", "recent-deleted"]
 );
 assert.deepEqual(
   helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses.filter((schedule) => schedule.status === "deleted"), "deleted")
