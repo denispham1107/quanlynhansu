@@ -40,6 +40,7 @@ const buildHelpers = new Function(`
   ${extractFunction("getTaskDateValue")}
   ${extractFunction("todayInputValue")}
   ${extractFunction("yesterdayInputValue")}
+  ${extractFunction("tomorrowInputValue")}
   ${extractFunction("scheduledWorkOrderMatchesStatusFilter")}
   ${extractFunction("sortScheduledWorkOrdersForDisplay")}
   ${extractFunction("normalizeScheduledWorkOrderTimeFilter")}
@@ -50,7 +51,7 @@ const buildHelpers = new Function(`
   ${extractFunction("canOverrideLockedScheduledWorkOrder")}
   ${extractFunction("canEditScheduledWorkOrder")}
   ${extractFunction("canDeleteScheduledWorkOrder")}
-  return { state, setAdmin: (value) => { admin = value; }, todayInputValue, yesterdayInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderMonthKey, scheduledWorkOrderMatchesTimeFilter, scheduledWorkOrderTimeFilterLabel, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
+  return { state, setAdmin: (value) => { admin = value; }, todayInputValue, yesterdayInputValue, tomorrowInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderMonthKey, scheduledWorkOrderMatchesTimeFilter, scheduledWorkOrderTimeFilterLabel, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
 `);
 
 const helpers = buildHelpers();
@@ -62,6 +63,7 @@ function localNoonMilliseconds(dateValue) {
 
 const today = helpers.todayInputValue();
 const yesterday = helpers.yesterdayInputValue();
+const tomorrow = helpers.tomorrowInputValue();
 const twoDaysAgoDate = new Date(localNoonMilliseconds(yesterday));
 twoDaysAgoDate.setDate(twoDaysAgoDate.getDate() - 1);
 const twoDaysAgo = [
@@ -71,6 +73,7 @@ const twoDaysAgo = [
 ].join("-");
 
 const schedules = [
+  { id: "tomorrow-unassigned", status: "pending", scheduledForMs: localNoonMilliseconds(tomorrow) },
   { id: "today-unassigned", status: "pending", scheduledForMs: localNoonMilliseconds(today) },
   { id: "today-assigned", status: "assigned", scheduledForMs: localNoonMilliseconds(today) },
   { id: "today-deleted", status: "deleted", scheduledForMs: localNoonMilliseconds(today) },
@@ -92,6 +95,9 @@ assert.deepEqual(filterIds("today", "deleted"), ["today-deleted"]);
 assert.deepEqual(filterIds("today", "replaced"), ["today-replaced"]);
 assert.deepEqual(filterIds("today", "all"), ["today-unassigned", "today-assigned", "today-deleted", "today-replaced"]);
 assert.deepEqual(filterIds("yesterday", "assigned"), ["yesterday-assigned"]);
+assert.deepEqual(filterIds("tomorrow", "unassigned"), ["tomorrow-unassigned"]);
+assert.deepEqual(filterIds("tomorrow", "assigned"), []);
+assert.equal(helpers.tomorrowInputValue(new Date(2026, 11, 31, 12)), "2027-01-01");
 
 const currentMonth = helpers.scheduledWorkOrderMonthKey();
 const previousMonth = helpers.scheduledWorkOrderMonthKey(-1);
@@ -108,9 +114,11 @@ assert.deepEqual(monthSchedules.filter((schedule) => helpers.scheduledWorkOrderM
 assert.equal(helpers.scheduledWorkOrderMonthKey(-1, new Date(2026, 0, 15)), "2025-12");
 assert.equal(helpers.scheduledWorkOrderMonthKey(0, new Date(2026, 0, 15)), "2026-01");
 assert.equal(helpers.scheduledWorkOrderTimeFilterLabel("this-month"), "Tháng này");
+assert.equal(helpers.scheduledWorkOrderTimeFilterLabel("tomorrow"), "Ngày mai");
 assert.equal(helpers.scheduledWorkOrderTimeFilterLabel("last-month"), "Tháng trước");
 assert.equal(helpers.scheduledWorkOrderTimeFilterLabel("all"), "Tất cả");
 const scheduleTimeSelect = pageSource.match(/<select id="scheduledWorkOrderTimeFilter">([\s\S]*?)<\/select>/)?.[1] || "";
+assert.match(scheduleTimeSelect, /<option value="tomorrow">Ngày mai<\/option>/);
 assert.match(scheduleTimeSelect, /<option value="this-month">Tháng này<\/option>/);
 assert.match(scheduleTimeSelect, /<option value="last-month">Tháng trước<\/option>/);
 assert.match(scheduleTimeSelect, /<option value="all">Tất cả<\/option>/);
@@ -123,18 +131,22 @@ helpers.state.scheduledWorkOrderDateToFilter = yesterday;
 assert.deepEqual(filterIds("range", "assigned"), ["today-assigned", "yesterday-assigned"]);
 
 const mixedStatuses = [
-  { id: "recent-deleted", status: "deleted" },
-  { id: "recent-pending", status: "pending" },
-  { id: "middle-replaced", status: "replaced" },
-  { id: "older-assigned", status: "assigned" },
-  { id: "older-converted", status: "converted" },
-  { id: "oldest-deleted", status: "deleted" }
+  { id: "recent-deleted", status: "deleted", scheduledForMs: 600 },
+  { id: "recent-pending", status: "pending", scheduledForMs: 500 },
+  { id: "middle-replaced", status: "replaced", scheduledForMs: 400 },
+  { id: "older-assigned", status: "assigned", scheduledForMs: 300 },
+  { id: "older-converted", status: "converted", scheduledForMs: 200 },
+  { id: "oldest-deleted", status: "deleted", scheduledForMs: 100 }
 ];
 assert.deepEqual(
   helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses, "all").map((schedule) => schedule.id),
-  ["recent-pending", "older-assigned", "older-converted", "recent-deleted", "middle-replaced", "oldest-deleted"]
+  ["older-converted", "older-assigned", "recent-pending", "oldest-deleted", "middle-replaced", "recent-deleted"]
 );
-assert.deepEqual(helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses, "deleted"), mixedStatuses);
+assert.deepEqual(
+  helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses.filter((schedule) => schedule.status === "deleted"), "deleted")
+    .map((schedule) => schedule.id),
+  ["oldest-deleted", "recent-deleted"]
+);
 assert.deepEqual(mixedStatuses.map((schedule) => schedule.id), [
   "recent-deleted", "recent-pending", "middle-replaced", "older-assigned", "older-converted", "oldest-deleted"
 ]);

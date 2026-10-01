@@ -2404,6 +2404,12 @@ function yesterdayInputValue() {
   return toLocalDateInputValue(date);
 }
 
+function tomorrowInputValue(referenceDate = new Date()) {
+  const date = new Date(referenceDate);
+  date.setDate(date.getDate() + 1);
+  return toLocalDateInputValue(date);
+}
+
 function getMonthDateRange(monthOffset = 0) {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
@@ -11308,11 +11314,14 @@ function scheduledWorkOrderMatchesStatusFilter(schedule, filterValue = "all") {
 }
 
 function sortScheduledWorkOrdersForDisplay(schedules, filterValue = "all") {
-  if (filterValue !== "all") return schedules;
-  // Giữ nguyên thứ tự thời gian trong từng nhóm, chỉ đưa lịch sử xuống cuối.
+  const chronological = [...schedules].sort((left, right) => (
+    Number(left.scheduledForMs || 0) - Number(right.scheduledForMs || 0)
+  ));
+  if (filterValue !== "all") return chronological;
+  // Lịch hiện hành trước lịch sử; trong mỗi nhóm luôn xếp từ sớm đến muộn.
   const current = [];
   const history = [];
-  schedules.forEach((schedule) => {
+  chronological.forEach((schedule) => {
     (schedule.status === "deleted" || schedule.status === "replaced" ? history : current).push(schedule);
   });
   return [...current, ...history];
@@ -11329,7 +11338,7 @@ function scheduledWorkOrderFilterLabel(filterValue = "all") {
 }
 
 function normalizeScheduledWorkOrderTimeFilter(filterValue = "today") {
-  return ["today", "yesterday", "this-month", "last-month", "date", "range", "all"].includes(filterValue)
+  return ["today", "tomorrow", "yesterday", "this-month", "last-month", "date", "range", "all"].includes(filterValue)
     ? filterValue
     : "today";
 }
@@ -11351,6 +11360,7 @@ function scheduledWorkOrderMatchesTimeFilter(schedule, filterValue = "today") {
   const scheduleDate = scheduledWorkOrderDateValue(schedule);
   if (!scheduleDate) return false;
   if (activeFilter === "today") return scheduleDate === todayInputValue();
+  if (activeFilter === "tomorrow") return scheduleDate === tomorrowInputValue();
   if (activeFilter === "yesterday") return scheduleDate === yesterdayInputValue();
   if (activeFilter === "this-month") return scheduleDate.slice(0, 7) === scheduledWorkOrderMonthKey();
   if (activeFilter === "last-month") return scheduleDate.slice(0, 7) === scheduledWorkOrderMonthKey(-1);
@@ -11369,6 +11379,7 @@ function scheduledWorkOrderMatchesTimeFilter(schedule, filterValue = "today") {
 
 function scheduledWorkOrderTimeFilterLabel(filterValue = "today") {
   const activeFilter = normalizeScheduledWorkOrderTimeFilter(filterValue);
+  if (activeFilter === "tomorrow") return "Ngày mai";
   if (activeFilter === "this-month") return "Tháng này";
   if (activeFilter === "last-month") return "Tháng trước";
   if (activeFilter === "all") return "Tất cả";
