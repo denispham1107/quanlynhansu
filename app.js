@@ -11304,6 +11304,9 @@ function scheduledReplacementTargets(schedules) {
 }
 
 function scheduledWorkOrderMatchesStatusFilter(schedule, filterValue = "all") {
+  const isLocked = schedule?.editDeletePolicy === "locked";
+  if (filterValue === "locked") return isLocked;
+  if (isLocked) return false;
   const status = String(schedule?.status || "pending");
   if (filterValue === "assigned") return status === "assigned";
   if (filterValue === "unassigned") return status === "pending" || status === "generated";
@@ -11329,6 +11332,7 @@ function sortScheduledWorkOrdersForDisplay(schedules, filterValue = "all") {
 
 function scheduledWorkOrderFilterLabel(filterValue = "all") {
   return ({
+    locked: "Không cho Sửa-Xóa",
     unassigned: "Chưa giao việc",
     assigned: "Đã giao việc",
     deleted: "Đã xóa",
@@ -11433,7 +11437,7 @@ function renderScheduledWorkOrderList() {
   if (!els.scheduledWorkOrderList) return;
   const schedules = Array.isArray(state.scheduledWorkOrders) ? state.scheduledWorkOrders : [];
   const replacementTargets = scheduledReplacementTargets(schedules);
-  const activeStatusFilter = ["all", "unassigned", "assigned", "deleted", "replaced", "converted"].includes(state.scheduledWorkOrderStatusFilter)
+  const activeStatusFilter = ["all", "locked", "unassigned", "assigned", "deleted", "replaced", "converted"].includes(state.scheduledWorkOrderStatusFilter)
     ? state.scheduledWorkOrderStatusFilter
     : "all";
   const activeTimeFilter = normalizeScheduledWorkOrderTimeFilter(state.scheduledWorkOrderTimeFilter);
@@ -11529,7 +11533,7 @@ function showScheduledWorkOrderInList(scheduleId, { missingMessage = "Không cò
     toast("Ngày của lịch đã thay thế không hợp lệ.", "error");
     return;
   }
-  state.scheduledWorkOrderStatusFilter = "all";
+  state.scheduledWorkOrderStatusFilter = target.editDeletePolicy === "locked" ? "locked" : "all";
   state.scheduledWorkOrderTimeFilter = "date";
   state.scheduledWorkOrderDateFilter = targetDate;
   renderScheduledWorkOrderList();
@@ -11750,7 +11754,7 @@ els.viewScheduledWorkOrdersHeaderBtn?.addEventListener("click", () => {
 });
 els.scheduledWorkOrderStatusFilter?.addEventListener("change", () => {
   const nextFilter = els.scheduledWorkOrderStatusFilter?.value || "all";
-  state.scheduledWorkOrderStatusFilter = ["unassigned", "assigned", "deleted", "replaced", "converted"].includes(nextFilter) ? nextFilter : "all";
+  state.scheduledWorkOrderStatusFilter = ["locked", "unassigned", "assigned", "deleted", "replaced", "converted"].includes(nextFilter) ? nextFilter : "all";
   renderScheduledWorkOrderList();
 });
 els.scheduledWorkOrderTimeFilter?.addEventListener("change", () => {

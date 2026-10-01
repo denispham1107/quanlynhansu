@@ -43,6 +43,7 @@ const buildHelpers = new Function(`
   ${extractFunction("tomorrowInputValue")}
   ${extractFunction("scheduledWorkOrderMatchesStatusFilter")}
   ${extractFunction("sortScheduledWorkOrdersForDisplay")}
+  ${extractFunction("scheduledWorkOrderFilterLabel")}
   ${extractFunction("normalizeScheduledWorkOrderTimeFilter")}
   ${extractFunction("scheduledWorkOrderMonthKey")}
   ${extractFunction("scheduledWorkOrderDateValue")}
@@ -51,7 +52,7 @@ const buildHelpers = new Function(`
   ${extractFunction("canOverrideLockedScheduledWorkOrder")}
   ${extractFunction("canEditScheduledWorkOrder")}
   ${extractFunction("canDeleteScheduledWorkOrder")}
-  return { state, setAdmin: (value) => { admin = value; }, todayInputValue, yesterdayInputValue, tomorrowInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderMonthKey, scheduledWorkOrderMatchesTimeFilter, scheduledWorkOrderTimeFilterLabel, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
+  return { state, setAdmin: (value) => { admin = value; }, todayInputValue, yesterdayInputValue, tomorrowInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderFilterLabel, scheduledWorkOrderMonthKey, scheduledWorkOrderMatchesTimeFilter, scheduledWorkOrderTimeFilterLabel, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
 `);
 
 const helpers = buildHelpers();
@@ -98,6 +99,25 @@ assert.deepEqual(filterIds("yesterday", "assigned"), ["yesterday-assigned"]);
 assert.deepEqual(filterIds("tomorrow", "unassigned"), ["tomorrow-unassigned"]);
 assert.deepEqual(filterIds("tomorrow", "assigned"), []);
 assert.equal(helpers.tomorrowInputValue(new Date(2026, 11, 31, 12)), "2027-01-01");
+
+const lockedSchedules = [
+  { id: "locked-pending", status: "pending", editDeletePolicy: "locked" },
+  { id: "locked-assigned", status: "assigned", editDeletePolicy: "locked" },
+  { id: "locked-deleted", status: "deleted", editDeletePolicy: "locked" },
+  { id: "editable-assigned", status: "assigned", editDeletePolicy: "editable" }
+];
+const idsForStatus = (filterValue) => lockedSchedules
+  .filter((schedule) => helpers.scheduledWorkOrderMatchesStatusFilter(schedule, filterValue))
+  .map((schedule) => schedule.id);
+assert.deepEqual(idsForStatus("locked"), ["locked-pending", "locked-assigned", "locked-deleted"]);
+assert.deepEqual(idsForStatus("all"), ["editable-assigned"]);
+assert.deepEqual(idsForStatus("assigned"), ["editable-assigned"]);
+for (const filterValue of ["unassigned", "deleted", "replaced", "converted"]) {
+  assert.deepEqual(idsForStatus(filterValue), []);
+}
+assert.equal(helpers.scheduledWorkOrderFilterLabel("locked"), "Không cho Sửa-Xóa");
+assert.match(pageSource, /<option value="locked">Không cho Sửa-Xóa<\/option>/);
+assert.match(appSource, /state\.scheduledWorkOrderStatusFilter = target\.editDeletePolicy === "locked" \? "locked" : "all";/);
 
 const currentMonth = helpers.scheduledWorkOrderMonthKey();
 const previousMonth = helpers.scheduledWorkOrderMonthKey(-1);
