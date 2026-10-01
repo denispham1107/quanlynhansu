@@ -19707,6 +19707,118 @@ async function cleanupUncommittedReportPhotos(photos = []) {
   );
 }
 
+function isPhoneCameraDevice() {
+  return navigator.userAgentData?.mobile === true
+    || /iPhone|iPod|Android.*Mobile|Windows Phone/i.test(navigator.userAgent || "");
+}
+
+async function captureReportPhotoFromCamera() {
+  if (document.querySelector(".report-camera-overlay")) return null;
+  if (!isPhoneCameraDevice()) {
+    throw new Error("Ảnh báo cáo phải được chụp trực tiếp bằng camera điện thoại.");
+  }
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Không mở được camera. Hãy dùng HTTPS và cấp quyền camera cho trình duyệt điện thoại.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const overlay = document.createElement("div");
+    overlay.className = "report-camera-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Chụp ảnh báo cáo");
+    overlay.innerHTML = `
+      <div class="report-camera-card">
+        <div class="report-camera-header">
+          <strong>Chụp ảnh báo cáo</strong>
+          <button class="report-camera-cancel" type="button" aria-label="Đóng camera">✕</button>
+        </div>
+        <div class="report-camera-content">
+          <video class="report-camera-preview" autoplay muted playsinline aria-label="Hình ảnh trực tiếp từ camera"></video>
+          <p>Chụp ảnh mới bằng camera điện thoại. Ảnh trong thư viện không thể dùng làm ảnh báo cáo.</p>
+        </div>
+        <div class="report-camera-actions">
+          <button class="report-camera-cancel" type="button">Hủy</button>
+          <button class="report-camera-shoot" type="button" disabled>📸 Chụp ảnh</button>
+        </div>
+      </div>
+    `;
+
+    const video = overlay.querySelector("video");
+    const shootButton = overlay.querySelector(".report-camera-shoot");
+    const previousOverflow = document.body.style.overflow;
+    let stream = null;
+    let finished = false;
+
+    const close = (file = null, error = null) => {
+      if (finished) return;
+      finished = true;
+      stream?.getTracks().forEach((track) => track.stop());
+      video.srcObject = null;
+      overlay.remove();
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+      if (error) reject(error);
+      else resolve(file);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") close();
+    };
+
+    overlay.querySelectorAll(".report-camera-cancel").forEach((button) => {
+      button.addEventListener("click", () => close());
+    });
+    shootButton.addEventListener("click", () => {
+      if (finished || !video.videoWidth || !video.videoHeight) return;
+      shootButton.disabled = true;
+      try {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 2560 / Math.max(video.videoWidth, video.videoHeight));
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Không tạo được ảnh từ camera.");
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            close(null, new Error("Không lưu được ảnh vừa chụp. Vui lòng thử lại."));
+            return;
+          }
+          const capturedAt = Date.now();
+          close(new File([blob], `bao-cao-${capturedAt}.jpg`, {
+            type: "image/jpeg",
+            lastModified: capturedAt
+          }));
+        }, "image/jpeg", 0.85);
+      } catch (error) {
+        close(null, new Error("Không chụp được ảnh từ camera. Vui lòng thử lại."));
+      }
+    });
+
+    document.body.appendChild(overlay);
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
+    overlay.querySelector(".report-camera-cancel")?.focus();
+
+    navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" } } })
+      .then(async (cameraStream) => {
+        if (finished) {
+          cameraStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        stream = cameraStream;
+        video.srcObject = cameraStream;
+        await video.play();
+        if (!finished) shootButton.disabled = false;
+      })
+      .catch((error) => {
+        if (finished) return;
+        console.error("Không mở được camera báo cáo:", error);
+        close(null, new Error("Không mở được camera. Hãy cấp quyền camera cho trình duyệt rồi thử lại."));
+      });
+  });
+}
+
 async function openPhotoUploadPicker(taskId, button) {
   const task = state.tasks.find((item) => item.id === taskId);
 
@@ -19720,16 +19832,15 @@ async function openPhotoUploadPicker(taskId, button) {
     return;
   }
 
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-  input.multiple = true;
-  input.style.display = "none";
-  document.body.appendChild(input);
-
-  input.addEventListener("change", async () => {
-    const files = Array.from(input.files || []);
-    input.remove();
+  let capturedFile;
+  try {
+    capturedFile = await captureReportPhotoFromCamera();
+  } catch (error) {
+    toast(error.message || "Không mở được camera điện thoại.", "error");
+    return;
+  }
+  if (!capturedFile) return;
+  const files = [capturedFile];
 
     const validationError = validateSelectedPhotoFiles(files);
     if (validationError) {
@@ -19761,7 +19872,10 @@ async function openPhotoUploadPicker(taskId, button) {
         }
 
         knownFingerprints.push(fingerprint);
-        const captureInfo = await readPhotoCapturedAt(originalFile);
+        const captureInfo = {
+          date: new Date(originalFile.lastModified),
+          source: "in_app_camera"
+        };
         if (button) button.textContent = `Đang tối ưu ${index + 1}/${files.length}...`;
         const optimizedItem = await optimizePhotoFileForUpload(originalFile);
 
@@ -19922,9 +20036,6 @@ async function openPhotoUploadPicker(taskId, button) {
     } finally {
       setButtonLoading(button, false);
     }
-  }, { once: true });
-
-  input.click();
 }
 
 // =========================

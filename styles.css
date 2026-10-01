@@ -250,3 +250,76 @@ input:focus, select:focus, textarea:focus {
 @supports (-webkit-touch-callout: none) {
   input, select, textarea { font-size: 16px !important; min-height: 48px; }
 }
+
+.report-camera-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: rgba(15, 23, 42, .88);
+}
+.report-camera-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: min(100%, 680px);
+  max-height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  border-radius: 20px;
+  background: #fff;
+}
+.report-camera-header,
+.report-camera-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  min-width: 0;
+}
+.report-camera-header strong { min-width: 0; overflow-wrap: anywhere; }
+.report-camera-content {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 14px;
+}
+.report-camera-preview {
+  display: block;
+  width: 100%;
+  max-height: min(65dvh, 600px);
+  min-width: 0;
+  border-radius: 12px;
+  background: #111827;
+  object-fit: contain;
+}
+.report-camera-content p { margin: 10px 0; color: #475569; overflow-wrap: anywhere; }
+.report-camera-actions { border-top: 1px solid #e2e8f0; }
+.report-camera-actions button { flex: 1 1 0; min-width: 0; }
+.report-camera-cancel,
+.report-camera-shoot {
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.report-camera-cancel { background: #e2e8f0; color: #0f172a; }
+.report-camera-shoot { background: #2563eb; color: #fff; }
+.report-camera-shoot:disabled { opacity: .55; cursor: not-allowed; }
+
+@media (max-width: 640px) {
+  .report-camera-overlay { padding: 0; }
+  .report-camera-card { width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+  .report-camera-header { padding-top: max(14px, env(safe-area-inset-top)); }
+  .report-camera-actions { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+  .report-camera-content { flex: 1 1 auto; }
+  .report-camera-preview { max-height: 100%; }
+}
