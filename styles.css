@@ -299,10 +299,41 @@ input:focus, select:focus, textarea:focus {
   object-fit: contain;
 }
 .report-camera-content p { margin: 10px 0; color: #475569; overflow-wrap: anywhere; }
+.report-camera-error { color: #b91c1c !important; font-weight: 700; }
+.report-camera-review { display: grid; gap: 8px; min-width: 0; padding-bottom: 12px; }
+.report-camera-count { font-size: 14px; color: #0f172a; }
+.report-camera-captures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+.report-camera-capture { position: relative; min-width: 0; }
+.report-camera-capture img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 10px;
+}
+.report-camera-capture button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 30px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
 .report-camera-actions { border-top: 1px solid #e2e8f0; }
 .report-camera-actions button { flex: 1 1 0; min-width: 0; }
 .report-camera-cancel,
-.report-camera-shoot {
+.report-camera-shoot,
+.report-camera-submit {
   min-height: 44px;
   border: 0;
   border-radius: 12px;
@@ -313,7 +344,9 @@ input:focus, select:focus, textarea:focus {
 }
 .report-camera-cancel { background: #e2e8f0; color: #0f172a; }
 .report-camera-shoot { background: #2563eb; color: #fff; }
-.report-camera-shoot:disabled { opacity: .55; cursor: not-allowed; }
+.report-camera-submit { background: #16a34a; color: #fff; }
+.report-camera-shoot:disabled,
+.report-camera-submit:disabled { opacity: .55; cursor: not-allowed; }
 
 @media (max-width: 640px) {
   .report-camera-overlay { padding: 0; }
@@ -322,4 +355,5 @@ input:focus, select:focus, textarea:focus {
   .report-camera-actions { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
   .report-camera-content { flex: 1 1 auto; }
   .report-camera-preview { max-height: 100%; }
+  .report-camera-captures { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

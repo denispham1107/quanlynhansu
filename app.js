@@ -19712,8 +19712,8 @@ function isPhoneCameraDevice() {
     || /iPhone|iPod|Android.*Mobile|Windows Phone/i.test(navigator.userAgent || "");
 }
 
-async function captureReportPhotoFromCamera() {
-  if (document.querySelector(".report-camera-overlay")) return null;
+async function captureReportPhotosFromCamera() {
+  if (document.querySelector(".report-camera-overlay")) return [];
   if (!isPhoneCameraDevice()) {
     throw new Error("Ảnh báo cáo phải được chụp trực tiếp bằng camera điện thoại.");
   }
@@ -19731,26 +19731,39 @@ async function captureReportPhotoFromCamera() {
       <div class="report-camera-card">
         <div class="report-camera-header">
           <strong>Chụp ảnh báo cáo</strong>
-          <button class="report-camera-cancel" type="button" aria-label="Đóng camera">✕</button>
+          <button class="report-camera-cancel" type="button" aria-label="Hủy chụp ảnh">Hủy ✕</button>
         </div>
         <div class="report-camera-content">
           <video class="report-camera-preview" autoplay muted playsinline aria-label="Hình ảnh trực tiếp từ camera"></video>
-          <p>Chụp ảnh mới bằng camera điện thoại. Ảnh trong thư viện không thể dùng làm ảnh báo cáo.</p>
+          <p>Chụp liên tiếp tối đa 30 ảnh bằng camera điện thoại, rồi đăng tất cả cùng lúc. Không chọn ảnh từ thư viện.</p>
+          <p class="report-camera-error" role="alert" hidden></p>
+          <div class="report-camera-review">
+            <strong class="report-camera-count">Chưa có ảnh</strong>
+            <div class="report-camera-captures" aria-label="Ảnh báo cáo đã chụp"></div>
+          </div>
         </div>
         <div class="report-camera-actions">
-          <button class="report-camera-cancel" type="button">Hủy</button>
           <button class="report-camera-shoot" type="button" disabled>📸 Chụp ảnh</button>
+          <button class="report-camera-submit" type="button" disabled>Đăng 0 ảnh</button>
         </div>
       </div>
     `;
 
     const video = overlay.querySelector("video");
     const shootButton = overlay.querySelector(".report-camera-shoot");
+    const submitButton = overlay.querySelector(".report-camera-submit");
+    const captures = overlay.querySelector(".report-camera-captures");
+    const count = overlay.querySelector(".report-camera-count");
+    const errorMessage = overlay.querySelector(".report-camera-error");
     const previousOverflow = document.body.style.overflow;
+    const capturedPhotos = [];
     let stream = null;
     let finished = false;
+    let cameraReady = false;
+    let capturing = false;
+    let captureSequence = 0;
 
-    const close = (file = null, error = null) => {
+    const close = (files = [], error = null) => {
       if (finished) return;
       finished = true;
       stream?.getTracks().forEach((track) => track.stop());
@@ -19759,7 +19772,41 @@ async function captureReportPhotoFromCamera() {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKeyDown);
       if (error) reject(error);
-      else resolve(file);
+      else resolve(files);
+    };
+    const updateControls = () => {
+      const total = capturedPhotos.length;
+      count.textContent = total ? `Đã chụp ${total}/30 ảnh` : "Chưa có ảnh";
+      submitButton.textContent = `Đăng ${total} ảnh`;
+      submitButton.disabled = capturing || total === 0;
+      shootButton.disabled = !cameraReady || capturing || total >= 30;
+    };
+    const renderCaptures = () => {
+      captures.replaceChildren();
+      capturedPhotos.forEach((photo, index) => {
+        const item = document.createElement("div");
+        item.className = "report-camera-capture";
+        const image = document.createElement("img");
+        image.src = photo.preview;
+        image.alt = `Ảnh đã chụp ${index + 1}`;
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.textContent = "✕";
+        removeButton.setAttribute("aria-label", `Bỏ ảnh đã chụp ${index + 1}`);
+        removeButton.addEventListener("click", () => {
+          capturedPhotos.splice(index, 1);
+          renderCaptures();
+        });
+        item.append(image, removeButton);
+        captures.appendChild(item);
+      });
+      updateControls();
+    };
+    const showCaptureError = () => {
+      errorMessage.textContent = "Không chụp được ảnh. Vui lòng thử lại.";
+      errorMessage.hidden = false;
+      capturing = false;
+      updateControls();
     };
     const onKeyDown = (event) => {
       if (event.key === "Escape") close();
@@ -19768,30 +19815,45 @@ async function captureReportPhotoFromCamera() {
     overlay.querySelectorAll(".report-camera-cancel").forEach((button) => {
       button.addEventListener("click", () => close());
     });
+    submitButton.addEventListener("click", () => {
+      if (!capturing && capturedPhotos.length) close(capturedPhotos.map((photo) => photo.file));
+    });
     shootButton.addEventListener("click", () => {
-      if (finished || !video.videoWidth || !video.videoHeight) return;
-      shootButton.disabled = true;
+      if (finished || capturing || capturedPhotos.length >= 30 || !video.videoWidth || !video.videoHeight) return;
+      capturing = true;
+      errorMessage.hidden = true;
+      updateControls();
       try {
         const canvas = document.createElement("canvas");
-        const scale = Math.min(1, 2560 / Math.max(video.videoWidth, video.videoHeight));
+        const scale = Math.min(1, PHOTO_UPLOAD_MAX_DIMENSION / Math.max(video.videoWidth, video.videoHeight));
         canvas.width = Math.round(video.videoWidth * scale);
         canvas.height = Math.round(video.videoHeight * scale);
         const context = canvas.getContext("2d");
         if (!context) throw new Error("Không tạo được ảnh từ camera.");
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const previewCanvas = document.createElement("canvas");
+        previewCanvas.width = 120;
+        previewCanvas.height = 120;
+        const previewContext = previewCanvas.getContext("2d");
+        if (!previewContext) throw new Error("Không tạo được ảnh xem trước.");
+        const crop = Math.min(canvas.width, canvas.height);
+        previewContext.drawImage(canvas, (canvas.width - crop) / 2, (canvas.height - crop) / 2, crop, crop, 0, 0, 120, 120);
+        const preview = previewCanvas.toDataURL("image/jpeg", 0.6);
         canvas.toBlob((blob) => {
-          if (!blob) {
-            close(null, new Error("Không lưu được ảnh vừa chụp. Vui lòng thử lại."));
-            return;
-          }
+          if (finished) return;
+          if (!blob) return showCaptureError();
           const capturedAt = Date.now();
-          close(new File([blob], `bao-cao-${capturedAt}.jpg`, {
+          captureSequence += 1;
+          const file = new File([blob], `bao-cao-${capturedAt}-${captureSequence}.jpg`, {
             type: "image/jpeg",
             lastModified: capturedAt
-          }));
-        }, "image/jpeg", 0.85);
+          });
+          capturedPhotos.push({ file, preview });
+          capturing = false;
+          renderCaptures();
+        }, "image/jpeg", PHOTO_UPLOAD_JPEG_QUALITY);
       } catch (error) {
-        close(null, new Error("Không chụp được ảnh từ camera. Vui lòng thử lại."));
+        showCaptureError();
       }
     });
 
@@ -19809,12 +19871,15 @@ async function captureReportPhotoFromCamera() {
         stream = cameraStream;
         video.srcObject = cameraStream;
         await video.play();
-        if (!finished) shootButton.disabled = false;
+        if (!finished) {
+          cameraReady = true;
+          updateControls();
+        }
       })
       .catch((error) => {
         if (finished) return;
         console.error("Không mở được camera báo cáo:", error);
-        close(null, new Error("Không mở được camera. Hãy cấp quyền camera cho trình duyệt rồi thử lại."));
+        close([], new Error("Không mở được camera. Hãy cấp quyền camera cho trình duyệt rồi thử lại."));
       });
   });
 }
@@ -19832,15 +19897,14 @@ async function openPhotoUploadPicker(taskId, button) {
     return;
   }
 
-  let capturedFile;
+  let files;
   try {
-    capturedFile = await captureReportPhotoFromCamera();
+    files = await captureReportPhotosFromCamera();
   } catch (error) {
     toast(error.message || "Không mở được camera điện thoại.", "error");
     return;
   }
-  if (!capturedFile) return;
-  const files = [capturedFile];
+  if (!files.length) return;
 
     const validationError = validateSelectedPhotoFiles(files);
     if (validationError) {
