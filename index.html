@@ -29,6 +29,21 @@
         installed: false,
         serviceWorkerPromise: null
       };
+      const updateCheckIntervalMs = 5 * 60 * 1000;
+      let lastUpdateCheckAt = 0;
+
+      const checkForAppUpdate = async () => {
+        if (document.hidden || navigator.onLine === false) return;
+        const now = Date.now();
+        if (now - lastUpdateCheckAt < 60 * 1000) return;
+        lastUpdateCheckAt = now;
+        try {
+          const registration = await pwaState.serviceWorkerPromise;
+          await registration?.update();
+        } catch (error) {
+          console.warn("Chưa kiểm tra được bản cập nhật ứng dụng:", error);
+        }
+      };
 
       window.addEventListener("beforeinstallprompt", (event) => {
         event.preventDefault();
@@ -44,11 +59,18 @@
 
       if ("serviceWorker" in navigator) {
         pwaState.serviceWorkerPromise = navigator.serviceWorker
-          .register("./sw.js", { scope: "./" })
+          .register("./sw.js", { scope: "./", updateViaCache: "none" })
+          .then((registration) => {
+            void checkForAppUpdate();
+            return registration;
+          })
           .catch((error) => {
             console.warn("Không đăng ký sớm được service worker:", error);
             return null;
           });
+        window.setInterval(() => void checkForAppUpdate(), updateCheckIntervalMs);
+        window.addEventListener("focus", () => void checkForAppUpdate());
+        document.addEventListener("visibilitychange", () => void checkForAppUpdate());
       }
 
       // Mã Firebase là module ngoài miền. Nếu mạng chậm, vẫn phải nói rõ ứng
@@ -12342,7 +12364,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20261001-report-camera-batch-v130"></script>
+  <script type="module" src="app.js?v=20261001-force-update-v131"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

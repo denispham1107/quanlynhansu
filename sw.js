@@ -1,11 +1,11 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20261001-report-camera-batch-v130";
+const CACHE_NAME = "culao-task-shell-v20261001-force-update-v131";
 const APP_SHELL_NETWORK_TIMEOUT_MS = 1800;
 const APP_SHELL_BACKGROUND_TIMEOUT_MS = 15000;
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./app.js?v=20261001-report-camera-batch-v130",
+  "./app.js?v=20261001-force-update-v131",
   "./styles.css"
 ];
 const OPTIONAL_SHELL = [
@@ -32,9 +32,24 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
-      .then(() => self.clients.claim())
+    (async () => {
+      const keys = await caches.keys();
+      const replacingOldApp = keys.some((key) => key.startsWith("culao-task-shell-") && key !== CACHE_NAME);
+      await Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)));
+      await self.clients.claim();
+      if (!replacingOldApp) return;
+
+      // Trang cũ đang mở vẫn chạy JavaScript cũ dù service worker đã đổi.
+      // Nạp lại mỗi tab cùng scope đúng một lần để nhận giao diện và luồng camera mới.
+      const scope = new URL(self.registration.scope);
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      await Promise.allSettled(windows.map(async (client) => {
+        const url = new URL(client.url);
+        if (url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return;
+        url.searchParams.set("_appVersion", CACHE_NAME);
+        await client.navigate(url.href);
+      }));
+    })()
   );
 });
 
@@ -42,6 +57,13 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+
+  // Lần nạp lại bắt buộc phải lấy đúng HTML đã đóng gói cùng worker mới,
+  // kể cả khi CDN còn trả bản HTML cũ trong ít phút đầu sau triển khai.
+  if (event.request.mode === "navigate" && url.searchParams.get("_appVersion") === CACHE_NAME) {
+    event.respondWith(caches.match("./index.html").then((cached) => cached || fetch(event.request)));
+    return;
+  }
 
   // Ưu tiên bản mới, nhưng không để mạng treo giữ trang trắng nhiều phút.
   // Khi có cache, giới hạn thời gian chờ và cập nhật cache ở nền.
