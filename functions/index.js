@@ -25,6 +25,7 @@ const {
   ordinaryDraftTaskUpdate,
   isScheduledDraftConversionUpdate,
   convertedScheduleUpdate,
+  collectConvertedScheduleAssignees,
   hotelDeliveredScheduleUpdate,
   linkedLunchCompletionUpdate
 } = require("./scheduled-conversion");
@@ -1428,9 +1429,23 @@ exports.listScheduledWorkOrders = onCall({
     db.collection("deletedScheduledWorkOrders").where("createdByUid", "==", adminUid).get(),
     db.collection("replacedScheduledWorkOrders").where("createdByUid", "==", adminUid).get()
   ]);
-  const schedules = [...snapshot.docs, ...deletedSnapshot.docs, ...replacedSnapshot.docs]
+  const scheduleItems = [...snapshot.docs, ...deletedSnapshot.docs, ...replacedSnapshot.docs]
     .map((item) => ({ id: item.id, ...item.data() }))
-    .filter((item) => String(item.createdByUid || "") === adminUid)
+    .filter((item) => String(item.createdByUid || "") === adminUid);
+  const convertedWorkOrderIds = new Set(scheduleItems
+    .filter((item) => item.status === "converted")
+    .map((item) => String(item.convertedWorkOrderId || "").trim())
+    .filter(Boolean));
+  const convertedTasks = [];
+  const convertedIds = [...convertedWorkOrderIds];
+  for (let offset = 0; offset < convertedIds.length; offset += 25) {
+    const taskSnapshot = await db.collection("tasks")
+      .where("workOrderId", "in", convertedIds.slice(offset, offset + 25))
+      .get();
+    convertedTasks.push(...taskSnapshot.docs.map((task) => task.data() || {}));
+  }
+  const convertedAssignees = collectConvertedScheduleAssignees(convertedTasks, convertedWorkOrderIds);
+  const schedules = scheduleItems
     .sort((left, right) => (
       (firestoreTimestampOrNull(right.scheduledAt)?.toMillis() || 0)
       - (firestoreTimestampOrNull(left.scheduledAt)?.toMillis() || 0)
@@ -1457,6 +1472,9 @@ exports.listScheduledWorkOrders = onCall({
       occurrenceIndex: Math.max(0, Math.trunc(Number(item.occurrenceIndex || 0))),
       status: String(item.status || "pending"),
       assignedToName: String(item.assignedToName || "").trim().slice(0, 120),
+      assignedToNames: item.status === "converted"
+        ? convertedAssignees.get(String(item.convertedWorkOrderId || "").trim()) || []
+        : [],
       assignmentCountdownWaitingForAvailableEmployee: item.assignmentCountdownWaitingForAvailableEmployee === true,
       assignmentCountdownStartedAtMs: firestoreTimestampOrNull(item.assignmentCountdownStartedAt)?.toMillis() || 0,
       assignmentDeadlineAtMs: firestoreTimestampOrNull(item.assignmentDeadlineAt)?.toMillis() || 0,
@@ -1762,6 +1780,33 @@ exports.markScheduledHotelDelivered = onCall(
   scheduledArrivalCallableOptions,
   async (request) => processScheduledGeneratedWorkOrderArrival(request, "hotel")
 );
+
+exports.getConvertedScheduledDraftLink = onCall({
+  region: REGION,
+  timeoutSeconds: 30,
+  memory: "256MiB",
+  maxInstances: 20
+}, async (request) => {
+  const adminUid = assertAuthenticated(request);
+  await assertAdmin(adminUid);
+  const workOrderId = String(request.data?.workOrderId || "").trim();
+  if (!workOrderId || workOrderId.includes("/") || workOrderId.length > 180) {
+    throw new HttpsError("invalid-argument", "Phiếu công việc không hợp lệ.");
+  }
+  const workOrderSnapshot = await db.doc(`workOrders/${workOrderId}`).get();
+  const workOrder = workOrderSnapshot.data() || {};
+  if (!workOrderSnapshot.exists || String(workOrder.createdByUid || "") !== adminUid
+    || workOrder.status !== "draft" || workOrder.scheduledWorkOrder === true) {
+    throw new HttpsError("failed-precondition", "Phiếu chưa giao việc này không còn hợp lệ để sửa.");
+  }
+  const linkedSchedules = await db.collection("scheduledWorkOrders")
+    .where("convertedWorkOrderId", "==", workOrderId)
+    .get();
+  return { linked: linkedSchedules.docs.some((item) => {
+    const schedule = item.data() || {};
+    return String(schedule.createdByUid || "") === adminUid && schedule.status === "converted";
+  }) };
+});
 
 async function materializeScheduledWorkOrderById(scheduleIdInput) {
   const scheduleId = String(scheduleIdInput || "").trim();

@@ -8,6 +8,7 @@ const {
   ordinaryDraftTaskUpdate,
   isScheduledDraftConversionUpdate,
   convertedScheduleUpdate,
+  collectConvertedScheduleAssignees,
   hotelDeliveredScheduleUpdate,
   linkedLunchCompletionUpdate
 } = require("./scheduled-conversion");
@@ -40,6 +41,19 @@ assert.equal(schedulePatch.generatedWorkOrderId, "");
 assert.equal(schedulePatch.assignmentDeadlineAt, null);
 assert.equal(schedulePatch.timeoutProcessedAt, now);
 
+const convertedIds = new Set(["ticket-1"]);
+assert.deepEqual(collectConvertedScheduleAssignees([
+  { workOrderId: "ticket-1", assignedToUid: "employee-1", assignedToName: "An", status: "draft" },
+  { workOrderId: "ticket-1", assignedToUid: "employee-1", assignedToName: "An", status: "assigned" },
+  { workOrderId: "ticket-1", assignedToUid: "employee-1", assignedToName: "An", status: "completed" },
+  { workOrderId: "ticket-1", assignedToUid: "employee-2", assignedToName: "Bình", status: "queued" },
+  { workOrderId: "ticket-1", assignedToUid: "employee-3", assignedToName: "Cũ", status: "waiting_assignee" },
+  { workOrderId: "other", assignedToUid: "employee-4", assignedToName: "Khác", status: "assigned" }
+], convertedIds).get("ticket-1"), ["An", "Bình"]);
+assert.equal(collectConvertedScheduleAssignees([
+  { workOrderId: "ticket-1", assignedToUid: "employee-1", assignedToName: "An", status: "draft" }
+], convertedIds).has("ticket-1"), false);
+
 const hotelPatch = hotelDeliveredScheduleUpdate(now, "admin-1");
 assert.equal(hotelPatch.status, "assigned");
 assert.equal(hotelPatch.hotelDelivered, true);
@@ -61,6 +75,8 @@ assert.equal(lunch.autoCompletedByScheduledConversion, true);
 assert.equal(lunch.convertedScheduledWorkOrderId, "ticket-1");
 
 const server = readFileSync(join(__dirname, "index.js"), "utf8");
+assert.match(server, /collectConvertedScheduleAssignees\(convertedTasks, convertedWorkOrderIds\)/);
+assert.match(server, /\.where\("workOrderId", "in", convertedIds\.slice\(offset, offset \+ 25\)\)/);
 const start = server.indexOf("async function processScheduledGeneratedWorkOrderArrival(");
 const end = server.indexOf("async function materializeScheduledWorkOrderById(", start);
 assert.ok(start >= 0 && end > start);

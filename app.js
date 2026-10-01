@@ -166,6 +166,7 @@ const getScheduledGeneratedWorkOrderForEditCallable = httpsCallable(functions, "
 const updateScheduledGeneratedWorkOrderCallable = httpsCallable(functions, "updateScheduledGeneratedWorkOrder");
 const convertScheduledGeneratedWorkOrderToDraftCallable = httpsCallable(functions, "convertScheduledGeneratedWorkOrderToDraft");
 const markScheduledHotelDeliveredCallable = httpsCallable(functions, "markScheduledHotelDelivered");
+const getConvertedScheduledDraftLinkCallable = httpsCallable(functions, "getConvertedScheduledDraftLink");
 
 // Secondary app dùng riêng để Admin tạo tài khoản nhân viên.
 // Cách này giúp tài khoản Admin hiện tại không bị đăng xuất khi createUserWithEmailAndPassword.
@@ -10834,6 +10835,12 @@ async function persistWorkOrder(dispatch, button) {
       throw new Error(photoValidationError);
     }
 
+    const previousWorkOrderId = state.editingWorkOrderId;
+    const preserveConvertedWorkOrderId = Boolean(
+      previousWorkOrderId && previousWorkOrderId !== "legacy" && isAdminProfile()
+      && (await getConvertedScheduledDraftLinkCallable({ workOrderId: previousWorkOrderId })).data?.linked === true
+    );
+
     if (dispatch) {
       const assignedHotelRows = rows.filter((row) => row.isHotel && row.assignedToUid);
       if (assignedHotelRows.length > 1) {
@@ -10872,10 +10879,10 @@ async function persistWorkOrder(dispatch, button) {
       });
     });
 
-    // Nếu đang sửa 1 phiếu nháp có sẵn: xoá phiếu + công việc cũ, sau đó tạo lại từ đầu.
+    // Phiếu Spa chuyển từ lịch phải giữ nguyên mã để lịch còn theo dõi được người nhận việc.
+    // Các Phiếu nháp khác vẫn dùng luồng xóa và tạo lại như trước.
     // Luôn giữ nguyên mốc tạo/lưu đầu tiên của Phiếu để Lịch sử giao việc hiển thị
     // đúng giờ tạo Phiếu, không bị đổi thành giờ giao việc sau khi sửa rồi giao.
-    const previousWorkOrderId = state.editingWorkOrderId;
     const previousWorkOrder = previousWorkOrderId
       ? getWorkOrderMeta(previousWorkOrderId)
       : null;
@@ -10895,12 +10902,14 @@ async function persistWorkOrder(dispatch, button) {
     if (previousWorkOrderId) {
       oldTasks.forEach((task) => batch.delete(doc(db, "tasks", task.id)));
 
-      if (previousWorkOrderId !== "legacy") {
+      if (previousWorkOrderId !== "legacy" && !preserveConvertedWorkOrderId) {
         batch.delete(doc(db, "workOrders", previousWorkOrderId));
       }
     }
 
-    const workOrderRef = doc(collection(db, "workOrders"));
+    const workOrderRef = preserveConvertedWorkOrderId
+      ? doc(db, "workOrders", previousWorkOrderId)
+      : doc(collection(db, "workOrders"));
     batch.set(workOrderRef, {
       id: workOrderRef.id,
       name: workOrderName,
@@ -11509,9 +11518,13 @@ function resetScheduledWorkOrderTimeFilter() {
 }
 
 function renderScheduledWorkOrderAssigneeBadge(schedule) {
-  const name = String(schedule?.assignedToName || "").trim();
-  if (schedule?.status !== "assigned" || schedule.hotelDelivered === true || !name) return "";
-  return `<span class="scheduled-work-order-assignee-badge">Nhân viên: ${escapeHtml(name)}</span>`;
+  if (schedule?.hotelDelivered === true) return "";
+  const names = schedule?.status === "converted"
+    ? (Array.isArray(schedule.assignedToNames) ? schedule.assignedToNames : [])
+    : schedule?.status === "assigned" ? [schedule.assignedToName] : [];
+  const displayNames = names.map((name) => String(name || "").trim()).filter(Boolean);
+  if (!displayNames.length) return "";
+  return `<span class="scheduled-work-order-assignee-badge">Nhân viên: ${displayNames.map(escapeHtml).join(", ")}</span>`;
 }
 
 function renderScheduledWorkOrderList() {

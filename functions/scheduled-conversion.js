@@ -51,6 +51,23 @@ function convertedScheduleUpdate(now, adminUid, workOrderId) {
   };
 }
 
+function collectConvertedScheduleAssignees(taskDocuments, convertedWorkOrderIds) {
+  const assignees = new Map();
+  for (const task of taskDocuments) {
+    const workOrderId = String(task?.workOrderId || "").trim();
+    const employeeUid = String(task?.assignedToUid || "").trim();
+    const employeeName = String(task?.assignedToName || "").trim().slice(0, 120);
+    if (!convertedWorkOrderIds.has(workOrderId) || !employeeUid || !employeeName
+      || ["draft", "waiting_assignee"].includes(String(task?.status || ""))) continue;
+    if (!assignees.has(workOrderId)) assignees.set(workOrderId, new Map());
+    assignees.get(workOrderId).set(employeeUid, employeeName);
+  }
+  return new Map([...assignees].map(([workOrderId, namesByUid]) => [
+    workOrderId,
+    [...namesByUid.values()].sort((left, right) => left.localeCompare(right, "vi"))
+  ]));
+}
+
 function hotelDeliveredScheduleUpdate(now, adminUid) {
   return {
     status: "assigned",
@@ -109,6 +126,7 @@ module.exports = {
   ordinaryDraftTaskUpdate,
   isScheduledDraftConversionUpdate,
   convertedScheduleUpdate,
+  collectConvertedScheduleAssignees,
   hotelDeliveredScheduleUpdate,
   linkedLunchCompletionUpdate
 };
