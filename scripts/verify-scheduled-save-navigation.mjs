@@ -46,7 +46,7 @@ assert.match(openList, /state\.scheduledWorkOrders = Array\.isArray\(result\?\.d
 assert.match(openList, /if \(focusScheduleId\) \{\s*showScheduledWorkOrderInList\(focusScheduleId/);
 assert.ok(openList.indexOf("state.scheduledWorkOrders =") < openList.indexOf("showScheduledWorkOrderInList(focusScheduleId"));
 
-assert.match(focus, /state\.scheduledWorkOrderStatusFilter = "all"/);
+assert.match(focus, /state\.scheduledWorkOrderStatusFilter = target\.editDeletePolicy === "locked" \? "locked" : "all"/);
 assert.match(focus, /state\.scheduledWorkOrderTimeFilter = "date"/);
 assert.match(focus, /state\.scheduledWorkOrderDateFilter = targetDate/);
 assert.match(focus, /row\.classList\.add\("is-jump-target"\)/);

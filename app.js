@@ -217,6 +217,7 @@ const state = {
   editingWorkOrderId: null,
   editingScheduledWorkOrderId: "",
   scheduledEditorReturnToDashboard: false,
+  scheduledEditorListScrollTop: 0,
   editingScheduledDraftWorkOrderId: "",
   editingScheduledDraftRevision: 0,
   editingScheduledDraftGeneratedAtMs: 0,
@@ -9468,7 +9469,7 @@ function updateScheduledWorkOrderEditorControls() {
   }
   if (els.viewScheduledWorkOrdersBtn) {
     els.viewScheduledWorkOrdersBtn.textContent = editingSchedule
-      ? (state.scheduledEditorReturnToDashboard ? "← Quay lại trang quản lý" : "← Quay lại danh sách")
+      ? "← Quay lại danh sách"
       : "📋 Xem lịch";
   }
   els.viewScheduledWorkOrdersHeaderBtn?.classList.toggle("hidden", state.taskModalMode !== "schedule" || editingSchedule);
@@ -9488,7 +9489,9 @@ function setTaskModalMode(mode = "create") {
   const closeButton = els.taskModal?.querySelector(".task-create-close-btn");
   if (closeButton) {
     closeButton.textContent = scheduleMode ? "←" : "×";
-    closeButton.setAttribute("aria-label", scheduleMode ? "Quay lại trang quản lý" : "Đóng");
+    closeButton.setAttribute("aria-label", scheduleMode
+      ? (state.editingScheduledWorkOrderId ? "Quay lại danh sách lịch" : "Quay lại trang quản lý")
+      : "Đóng");
   }
   const subtitle = els.taskModal?.querySelector(".task-create-subtitle");
   if (subtitle) {
@@ -9718,6 +9721,7 @@ function closeTaskModal() {
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = "";
   state.scheduledEditorReturnToDashboard = false;
+  state.scheduledEditorListScrollTop = 0;
   state.editingScheduledDraftWorkOrderId = "";
   state.editingScheduledDraftRevision = 0;
   state.editingScheduledDraftGeneratedAtMs = 0;
@@ -9759,6 +9763,7 @@ function resetScheduledWorkOrderFormForCreate() {
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = "";
   state.scheduledEditorReturnToDashboard = false;
+  state.scheduledEditorListScrollTop = 0;
   els.workOrderName.value = "";
   resetTaskRows();
   resetPhotoRequirementControls();
@@ -9862,6 +9867,9 @@ function openScheduledWorkOrderEditor(scheduleId, { returnToDashboard = false } 
   state.editingWorkOrderId = null;
   state.editingScheduledWorkOrderId = schedule.id;
   state.scheduledEditorReturnToDashboard = returnToDashboard;
+  state.scheduledEditorListScrollTop = returnToDashboard
+    ? 0
+    : (els.scheduledWorkOrderListModal?.querySelector(".scheduled-work-order-list-content")?.scrollTop || 0);
   els.workOrderName.value = schedule.name || "";
   taskRowWorkPhotos.clear();
   els.taskRowsContainer.innerHTML = "";
@@ -10226,7 +10234,13 @@ function openEditWorkOrderModal(workOrderId) {
 }
 
 $$("[data-close-modal]").forEach((button) => {
-  button.addEventListener("click", closeTaskModal);
+  button.addEventListener("click", () => {
+    if (state.taskModalMode === "schedule" && state.editingScheduledWorkOrderId) {
+      returnToScheduledWorkOrderListFromEditor();
+    } else {
+      closeTaskModal();
+    }
+  });
 });
 
 function readTaskRowsData() {
@@ -11228,16 +11242,51 @@ function returnToScheduledWorkOrderModal() {
     setTaskModalMode("schedule");
     els.taskModal?.classList.remove("hidden");
     window.scrollTo({ top: state.schedulePageScrollY || 0, behavior: "auto" });
+  } else {
+    els.taskModal?.classList.add("hidden");
+    document.body.classList.remove("schedule-page-open");
+    els.adminView?.classList.remove("hidden");
+    window.scrollTo({ top: state.schedulePageReturnScrollY || 0, behavior: "auto" });
   }
   state.scheduledListReturnToTaskModal = false;
 }
 
 function returnToScheduledWorkOrderListFromEditor() {
+  const scheduleId = state.editingScheduledWorkOrderId;
+  if (!scheduleId) return;
+  const returnToDashboard = state.scheduledEditorReturnToDashboard;
+  const previousScrollTop = state.scheduledEditorListScrollTop;
+  if (returnToDashboard) {
+    closeTaskModal();
+    openScheduledWorkOrderListModal({ focusScheduleId: scheduleId });
+    return;
+  }
   state.editingScheduledWorkOrderId = "";
   els.taskModal?.classList.add("hidden");
   resetScheduledWorkOrderFormForCreate();
   els.scheduledWorkOrderListModal?.classList.remove("hidden");
+  syncScheduledWorkOrderListBackButtons();
   renderScheduledWorkOrderList();
+  requestAnimationFrame(() => {
+    const content = els.scheduledWorkOrderListModal?.querySelector(".scheduled-work-order-list-content");
+    if (!content) return;
+    content.scrollTop = previousScrollTop;
+    const row = [...(els.scheduledWorkOrderList?.querySelectorAll("[data-scheduled-list-item-id]") || [])]
+      .find((item) => item.dataset.scheduledListItemId === scheduleId);
+    if (!row) {
+      showScheduledWorkOrderInList(scheduleId);
+      return;
+    }
+    const rowRect = row.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    if (rowRect.top < contentRect.top || rowRect.bottom > contentRect.bottom) {
+      content.scrollTop += rowRect.top - contentRect.top - 12;
+    }
+    if (!row.hasAttribute("tabindex")) row.tabIndex = -1;
+    row.focus({ preventScroll: true });
+    row.classList.add("is-jump-target");
+    setTimeout(() => row.classList.remove("is-jump-target"), 2400);
+  });
 }
 
 function scheduledWorkOrderStatusLabel(status, waitingForAvailableEmployee = false) {
@@ -11595,6 +11644,15 @@ function syncScheduledWorkOrderListPresentation() {
 
 scheduledWorkOrderListPageMedia.addEventListener("change", syncScheduledWorkOrderListPresentation);
 
+function syncScheduledWorkOrderListBackButtons() {
+  const label = state.scheduledListReturnToTaskModal ? "Quay lại Lên lịch" : "Quay lại trang quản lý";
+  els.scheduledWorkOrderListModal?.querySelectorAll("button[data-back-scheduled-work-order-list]").forEach((button) => {
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    if (!button.classList.contains("icon-btn")) button.textContent = `← ${label}`;
+  });
+}
+
 async function openScheduledWorkOrderListModal({ focusScheduleId = "", focusMissingMessage = "" } = {}) {
   if (!isAdminProfile()) {
     toast("Chỉ Admin được xem danh sách lịch.", "error");
@@ -11617,6 +11675,7 @@ async function openScheduledWorkOrderListModal({ focusScheduleId = "", focusMiss
   );
   if (state.scheduledListReturnToTaskModal) state.schedulePageScrollY = window.scrollY || 0;
   els.taskModal?.classList.add("hidden");
+  syncScheduledWorkOrderListBackButtons();
   syncScheduledWorkOrderListPresentation();
   els.scheduledWorkOrderListModal?.classList.remove("hidden");
   const listContent = els.scheduledWorkOrderListModal?.querySelector(".scheduled-work-order-list-content");
@@ -11769,8 +11828,7 @@ $$('[data-cancel-scheduled-delete]').forEach((button) => {
 
 els.viewScheduledWorkOrdersBtn?.addEventListener("click", () => {
   if (state.editingScheduledWorkOrderId) {
-    if (state.scheduledEditorReturnToDashboard) closeTaskModal();
-    else returnToScheduledWorkOrderListFromEditor();
+    returnToScheduledWorkOrderListFromEditor();
     return;
   }
   openScheduledWorkOrderListModal();

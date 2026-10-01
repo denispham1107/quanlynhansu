@@ -439,6 +439,7 @@ await send("Runtime.evaluate", {
     document.getElementById("scheduledWorkOrderDateFromFilter").value = "2026-09-01";
     document.getElementById("scheduledWorkOrderDateToFilter").value = "2026-09-30";
     document.getElementById("scheduledWorkOrderFilterCount").textContent = "9/91 lịch";
+    listModal.querySelector(".modal-footer-actions button").textContent = "← Quay lại trang quản lý";
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
       <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : index === 21 ? " is-assigned" : ""}">
         <div class="scheduled-work-order-list-row">
@@ -475,6 +476,7 @@ for (const profile of profiles) {
     const contentElement = modal.querySelector(".scheduled-work-order-list-content");
     const headerElement = contentElement.querySelector(".modal-header");
     const footerElement = cardElement.querySelector(".modal-footer-actions");
+    const footerButtonElement = footerElement.querySelector("button");
     const filterElement = modal.querySelector(".scheduled-work-order-list-filter");
     const filterShellElements = [...modal.querySelectorAll(".scheduled-work-order-filter-shell, .scheduled-work-order-date-shell")]
       .filter((element) => !element.closest(".hidden"));
@@ -497,6 +499,7 @@ for (const profile of profiles) {
     const content = box(contentElement);
     const header = box(headerElement);
     const footer = box(footerElement);
+    const footerButton = box(footerButtonElement);
     const filter = box(filterElement);
     const filterShells = filterShellElements.map(box);
     const filterControls = filterControlElements.map(box);
@@ -531,6 +534,8 @@ for (const profile of profiles) {
         && header.top >= content.top - 0.5 && header.bottom <= content.bottom + 0.5,
       footerInsideCard: footer.left >= card.left - 0.5 && footer.right <= card.right + 0.5
         && footer.top >= card.top - 0.5 && footer.bottom <= card.bottom + 0.5,
+      footerButtonInsideFooter: footerButton.left >= footer.left - 0.5 && footerButton.right <= footer.right + 0.5
+        && footerButton.top >= footer.top - 0.5 && footerButton.bottom <= footer.bottom + 0.5,
       filter,
       filterShells,
       filterControls,
@@ -611,6 +616,7 @@ for (const profile of profiles) {
     && result.headerInsideContent
     && result.headerScrollDistance > 20
     && result.footerInsideCard
+    && result.footerButtonInsideFooter
     && result.listInsideContentWidth
     && result.filterInsideContentWidth
     && result.controlsInsideShells
