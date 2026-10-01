@@ -438,6 +438,7 @@ await send("Runtime.evaluate", {
     dateRange.classList.remove("hidden");
     document.getElementById("scheduledWorkOrderDateFromFilter").value = "2026-09-01";
     document.getElementById("scheduledWorkOrderDateToFilter").value = "2026-09-30";
+    document.getElementById("scheduledWorkOrderFilterCount").textContent = "9/91 lịch";
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
       <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : index === 21 ? " is-assigned" : ""}">
         <div class="scheduled-work-order-list-row">
@@ -479,6 +480,12 @@ for (const profile of profiles) {
       .filter((element) => !element.closest(".hidden"));
     const filterControlElements = [...modal.querySelectorAll(".scheduled-work-order-filter-shell > select, .scheduled-work-order-date-shell > input")]
       .filter((element) => !element.closest(".hidden"));
+    const dayNavigationElement = modal.querySelector(".scheduled-work-order-filter-navigation");
+    const dayCountElement = document.getElementById("scheduledWorkOrderFilterCount");
+    const dayButtons = [
+      document.getElementById("scheduledWorkOrderPreviousDayBtn"),
+      document.getElementById("scheduledWorkOrderNextDayBtn")
+    ];
     const listElement = document.getElementById("scheduledWorkOrderList");
       const firstRowElement = listElement.querySelector(".scheduled-work-order-list-row");
       const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
@@ -493,6 +500,9 @@ for (const profile of profiles) {
     const filter = box(filterElement);
     const filterShells = filterShellElements.map(box);
     const filterControls = filterControlElements.map(box);
+    const dayNavigation = box(dayNavigationElement);
+    const dayCount = box(dayCountElement);
+    const dayButtonBoxes = dayButtons.map(box);
     const list = box(listElement);
       const firstRow = box(firstRowElement);
       const firstDeleteButton = box(firstDeleteButtonElement);
@@ -524,6 +534,19 @@ for (const profile of profiles) {
       filter,
       filterShells,
       filterControls,
+      dayNavigation,
+      dayButtonBoxes,
+      dayNavigationInsideFilter: dayNavigation.left >= filter.left - 0.5
+        && dayNavigation.right <= filter.right + 0.5
+        && dayNavigation.top >= filter.top - 0.5
+        && dayNavigation.bottom <= filter.bottom + 0.5,
+      dayControlsInsideNavigation: [dayCount, ...dayButtonBoxes].every((rect) => (
+        rect.left >= dayNavigation.left - 0.5 && rect.right <= dayNavigation.right + 0.5
+        && rect.top >= dayNavigation.top - 0.5 && rect.bottom <= dayNavigation.bottom + 0.5
+      )),
+      dayButtonsDoNotOverlap: dayButtonBoxes[0].right <= dayButtonBoxes[1].left + 0.5,
+      dayButtonsAfterCount: dayCount.right <= dayButtonBoxes[0].left + 0.5
+        || dayCount.bottom <= dayButtonBoxes[0].top + 0.5,
       list,
         firstRow,
         firstDeleteButton,
@@ -579,6 +602,11 @@ for (const profile of profiles) {
     && result.filterControls.length === 4
     && result.filterShells.every((rect) => rect.width > 0)
     && result.filterControls.every((rect) => rect.width > 0)
+    && result.dayNavigationInsideFilter
+    && result.dayControlsInsideNavigation
+    && result.dayButtonBoxes.every((rect) => rect.width >= 30 && rect.height >= 30)
+    && result.dayButtonsDoNotOverlap
+    && result.dayButtonsAfterCount
     && result.contentInsideCard
     && result.headerInsideContent
     && result.headerScrollDistance > 20

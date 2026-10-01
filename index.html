@@ -11748,7 +11748,17 @@
               </div>
             </label>
           </div>
-          <span id="scheduledWorkOrderFilterCount" class="scheduled-work-order-filter-count" aria-live="polite"></span>
+          <div class="scheduled-work-order-filter-navigation">
+            <span id="scheduledWorkOrderFilterCount" class="scheduled-work-order-filter-count" aria-live="polite"></span>
+            <div class="scheduled-work-order-day-buttons" role="group" aria-label="Chuyển ngày xem lịch">
+              <button id="scheduledWorkOrderPreviousDayBtn" class="scheduled-work-order-day-button" type="button" aria-label="Xem lịch ngày trước" title="Xem lịch ngày trước" disabled>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+              </button>
+              <button id="scheduledWorkOrderNextDayBtn" class="scheduled-work-order-day-button" type="button" aria-label="Xem lịch ngày sau" title="Xem lịch ngày sau" disabled>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
         </div>
         <div id="scheduledWorkOrderList" class="scheduled-work-order-list" aria-live="polite">
           <div class="empty-state">Đang tải danh sách lịch...</div>
@@ -12366,7 +12376,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20261001-locked-schedule-filter-v133"></script>
+  <script type="module" src="app.js?v=20261002-schedule-day-navigation-v134"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">
@@ -13177,8 +13187,24 @@
     display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; min-width:0; grid-column:1 / -1;
   }
   .scheduled-work-order-filter-count {
-    min-width:0; grid-column:1 / -1; color:#6d28d9; font-size:.84rem; font-weight:800; text-align:left;
+    min-width:0; color:#6d28d9; font-size:.84rem; font-weight:800; text-align:left;
   }
+  .scheduled-work-order-filter-navigation {
+    display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-width:0; grid-column:1 / -1;
+  }
+  .scheduled-work-order-day-buttons { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+  .scheduled-work-order-day-button {
+    display:inline-grid; place-items:center; flex:0 0 36px; width:36px; height:36px; padding:0;
+    box-sizing:border-box; border:1px solid #c4b5fd; border-radius:11px;
+    background:linear-gradient(180deg,#fff,#f5f3ff); color:#6d28d9; cursor:pointer;
+    box-shadow:0 1px 2px rgba(76,29,149,.08); touch-action:manipulation;
+  }
+  .scheduled-work-order-day-button svg { width:18px; height:18px; }
+  .scheduled-work-order-day-button:hover:not(:disabled) {
+    border-color:#8b5cf6; background:#ede9fe; color:#5b21b6;
+  }
+  .scheduled-work-order-day-button:focus-visible { outline:3px solid rgba(124,58,237,.24); outline-offset:2px; }
+  .scheduled-work-order-day-button:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
   #scheduledWorkOrderListModal .scheduled-work-order-list {
     display:grid; align-content:start; gap:10px; min-width:0; padding:2px 0 2px 2px;
     overflow:visible;
@@ -13317,7 +13343,7 @@
     .scheduled-work-order-filter-field,
     .scheduled-work-order-date-filter,
     .scheduled-work-order-date-range,
-    .scheduled-work-order-filter-count { grid-column:1; grid-row:auto; }
+    .scheduled-work-order-filter-navigation { grid-column:1; grid-row:auto; }
     .scheduled-work-order-date-range { grid-template-columns:minmax(0,1fr); gap:7px; }
     .scheduled-work-order-list-main { font-size:.9rem; }
   }

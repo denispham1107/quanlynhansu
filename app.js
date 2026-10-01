@@ -1165,6 +1165,8 @@ const els = {
   scheduledWorkOrderDateFromFilter: $("#scheduledWorkOrderDateFromFilter"),
   scheduledWorkOrderDateToFilter: $("#scheduledWorkOrderDateToFilter"),
   scheduledWorkOrderFilterCount: $("#scheduledWorkOrderFilterCount"),
+  scheduledWorkOrderPreviousDayBtn: $("#scheduledWorkOrderPreviousDayBtn"),
+  scheduledWorkOrderNextDayBtn: $("#scheduledWorkOrderNextDayBtn"),
   scheduledGroupAssignmentModal: $("#scheduledGroupAssignmentModal"),
   scheduledGroupAssignmentForm: $("#scheduledGroupAssignmentForm"),
   scheduledGroupAssignmentSummary: $("#scheduledGroupAssignmentSummary"),
@@ -11407,6 +11409,26 @@ function scheduledWorkOrderTimeFilterLabel(filterValue = "today") {
   return activeFilter === "yesterday" ? "Hôm qua" : "Hôm nay";
 }
 
+function scheduledWorkOrderNavigationDateValue(filterValue = state.scheduledWorkOrderTimeFilter) {
+  const activeFilter = normalizeScheduledWorkOrderTimeFilter(filterValue);
+  if (activeFilter === "today") return todayInputValue();
+  if (activeFilter === "tomorrow") return tomorrowInputValue();
+  if (activeFilter === "yesterday") return yesterdayInputValue();
+  return activeFilter === "date" ? state.scheduledWorkOrderDateFilter : "";
+}
+
+function shiftScheduledWorkOrderDate(dayOffset) {
+  const dateValue = scheduledWorkOrderNavigationDateValue();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue) || ![-1, 1].includes(dayOffset)) return false;
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 12);
+  if (toLocalDateInputValue(date) !== dateValue) return false;
+  date.setDate(date.getDate() + dayOffset);
+  state.scheduledWorkOrderDateFilter = toLocalDateInputValue(date);
+  state.scheduledWorkOrderTimeFilter = "date";
+  return true;
+}
+
 function syncScheduledWorkOrderTimeFilterControls() {
   const activeFilter = normalizeScheduledWorkOrderTimeFilter(state.scheduledWorkOrderTimeFilter);
   state.scheduledWorkOrderTimeFilter = activeFilter;
@@ -11422,6 +11444,10 @@ function syncScheduledWorkOrderTimeFilterControls() {
   if (els.scheduledWorkOrderDateToFilter) {
     els.scheduledWorkOrderDateToFilter.value = state.scheduledWorkOrderDateToFilter;
   }
+  const canNavigateDay = Boolean(scheduledWorkOrderNavigationDateValue(activeFilter));
+  [els.scheduledWorkOrderPreviousDayBtn, els.scheduledWorkOrderNextDayBtn].forEach((button) => {
+    if (button) button.disabled = !canNavigateDay;
+  });
 }
 
 function resetScheduledWorkOrderTimeFilter() {
@@ -11783,6 +11809,12 @@ els.scheduledWorkOrderDateFromFilter?.addEventListener("change", () => {
 els.scheduledWorkOrderDateToFilter?.addEventListener("change", () => {
   state.scheduledWorkOrderDateToFilter = els.scheduledWorkOrderDateToFilter?.value || "";
   renderScheduledWorkOrderList();
+});
+els.scheduledWorkOrderPreviousDayBtn?.addEventListener("click", () => {
+  if (shiftScheduledWorkOrderDate(-1)) renderScheduledWorkOrderList();
+});
+els.scheduledWorkOrderNextDayBtn?.addEventListener("click", () => {
+  if (shiftScheduledWorkOrderDate(1)) renderScheduledWorkOrderList();
 });
 $$('[data-back-scheduled-work-order-list]').forEach((button) => {
   button.addEventListener("click", returnToScheduledWorkOrderModal);

@@ -49,10 +49,12 @@ const buildHelpers = new Function(`
   ${extractFunction("scheduledWorkOrderDateValue")}
   ${extractFunction("scheduledWorkOrderMatchesTimeFilter")}
   ${extractFunction("scheduledWorkOrderTimeFilterLabel")}
+  ${extractFunction("scheduledWorkOrderNavigationDateValue")}
+  ${extractFunction("shiftScheduledWorkOrderDate")}
   ${extractFunction("canOverrideLockedScheduledWorkOrder")}
   ${extractFunction("canEditScheduledWorkOrder")}
   ${extractFunction("canDeleteScheduledWorkOrder")}
-  return { state, setAdmin: (value) => { admin = value; }, todayInputValue, yesterdayInputValue, tomorrowInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderFilterLabel, scheduledWorkOrderMonthKey, scheduledWorkOrderMatchesTimeFilter, scheduledWorkOrderTimeFilterLabel, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
+  return { state, setAdmin: (value) => { admin = value; }, todayInputValue, yesterdayInputValue, tomorrowInputValue, getTaskDateValue, scheduledWorkOrderMatchesStatusFilter, sortScheduledWorkOrdersForDisplay, scheduledWorkOrderFilterLabel, scheduledWorkOrderMonthKey, scheduledWorkOrderMatchesTimeFilter, scheduledWorkOrderTimeFilterLabel, scheduledWorkOrderNavigationDateValue, shiftScheduledWorkOrderDate, canEditScheduledWorkOrder, canDeleteScheduledWorkOrder };
 `);
 
 const helpers = buildHelpers();
@@ -99,6 +101,38 @@ assert.deepEqual(filterIds("yesterday", "assigned"), ["yesterday-assigned"]);
 assert.deepEqual(filterIds("tomorrow", "unassigned"), ["tomorrow-unassigned"]);
 assert.deepEqual(filterIds("tomorrow", "assigned"), []);
 assert.equal(helpers.tomorrowInputValue(new Date(2026, 11, 31, 12)), "2027-01-01");
+
+helpers.state.scheduledWorkOrderTimeFilter = "today";
+assert.equal(helpers.shiftScheduledWorkOrderDate(1), true);
+assert.equal(helpers.state.scheduledWorkOrderTimeFilter, "date");
+assert.equal(helpers.state.scheduledWorkOrderDateFilter, tomorrow);
+assert.equal(helpers.shiftScheduledWorkOrderDate(1), true);
+assert.equal(helpers.state.scheduledWorkOrderDateFilter !== tomorrow, true);
+assert.equal(helpers.shiftScheduledWorkOrderDate(-1), true);
+assert.equal(helpers.state.scheduledWorkOrderDateFilter, tomorrow);
+helpers.state.scheduledWorkOrderTimeFilter = "tomorrow";
+assert.equal(helpers.shiftScheduledWorkOrderDate(-1), true);
+assert.equal(helpers.state.scheduledWorkOrderDateFilter, today);
+helpers.state.scheduledWorkOrderTimeFilter = "yesterday";
+assert.equal(helpers.shiftScheduledWorkOrderDate(1), true);
+assert.equal(helpers.state.scheduledWorkOrderDateFilter, today);
+helpers.state.scheduledWorkOrderTimeFilter = "date";
+helpers.state.scheduledWorkOrderDateFilter = "2026-12-31";
+assert.equal(helpers.shiftScheduledWorkOrderDate(1), true);
+assert.equal(helpers.state.scheduledWorkOrderDateFilter, "2027-01-01");
+assert.equal(helpers.shiftScheduledWorkOrderDate(-1), true);
+assert.equal(helpers.state.scheduledWorkOrderDateFilter, "2026-12-31");
+helpers.state.scheduledWorkOrderTimeFilter = "this-month";
+assert.equal(helpers.shiftScheduledWorkOrderDate(1), false);
+assert.equal(helpers.state.scheduledWorkOrderTimeFilter, "this-month");
+helpers.state.scheduledWorkOrderTimeFilter = "range";
+assert.equal(helpers.shiftScheduledWorkOrderDate(-1), false);
+helpers.state.scheduledWorkOrderTimeFilter = "all";
+assert.equal(helpers.shiftScheduledWorkOrderDate(1), false);
+helpers.state.scheduledWorkOrderTimeFilter = "date";
+helpers.state.scheduledWorkOrderDateFilter = "2026-02-30";
+assert.equal(helpers.shiftScheduledWorkOrderDate(1), false);
+assert.match(pageSource, /id="scheduledWorkOrderFilterCount"[\s\S]*?id="scheduledWorkOrderPreviousDayBtn"[\s\S]*?id="scheduledWorkOrderNextDayBtn"/);
 
 const lockedSchedules = [
   { id: "locked-pending", status: "pending", editDeletePolicy: "locked" },
