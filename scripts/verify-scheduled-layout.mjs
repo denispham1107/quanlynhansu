@@ -869,6 +869,67 @@ for (const profile of profiles) {
   if (!passed) failures.push({ profile: `Cài đặt quyền lịch ${profile.name}`, result });
 }
 
+const taskTitlePolicyFixture = `
+  <div class="task-row is-custom-ship-duration-locked">
+    <label class="task-row-field task-row-title-field"><span class="task-field-label">Tên công việc</span>
+      <input class="row-title" type="text" aria-invalid="true" value="Giao hàng khác"></label>
+    <p class="small-note task-template-title-note">Chưa chọn Loại công việc: hãy chọn đúng tên trong Danh sách công việc.</p>
+    <div class="two-col task-row-duration-grid">
+      <label class="task-row-field"><span class="task-field-label">Số giờ</span>
+        <div class="duration-input-shell"><input class="row-hours is-template-duration-locked" type="number" value="0" readonly><span>giờ</span></div></label>
+      <label class="task-row-field"><span class="task-field-label">Số phút</span>
+        <div class="duration-input-shell"><input class="row-minutes is-template-duration-locked" type="number" value="5" readonly><span>phút</span></div></label>
+    </div>
+  </div>`;
+await send("Runtime.evaluate", {
+  expression: `(() => {
+    document.getElementById("workOrderSettingsModal")?.classList.add("hidden");
+    document.body.classList.remove("work-order-settings-open", "schedule-page-open");
+    const modal = document.getElementById("taskModal");
+    modal.classList.remove("hidden", "is-schedule-mode", "is-scheduled-draft-edit");
+    document.getElementById("taskRowsContainer").innerHTML = ${JSON.stringify(taskTitlePolicyFixture)};
+  })()`
+});
+
+for (const profile of profiles) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: profile.width, height: profile.height,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
+    screenWidth: profile.width, screenHeight: profile.height
+  });
+  await delay(80);
+  const measurement = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const modal = document.getElementById("taskModal");
+      const card = modal.querySelector(".task-create-modal-card");
+      const row = modal.querySelector(".task-row.is-custom-ship-duration-locked");
+      const cardBox = card.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
+      const controls = [...row.querySelectorAll(".row-title, .row-hours, .row-minutes, .task-template-title-note")];
+      const allInside = controls.every((control) => {
+        const box = control.getBoundingClientRect();
+        return box.left >= rowBox.left - 0.5 && box.right <= rowBox.right + 0.5;
+      });
+      const duration = row.querySelector(".task-row-duration-grid");
+      return {
+        cardInsideViewport: cardBox.left >= -0.5 && cardBox.right <= innerWidth + 0.5,
+        rowInsideCard: rowBox.left >= cardBox.left - 0.5 && rowBox.right <= cardBox.right + 0.5,
+        allInside,
+        shipNote: getComputedStyle(duration, "::after").content.includes("5 phút"),
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth
+      };
+    })()`
+  });
+  const result = measurement.result.value;
+  const passed = result.cardInsideViewport && result.rowInsideCard && result.allInside && result.shipNote
+    && result.scrollWidth <= result.viewportWidth;
+  console.log(`${passed ? "PASS" : "FAIL"} | Tên công việc và Ship 5 phút ${profile.name} | scroll ${result.scrollWidth}/${result.viewportWidth}`);
+  if (!passed) failures.push({ profile: `Tên công việc và Ship 5 phút ${profile.name}`, result });
+}
+
 socket.close();
 browser.kill();
 await Promise.race([

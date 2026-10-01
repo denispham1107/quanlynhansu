@@ -5841,6 +5841,19 @@
       min-height: 76px !important;
     }
 
+    #taskModal .task-template-title-note {
+      min-width: 0;
+      margin: -2px 0 0 !important;
+      color: #b91c1c;
+      font-size: 11px !important;
+      font-weight: 750;
+      line-height: 1.4;
+    }
+
+    #taskModal .row-title[aria-invalid="true"] {
+      border-color: #f87171 !important;
+    }
+
     #taskModal .optional-label {
       color: #94a3b8 !important;
       font-size: 11px !important;
@@ -5883,7 +5896,8 @@
       pointer-events: none;
     }
 
-    #taskModal .task-row.is-template-duration-locked .task-row-duration-grid {
+    #taskModal .task-row.is-template-duration-locked .task-row-duration-grid,
+    #taskModal .task-row.is-custom-ship-duration-locked .task-row-duration-grid {
       position: relative;
     }
 
@@ -5896,6 +5910,21 @@
       font-size: 11px;
       font-weight: 800;
       line-height: 1.35;
+    }
+
+    #taskModal .task-row.is-custom-ship-duration-locked .task-row-duration-grid::after {
+      content: "🔒 Ship nhập tay: thời gian quy định cố định 5 phút";
+      grid-column: 1 / -1;
+      display: block;
+      margin-top: -2px;
+      color: #be185d;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    #taskModal .task-row.is-custom-ship-duration-locked.is-legacy-custom-ship-duration-locked .task-row-duration-grid::after {
+      content: "🔒 Phiếu Ship cũ: giữ nguyên thời gian đã lưu";
     }
 
     #taskModal .duration-input-shell input.is-template-duration-locked,
@@ -12313,7 +12342,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20261001-schedule-filters-v127"></script>
+  <script type="module" src="app.js?v=20261001-task-title-policy-v128"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

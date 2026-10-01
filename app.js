@@ -8002,6 +8002,35 @@ function findWorkTemplateByName(name) {
   return state.workTemplates.find((template) => normalizeSearchText(template.name || "") === normalizedName) || null;
 }
 
+function taskRowHasSelectedType(row) {
+  return [".row-lunch-break", ".row-hotel", ".row-ship", ".row-cleaning"]
+    .some((selector) => row?.querySelector(selector)?.checked === true);
+}
+
+function isLegacyUntypedTaskTitle(row, title) {
+  const originalTitle = String(row?.dataset?.legacyUntypedTitle || "").trim();
+  return Boolean(originalTitle && normalizeSearchText(originalTitle) === normalizeSearchText(title));
+}
+
+function legacyCustomShipDuration(row, title) {
+  const originalTitle = String(row?.dataset?.legacyCustomShipTitle || "").trim();
+  const originalMinutes = Number(row?.dataset?.legacyCustomShipDeadlineMinutes || 0);
+  return originalTitle && originalMinutes > 0
+    && normalizeSearchText(originalTitle) === normalizeSearchText(title)
+    ? originalMinutes
+    : 0;
+}
+
+function syncTaskRowTitleRestriction(row) {
+  const titleInput = row?.querySelector(".row-title");
+  if (!titleInput) return;
+  const title = titleInput.value.trim();
+  const invalid = Boolean(title && !taskRowHasSelectedType(row)
+    && !findWorkTemplateByName(title) && !isLegacyUntypedTaskTitle(row, title));
+  titleInput.setAttribute("aria-invalid", String(invalid));
+  row.querySelector(".task-template-title-note")?.classList.toggle("hidden", !invalid);
+}
+
 function applyWorkTemplateToRow(row, template) {
   if (!row || !template) return;
 
@@ -8015,18 +8044,23 @@ function applyWorkTemplateToRow(row, template) {
   if (minutesInput) minutesInput.value = deadlineMinutes % 60;
 }
 
-function setTaskDurationInputsLocked(row, locked, template = null) {
+function setTaskDurationInputsLocked(row, locked, template = null, { customShip = false, fixedMinutes = 5 } = {}) {
   if (!row) return;
 
   const hoursInput = row.querySelector(".row-hours");
   const minutesInput = row.querySelector(".row-minutes");
-  const isLocked = Boolean(locked && template);
-  const templateName = isLocked ? String(template.name || "").trim() : "";
-  const deadlineMinutes = isLocked ? Number(template.deadlineMinutes || 0) : 0;
+  const isTemplateLocked = Boolean(locked && template);
+  const isCustomShipLocked = Boolean(locked && customShip && !template);
+  const isLegacyShipLocked = isCustomShipLocked && fixedMinutes !== 5;
+  const isLocked = isTemplateLocked || isCustomShipLocked;
+  const templateName = isTemplateLocked ? String(template.name || "").trim() : "";
+  const deadlineMinutes = isTemplateLocked ? Number(template.deadlineMinutes || 0) : 0;
 
-  row.classList.toggle("is-template-duration-locked", isLocked);
+  row.classList.toggle("is-template-duration-locked", isTemplateLocked);
+  row.classList.toggle("is-custom-ship-duration-locked", isCustomShipLocked);
+  row.classList.toggle("is-legacy-custom-ship-duration-locked", isLegacyShipLocked);
 
-  if (isLocked) {
+  if (isTemplateLocked) {
     row.dataset.workTemplateId = String(template.id || "");
     row.dataset.workTemplateName = templateName;
     row.dataset.workTemplateDeadlineMinutes = String(deadlineMinutes);
@@ -8034,6 +8068,11 @@ function setTaskDurationInputsLocked(row, locked, template = null) {
     delete row.dataset.workTemplateId;
     delete row.dataset.workTemplateName;
     delete row.dataset.workTemplateDeadlineMinutes;
+  }
+
+  if (isCustomShipLocked) {
+    if (hoursInput) hoursInput.value = Math.floor(fixedMinutes / 60);
+    if (minutesInput) minutesInput.value = fixedMinutes % 60;
   }
 
   [hoursInput, minutesInput].forEach((input) => {
@@ -8045,7 +8084,11 @@ function setTaskDurationInputsLocked(row, locked, template = null) {
 
     if (isLocked) {
       input.dataset.templateLocked = "true";
-      input.title = `Thời gian cố định theo công việc mẫu “${templateName}”.`;
+      input.title = isCustomShipLocked
+        ? isLegacyShipLocked
+          ? "Giữ nguyên thời gian đã lưu của Phiếu Ship cũ."
+          : "Công việc Ship nhập tay có thời gian quy định cố định 5 phút."
+        : `Thời gian cố định theo công việc mẫu “${templateName}”.`;
     } else {
       delete input.dataset.templateLocked;
       input.removeAttribute("title");
@@ -8055,6 +8098,7 @@ function setTaskDurationInputsLocked(row, locked, template = null) {
 
 function syncWorkTemplateDurationLock(row, { applyDuration = true } = {}) {
   if (!row) return null;
+  syncTaskRowTitleRestriction(row);
 
   if (row.querySelector(".row-hotel")?.checked) {
     setTaskDurationInputsLocked(row, false);
@@ -8067,10 +8111,14 @@ function syncWorkTemplateDurationLock(row, { applyDuration = true } = {}) {
   const deadlineMinutes = Number(template?.deadlineMinutes || 0);
 
   if (!template || deadlineMinutes <= 0) {
-    setTaskDurationInputsLocked(row, false);
+    const originalShipMinutes = legacyCustomShipDuration(row, title);
+    setTaskDurationInputsLocked(row, row.querySelector(".row-ship")?.checked === true,
+      null, { customShip: true, fixedMinutes: originalShipMinutes || 5 });
     return null;
   }
 
+  const titleInput = row.querySelector(".row-title");
+  if (titleInput && titleInput.value !== template.name) titleInput.value = template.name;
   if (applyDuration) applyWorkTemplateToRow(row, template);
   setTaskDurationInputsLocked(row, true, template);
   return template;
@@ -8672,8 +8720,8 @@ function setHotelDurationInputsLocked(row, locked) {
   row.classList.toggle("is-hotel-duration-locked", Boolean(locked));
   [row.querySelector(".row-hours"), row.querySelector(".row-minutes")].forEach((input) => {
     if (!input) return;
-    input.readOnly = Boolean(locked);
-    input.setAttribute("aria-readonly", String(Boolean(locked)));
+    input.readOnly = Boolean(locked || input.dataset.templateLocked === "true");
+    input.setAttribute("aria-readonly", String(input.readOnly));
     input.classList.toggle("is-hotel-duration-locked", Boolean(locked));
     if (locked) {
       input.title = "Thời gian Hotel được hệ thống tự tính và không thể chỉnh sửa.";
@@ -8807,6 +8855,7 @@ function createTaskRowElement(prefill = null) {
       <span class="task-field-label">Tên công việc</span>
       <input type="text" class="row-title" list="workTemplateOptions" placeholder="Ví dụ: Dọn phòng khách sạn mèo" required />
     </label>
+    <p class="small-note task-template-title-note hidden">Chưa chọn Loại công việc: hãy chọn đúng tên trong Danh sách công việc.</p>
     <label class="task-row-field task-row-description-field">
       <span class="task-field-label">Mô tả công việc <span class="optional-label">(không bắt buộc)</span></span>
       <textarea class="row-description" rows="3" placeholder="Có thể bỏ trống hoặc ghi rõ yêu cầu, tiêu chuẩn hoàn thành..."></textarea>
@@ -8880,6 +8929,15 @@ function createTaskRowElement(prefill = null) {
   if (prefill) {
     taskRowWorkPhotos.set(rowId, Array.isArray(prefill.workPhotos) ? prefill.workPhotos.slice() : []);
     wrapper.querySelector(".row-title").value = prefill.title || "";
+    if (prefill.title && !prefill.isLunchBreak && !prefill.isHotel && !prefill.isShip && !prefill.isCleaning) {
+      wrapper.dataset.legacyUntypedTitle = String(prefill.title).trim();
+    }
+    const originalShipMinutes = Number(prefill.hours || 0) * 60 + Number(prefill.minutes || 0);
+    if (prefill.isShip && prefill.title && !findWorkTemplateByName(prefill.title)
+      && originalShipMinutes > 0 && originalShipMinutes !== 5) {
+      wrapper.dataset.legacyCustomShipTitle = String(prefill.title).trim();
+      wrapper.dataset.legacyCustomShipDeadlineMinutes = String(originalShipMinutes);
+    }
     wrapper.querySelector(".row-description").value = prefill.description || "";
     wrapper.querySelector(".row-hours").value = Number.isFinite(prefill.hours) ? prefill.hours : 0;
     wrapper.querySelector(".row-minutes").value = Number.isFinite(prefill.minutes) ? prefill.minutes : 30;
@@ -10174,6 +10232,7 @@ function readTaskRowsData() {
     const isLunchBreak = Boolean(row.querySelector(".row-lunch-break")?.checked);
     const isHotel = Boolean(row.querySelector(".row-hotel")?.checked);
     const isShip = Boolean(row.querySelector(".row-ship")?.checked);
+    const hasSelectedTaskType = taskRowHasSelectedType(row);
     const hotelPetCount = isHotel
       ? normalizeHotelPetCount(row.querySelector(".row-hotel-pet-count")?.value)
       : 0;
@@ -10184,6 +10243,8 @@ function readTaskRowsData() {
     const minutes = Number(row.querySelector(".row-minutes").value || 0);
     const matchedTemplate = findWorkTemplateByName(title);
     const templateDeadlineMinutes = Number(matchedTemplate?.deadlineMinutes || 0);
+    const isLegacyUntypedTitle = isLegacyUntypedTaskTitle(row, title);
+    const originalShipMinutes = isShip && !matchedTemplate ? legacyCustomShipDuration(row, title) : 0;
     // Bảo vệ lớp dữ liệu: nếu tên công việc khớp chính xác với Danh sách công việc,
     // luôn dùng thời gian của công việc mẫu kể cả khi DOM bị chỉnh thủ công.
     const deadlineMinutes = isHotel
@@ -10192,6 +10253,8 @@ function readTaskRowsData() {
         : Math.max(0, Number(row.dataset.hotelRemainingSeconds || 0) / 60)
       : templateDeadlineMinutes > 0
       ? templateDeadlineMinutes
+      : isShip
+      ? originalShipMinutes || 5
       : (hours * 60 + minutes);
     const assignedEmployee = state.employees.find((employee) => employee.uid === assignedToUid);
 
@@ -10209,16 +10272,38 @@ function readTaskRowsData() {
       isLunchBreak,
       isHotel,
       isShip,
+      hasSelectedTaskType,
+      hasWorkTemplate: Boolean(matchedTemplate),
+      isLegacyUntypedTitle,
+      isLegacyCustomShip: originalShipMinutes > 0,
+      enforceTaskTitlePolicy: true,
       hotelPetCount,
       hotelAllowedMinutes
     };
   });
 }
 
+function validateTaskRowTitlePolicies(rows) {
+  for (const row of rows) {
+    if (row.enforceTaskTitlePolicy !== true) continue;
+    const rowLabel = `Công việc #${row.index + 1}`;
+    if (row.title && !row.hasSelectedTaskType && !row.hasWorkTemplate && !row.isLegacyUntypedTitle) {
+      return `${rowLabel}: nếu không chọn Loại công việc, hãy chọn tên có trong Danh sách công việc.`;
+    }
+    if (row.isShip && !row.hasWorkTemplate && !row.isLegacyCustomShip && row.deadlineMinutes !== 5) {
+      return `${rowLabel}: công việc Ship nhập tay có thời gian quy định cố định 5 phút.`;
+    }
+  }
+  return null;
+}
+
 function validateTaskRows(rows) {
   if (!rows.length) {
     return "Phiếu cần có ít nhất 1 công việc.";
   }
+
+  const titlePolicyError = validateTaskRowTitlePolicies(rows);
+  if (titlePolicyError) return titlePolicyError;
 
   for (const row of rows) {
     const rowLabel = `Công việc #${row.index + 1}`;
@@ -10250,6 +10335,9 @@ function validateTaskRowsForDraft(rows) {
   if (!rows.length) {
     return "Phiếu cần có ít nhất 1 công việc (có thể để trống thông tin, điền sau).";
   }
+
+  const titlePolicyError = validateTaskRowTitlePolicies(rows);
+  if (titlePolicyError) return titlePolicyError;
 
   const invalidHotelRow = rows.find((row) => row.isHotel && (!row.taskDate || !row.hotelPetCount || row.deadlineMinutes <= 0));
   if (invalidHotelRow) {
