@@ -190,11 +190,16 @@ const mixedStatuses = [
   { id: "middle-replaced", status: "replaced", scheduledForMs: 400 },
   { id: "older-assigned", status: "assigned", scheduledForMs: 300 },
   { id: "older-converted", status: "converted", scheduledForMs: 200 },
+  { id: "oldest-generated", status: "generated", scheduledForMs: 150 },
   { id: "oldest-deleted", status: "deleted", scheduledForMs: 100 }
 ];
 assert.deepEqual(
   helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses, "all").map((schedule) => schedule.id),
-  ["older-converted", "older-assigned", "recent-pending", "oldest-deleted", "middle-replaced", "recent-deleted"]
+  ["oldest-generated", "recent-pending", "older-converted", "older-assigned", "oldest-deleted", "middle-replaced", "recent-deleted"]
+);
+assert.deepEqual(
+  helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses, "locked").map((schedule) => schedule.id),
+  ["oldest-generated", "recent-pending", "older-converted", "older-assigned", "oldest-deleted", "middle-replaced", "recent-deleted"]
 );
 assert.deepEqual(
   helpers.sortScheduledWorkOrdersForDisplay(mixedStatuses.filter((schedule) => schedule.status === "deleted"), "deleted")
@@ -202,12 +207,13 @@ assert.deepEqual(
   ["oldest-deleted", "recent-deleted"]
 );
 assert.deepEqual(mixedStatuses.map((schedule) => schedule.id), [
-  "recent-deleted", "recent-pending", "middle-replaced", "older-assigned", "older-converted", "oldest-deleted"
+  "recent-deleted", "recent-pending", "middle-replaced", "older-assigned", "older-converted", "oldest-generated", "oldest-deleted"
 ]);
 assert.match(extractFunction("renderScheduledWorkOrderList"), /sortScheduledWorkOrdersForDisplay\(schedules\.filter/);
 assert.match(extractFunction("renderScheduledWorkOrderList"), /const assigned = schedule\.status === "assigned"/);
 assert.match(extractFunction("renderScheduledWorkOrderList"), /\$\{assigned \? " is-assigned" : ""\}/);
-assert.match(pageSource, /\.scheduled-work-order-list-item\.is-assigned\s*\{[^}]*background:linear-gradient\(135deg,#dcfce7,#d1fae5\)/);
+assert.match(extractFunction("renderScheduledWorkOrderList"), /\$\{converted \? " is-converted" : ""\}/);
+assert.match(pageSource, /\.scheduled-work-order-list-item\.is-assigned,\s*\.scheduled-work-order-list-item\.is-converted\s*\{[^}]*background:linear-gradient\(135deg,#dcfce7,#d1fae5\)/);
 
 helpers.state.workOrders = [{
   id: "scheduled-work-order",

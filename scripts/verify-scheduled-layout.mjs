@@ -441,7 +441,7 @@ await send("Runtime.evaluate", {
     document.getElementById("scheduledWorkOrderFilterCount").textContent = "9/91 lịch";
     listModal.querySelector(".modal-footer-actions button").textContent = "← Quay lại trang quản lý";
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
-      <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : index === 21 ? " is-assigned" : ""}">
+      <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : index === 21 ? " is-assigned" : index === 20 ? " is-converted" : ""}">
         <div class="scheduled-work-order-list-row">
           <div class="scheduled-work-order-list-main">22/09/2026, 08:30:00, Nhóm nhân viên, “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
           <button class="btn danger scheduled-work-order-delete-btn" data-delete-scheduled-work-order="test-\${index}" type="button">×</button>
@@ -494,6 +494,7 @@ for (const profile of profiles) {
       const deletedElement = listElement.querySelector(".scheduled-work-order-list-item.is-deleted");
       const replacedElement = listElement.querySelector(".scheduled-work-order-list-item.is-replaced");
       const assignedElement = listElement.querySelector(".scheduled-work-order-list-item.is-assigned");
+      const convertedElement = listElement.querySelector(".scheduled-work-order-list-item.is-converted");
       const assigneeBadgeElement = assignedElement.querySelector(".scheduled-work-order-assignee-badge");
       const convertedAssigneeBadgeElement = listElement.querySelectorAll(".scheduled-work-order-assignee-badge")[0];
     const replacementLinkElement = replacedElement.querySelector(".scheduled-work-order-replacement-link");
@@ -563,6 +564,9 @@ for (const profile of profiles) {
         assignedInsideList: box(assignedElement).left >= list.left - 0.5 && box(assignedElement).right <= list.right + 0.5,
         assignedGreenBorder: getComputedStyle(assignedElement).borderTopColor === "rgb(134, 239, 172)",
         assignedGreenBackground: getComputedStyle(assignedElement).backgroundImage.includes("rgb(220, 252, 231)"),
+        convertedInsideList: box(convertedElement).left >= list.left - 0.5 && box(convertedElement).right <= list.right + 0.5,
+        convertedMatchesAssignedColors: getComputedStyle(convertedElement).borderTopColor === getComputedStyle(assignedElement).borderTopColor
+          && getComputedStyle(convertedElement).backgroundImage === getComputedStyle(assignedElement).backgroundImage,
         assigneeBadgeInsideRow: box(assigneeBadgeElement).left >= box(assignedElement).left - 0.5
           && box(assigneeBadgeElement).right <= box(assignedElement).right + 0.5,
         convertedAssigneeBadgeInsideRow: box(convertedAssigneeBadgeElement).left >= box(convertedAssigneeBadgeElement.closest(".scheduled-work-order-list-item")).left - 0.5
@@ -634,6 +638,8 @@ for (const profile of profiles) {
     && result.assignedInsideList
     && result.assignedGreenBorder
     && result.assignedGreenBackground
+    && result.convertedInsideList
+    && result.convertedMatchesAssignedColors
     && result.assigneeBadgeInsideRow
     && result.convertedAssigneeBadgeInsideRow
     && result.replacedInsideList

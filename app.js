@@ -11391,14 +11391,17 @@ function sortScheduledWorkOrdersForDisplay(schedules, filterValue = "all") {
   const chronological = [...schedules].sort((left, right) => (
     Number(left.scheduledForMs || 0) - Number(right.scheduledForMs || 0)
   ));
-  if (filterValue !== "all") return chronological;
-  // Lịch hiện hành trước lịch sử; trong mỗi nhóm luôn xếp từ sớm đến muộn.
+  if (filterValue !== "all" && filterValue !== "locked") return chronological;
+  // Giữ thứ tự thời gian trong từng nhóm: đang chờ, đã giao/chuyển đổi, rồi lịch sử.
   const current = [];
+  const completed = [];
   const history = [];
   chronological.forEach((schedule) => {
-    (schedule.status === "deleted" || schedule.status === "replaced" ? history : current).push(schedule);
+    if (schedule.status === "deleted" || schedule.status === "replaced") history.push(schedule);
+    else if (schedule.status === "assigned" || schedule.status === "converted") completed.push(schedule);
+    else current.push(schedule);
   });
-  return [...current, ...history];
+  return [...current, ...completed, ...history];
 }
 
 function scheduledWorkOrderFilterLabel(filterValue = "all") {
@@ -11617,6 +11620,7 @@ function renderScheduledWorkOrderList() {
     const editable = canEditScheduledWorkOrder(schedule);
     const deletable = canDeleteScheduledWorkOrder(schedule);
     const assigned = schedule.status === "assigned";
+    const converted = schedule.status === "converted";
     const deleted = schedule.status === "deleted";
     const replaced = schedule.status === "replaced";
     const replacementTarget = replaced ? replacementTargets.get(schedule.id) : null;
@@ -11628,7 +11632,7 @@ function renderScheduledWorkOrderList() {
     const countdownMinutes = normalizeScheduledCountdownMinutes(schedule.assignmentCountdownMinutes);
     return `
       <article
-        class="scheduled-work-order-list-item${editable ? " is-editable" : ""}${assigned ? " is-assigned" : ""}${deleted ? " is-deleted" : ""}${replaced ? " is-replaced" : ""}"
+        class="scheduled-work-order-list-item${editable ? " is-editable" : ""}${assigned ? " is-assigned" : ""}${converted ? " is-converted" : ""}${deleted ? " is-deleted" : ""}${replaced ? " is-replaced" : ""}"
         data-scheduled-list-item-id="${escapeHtml(schedule.id)}"
         ${editable ? `data-edit-scheduled-work-order="${escapeHtml(schedule.id)}" role="button" tabindex="0" aria-label="Chỉnh sửa lịch ${escapeHtml(schedule.name || "Phiếu công việc")}"` : ""}
       >
