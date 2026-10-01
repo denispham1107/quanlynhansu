@@ -1456,6 +1456,7 @@ exports.listScheduledWorkOrders = onCall({
       sourceScheduleId: String(item.sourceScheduleId || ""),
       occurrenceIndex: Math.max(0, Math.trunc(Number(item.occurrenceIndex || 0))),
       status: String(item.status || "pending"),
+      assignedToName: String(item.assignedToName || "").trim().slice(0, 120),
       assignmentCountdownWaitingForAvailableEmployee: item.assignmentCountdownWaitingForAvailableEmployee === true,
       assignmentCountdownStartedAtMs: firestoreTimestampOrNull(item.assignmentCountdownStartedAt)?.toMillis() || 0,
       assignmentDeadlineAtMs: firestoreTimestampOrNull(item.assignmentDeadlineAt)?.toMillis() || 0,

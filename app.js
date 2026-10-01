@@ -11508,6 +11508,12 @@ function resetScheduledWorkOrderTimeFilter() {
   syncScheduledWorkOrderTimeFilterControls();
 }
 
+function renderScheduledWorkOrderAssigneeBadge(schedule) {
+  const name = String(schedule?.assignedToName || "").trim();
+  if (schedule?.status !== "assigned" || schedule.hotelDelivered === true || !name) return "";
+  return `<span class="scheduled-work-order-assignee-badge">Nhân viên: ${escapeHtml(name)}</span>`;
+}
+
 function renderScheduledWorkOrderList() {
   if (!els.scheduledWorkOrderList) return;
   const schedules = Array.isArray(state.scheduledWorkOrders) ? state.scheduledWorkOrders : [];
@@ -11579,6 +11585,7 @@ function renderScheduledWorkOrderList() {
             schedule.status,
             schedule.assignmentCountdownWaitingForAvailableEmployee === true
           ))}</span>
+          ${renderScheduledWorkOrderAssigneeBadge(schedule)}
           ${assigned && schedule.hotelDelivered === true
             ? '<span class="scheduled-work-order-hotel-delivered-badge">Hotel đã mang đến</span>'
             : ""}
