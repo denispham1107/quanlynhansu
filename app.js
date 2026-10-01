@@ -6284,6 +6284,7 @@ function setupAdminDashboard() {
 
       state.tasks = nextTasks;
       scheduleAdminTasksRender();
+      syncScheduledWorkOrderAssigneeBadges();
       if (!snapshot.metadata.fromCache) {
         startStartupExtras(bootUid);
         startAdminSupplementaryListeners();
@@ -6323,6 +6324,7 @@ function setupAdminDashboard() {
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       state.workOrderById = new Map(state.workOrders.map((workOrder) => [workOrder.id, workOrder]));
       scheduleAdminTasksRender();
+      syncScheduledWorkOrderAssigneeBadges();
       renderWorkSupervisionCountdown();
       syncTaskReviewAlertSound();
     },
@@ -6349,6 +6351,7 @@ function setupAdminDashboard() {
     (snapshot) => {
       state.workAssignmentHistory = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       scheduleAdminTasksRender();
+      syncScheduledWorkOrderAssigneeBadges();
     },
     (error) => {
       console.error(error);
@@ -10836,10 +10839,18 @@ async function persistWorkOrder(dispatch, button) {
     }
 
     const previousWorkOrderId = state.editingWorkOrderId;
-    const preserveConvertedWorkOrderId = Boolean(
-      previousWorkOrderId && previousWorkOrderId !== "legacy" && isAdminProfile()
-      && (await getConvertedScheduledDraftLinkCallable({ workOrderId: previousWorkOrderId })).data?.linked === true
-    );
+    let preserveConvertedWorkOrderId = false;
+    if (previousWorkOrderId && previousWorkOrderId !== "legacy" && isAdminProfile()) {
+      try {
+        const link = await getConvertedScheduledDraftLinkCallable({ workOrderId: previousWorkOrderId });
+        preserveConvertedWorkOrderId = link.data?.linked === true;
+      } catch (error) {
+        if (String(error?.code || "").toLowerCase() !== "functions/not-found") throw error;
+        // Bản máy chủ cũ chưa có callable này: Admin vẫn giữ mã Phiếu nháp
+        // để không cắt liên kết lịch Spa khi sửa rồi giao việc.
+        preserveConvertedWorkOrderId = true;
+      }
+    }
 
     if (dispatch) {
       const assignedHotelRows = rows.filter((row) => row.isHotel && row.assignedToUid);
@@ -11517,14 +11528,59 @@ function resetScheduledWorkOrderTimeFilter() {
   syncScheduledWorkOrderTimeFilterControls();
 }
 
-function renderScheduledWorkOrderAssigneeBadge(schedule) {
+function renderScheduledWorkOrderAssigneeBadge(
+  schedule,
+  workOrders = state.workOrders,
+  tasks = state.tasks,
+  assignmentHistory = state.workAssignmentHistory
+) {
   if (schedule?.hotelDelivered === true) return "";
-  const names = schedule?.status === "converted"
+  let names = schedule?.status === "converted"
     ? (Array.isArray(schedule.assignedToNames) ? schedule.assignedToNames : [])
     : schedule?.status === "assigned" ? [schedule.assignedToName] : [];
-  const displayNames = names.map((name) => String(name || "").trim()).filter(Boolean);
+  if (schedule?.status === "assigned" && !names.some((name) => String(name || "").trim())) {
+    const workOrderId = String(schedule.generatedWorkOrderId || `scheduled_${schedule.id}`).slice(0, 180);
+    const workOrder = workOrders.find((item) => item.id === workOrderId && item.scheduleId === schedule.id);
+    if (workOrder?.status === "dispatched" && workOrder.scheduledAssignedToName) {
+      names = [workOrder.scheduledAssignedToName];
+    } else {
+      const history = assignmentHistory.find((item) => item.id === `scheduled_${schedule.id}`.slice(0, 180)
+        && item.scheduleId === schedule.id);
+      names = Array.isArray(history?.assignedEmployeeNames) ? history.assignedEmployeeNames : [];
+    }
+    if (!names.some((name) => String(name || "").trim())) {
+      names = tasks.filter((task) => task.workOrderId === workOrderId && task.scheduleId === schedule.id
+        && task.assignedToUid && !["draft", "waiting_assignee"].includes(task.status))
+        .map((task) => task.assignedToName);
+    }
+  }
+  if (schedule?.status === "converted"
+    && !names.some((name) => String(name || "").trim()) && schedule.convertedWorkOrderId) {
+    const workOrderId = schedule.convertedWorkOrderId;
+    if (workOrders.some((item) => item.id === workOrderId && item.status === "dispatched")) {
+      names = tasks.filter((task) => task.workOrderId === workOrderId && task.assignedToUid
+        && !["draft", "waiting_assignee"].includes(task.status))
+        .map((task) => task.assignedToName);
+    }
+  }
+  const displayNames = [...new Set(names.map((name) => String(name || "").trim()).filter(Boolean))];
   if (!displayNames.length) return "";
   return `<span class="scheduled-work-order-assignee-badge">Nhân viên: ${displayNames.map(escapeHtml).join(", ")}</span>`;
+}
+
+function syncScheduledWorkOrderAssigneeBadges() {
+  if (!els.scheduledWorkOrderList || els.scheduledWorkOrderListModal?.classList.contains("hidden")) return;
+  const visibleRows = new Map([...els.scheduledWorkOrderList.querySelectorAll("[data-scheduled-list-item-id]")]
+    .map((item) => [item.dataset.scheduledListItemId, item]));
+  state.scheduledWorkOrders.forEach((schedule) => {
+    const row = visibleRows.get(schedule.id);
+    if (!row || !["assigned", "converted"].includes(schedule.status)) return;
+    const badge = row.querySelector(".scheduled-work-order-assignee-badge");
+    const desiredBadge = renderScheduledWorkOrderAssigneeBadge(schedule);
+    if ((badge?.outerHTML || "") === desiredBadge) return;
+    badge?.remove();
+    if (desiredBadge) row.querySelector(".scheduled-work-order-status-badge")?.insertAdjacentHTML("afterend", desiredBadge);
+  });
 }
 
 function renderScheduledWorkOrderList() {

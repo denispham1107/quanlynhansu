@@ -25,7 +25,7 @@ const {
   ordinaryDraftTaskUpdate,
   isScheduledDraftConversionUpdate,
   convertedScheduleUpdate,
-  collectConvertedScheduleAssignees,
+  collectWorkOrderAssignees,
   hotelDeliveredScheduleUpdate,
   linkedLunchCompletionUpdate
 } = require("./scheduled-conversion");
@@ -1436,15 +1436,35 @@ exports.listScheduledWorkOrders = onCall({
     .filter((item) => item.status === "converted")
     .map((item) => String(item.convertedWorkOrderId || "").trim())
     .filter(Boolean));
-  const convertedTasks = [];
-  const convertedIds = [...convertedWorkOrderIds];
-  for (let offset = 0; offset < convertedIds.length; offset += 25) {
+  const assignedMissingName = scheduleItems.filter((item) => item.status === "assigned"
+    && item.hotelDelivered !== true && !String(item.assignedToName || "").trim());
+  const relatedWorkOrderIds = new Set([
+    ...convertedWorkOrderIds,
+    ...assignedMissingName.map((item) => String(item.generatedWorkOrderId || "").trim()).filter(Boolean)
+  ]);
+  const relatedTasks = [];
+  const relatedIds = [...relatedWorkOrderIds];
+  for (let offset = 0; offset < relatedIds.length; offset += 25) {
     const taskSnapshot = await db.collection("tasks")
-      .where("workOrderId", "in", convertedIds.slice(offset, offset + 25))
+      .where("workOrderId", "in", relatedIds.slice(offset, offset + 25))
       .get();
-    convertedTasks.push(...taskSnapshot.docs.map((task) => task.data() || {}));
+    relatedTasks.push(...taskSnapshot.docs.map((task) => task.data() || {}));
   }
-  const convertedAssignees = collectConvertedScheduleAssignees(convertedTasks, convertedWorkOrderIds);
+  const relatedAssignees = collectWorkOrderAssignees(relatedTasks, relatedWorkOrderIds);
+  const assignedHistoryNames = new Map();
+  for (let offset = 0; offset < assignedMissingName.length; offset += 50) {
+    const historyItems = assignedMissingName.slice(offset, offset + 50);
+    const historySnapshots = await db.getAll(...historyItems
+      .map((item) => db.doc(`workAssignmentHistory/${`scheduled_${item.id}`.slice(0, 180)}`)));
+    historySnapshots.forEach((historySnapshot, index) => {
+      if (!historySnapshot.exists) return;
+      const history = historySnapshot.data() || {};
+      const name = String(history.assignedEmployeeNames?.[0] || "").trim().slice(0, 120);
+      if (String(history.scheduleId || "") === historyItems[index].id && name) {
+        assignedHistoryNames.set(historyItems[index].id, name);
+      }
+    });
+  }
   const schedules = scheduleItems
     .sort((left, right) => (
       (firestoreTimestampOrNull(right.scheduledAt)?.toMillis() || 0)
@@ -1471,14 +1491,16 @@ exports.listScheduledWorkOrders = onCall({
       sourceScheduleId: String(item.sourceScheduleId || ""),
       occurrenceIndex: Math.max(0, Math.trunc(Number(item.occurrenceIndex || 0))),
       status: String(item.status || "pending"),
-      assignedToName: String(item.assignedToName || "").trim().slice(0, 120),
+      assignedToName: String(String(item.assignedToName || "").trim() || assignedHistoryNames.get(item.id)
+        || relatedAssignees.get(String(item.generatedWorkOrderId || "").trim())?.[0] || "").slice(0, 120),
       assignedToNames: item.status === "converted"
-        ? convertedAssignees.get(String(item.convertedWorkOrderId || "").trim()) || []
+        ? relatedAssignees.get(String(item.convertedWorkOrderId || "").trim()) || []
         : [],
       assignmentCountdownWaitingForAvailableEmployee: item.assignmentCountdownWaitingForAvailableEmployee === true,
       assignmentCountdownStartedAtMs: firestoreTimestampOrNull(item.assignmentCountdownStartedAt)?.toMillis() || 0,
       assignmentDeadlineAtMs: firestoreTimestampOrNull(item.assignmentDeadlineAt)?.toMillis() || 0,
       generatedWorkOrderId: String(item.generatedWorkOrderId || ""),
+      convertedWorkOrderId: String(item.convertedWorkOrderId || ""),
       hotelDelivered: item.hotelDelivered === true,
       hotelDeliveredAtMs: firestoreTimestampOrNull(item.hotelDeliveredAt)?.toMillis() || 0,
       createdAtMs: firestoreTimestampOrNull(item.createdAt)?.toMillis() || 0,
