@@ -443,7 +443,7 @@ await send("Runtime.evaluate", {
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
       <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : index === 21 ? " is-assigned" : index === 20 ? " is-converted" : ""}">
         <div class="scheduled-work-order-list-row">
-          <div class="scheduled-work-order-list-main">22/09/2026, 08:30:00, Nhóm nhân viên, “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
+          <div class="scheduled-work-order-list-main"><span class="scheduled-work-order-list-prefix">22/09/2026, 08:30:00, Nhóm nhân viên,</span> “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
           <button class="btn danger scheduled-work-order-delete-btn" data-delete-scheduled-work-order="test-\${index}" type="button">×</button>
         </div>
         <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : index === 22 ? "Đã thay thế" : index === 21 ? "Đã giao việc" : index === 20 ? "Đã chuyển thành Phiếu thường" : "Đang chờ đến giờ"}</span>\${index === 21 || index === 20 ? '<span class="scheduled-work-order-assignee-badge">Nhân viên: Nguyễn Thị Minh Anh Nguyễn Thị Minh Anh Nguyễn Thị Minh Anh</span>' : ""}\${index === 22 ? '<button class="scheduled-work-order-replacement-link" type="button">Lịch mới: 09:45:00 30/09/2026 →</button>' : ""}</div>
@@ -489,6 +489,7 @@ for (const profile of profiles) {
       document.getElementById("scheduledWorkOrderNextDayBtn")
     ];
     const listElement = document.getElementById("scheduledWorkOrderList");
+    const prefixElements = [...listElement.querySelectorAll(".scheduled-work-order-list-prefix")];
       const firstRowElement = listElement.querySelector(".scheduled-work-order-list-row");
       const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
       const deletedElement = listElement.querySelector(".scheduled-work-order-list-item.is-deleted");
@@ -556,6 +557,8 @@ for (const profile of profiles) {
       dayButtonsAfterCount: dayCount.right <= dayButtonBoxes[0].left + 0.5
         || dayCount.bottom <= dayButtonBoxes[0].top + 0.5,
       list,
+        allSchedulePrefixesOrange: prefixElements.length === 24
+          && prefixElements.every((element) => getComputedStyle(element).color === "rgb(194, 65, 12)"),
         firstRow,
         firstDeleteButton,
         deletedInsideList: box(deletedElement).left >= list.left - 0.5 && box(deletedElement).right <= list.right + 0.5,
@@ -628,6 +631,7 @@ for (const profile of profiles) {
     && result.footerInsideCard
     && result.footerButtonInsideFooter
     && result.listInsideContentWidth
+    && result.allSchedulePrefixesOrange
     && result.filterInsideContentWidth
     && result.controlsInsideShells
     && result.filterControlsDoNotOverlap
