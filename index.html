@@ -10299,6 +10299,49 @@
 </style>
 
   <style>
+    /* Mọi mục trong danh sách Admin phải co theo bề rộng card, kể cả khi
+       lịch sử hoặc Phiếu chứa tên dài và nhiều nút thao tác. */
+    #adminView .task-panel,
+    #adminTaskList,
+    #adminTaskList > .work-assignment-history-section,
+    #adminTaskList > .invalid-task-history-section,
+    #adminTaskList > .ticket-group,
+    #adminTaskList .work-assignment-history-list,
+    #adminTaskList .invalid-task-history-list,
+    #adminTaskList .ticket-tasks,
+    #adminTaskList .work-assignment-history-row,
+    #adminTaskList .invalid-task-history-row,
+    #adminTaskList .task-card {
+      min-width: 0;
+      max-width: 100%;
+    }
+    #adminTaskList,
+    #adminTaskList .work-assignment-history-section,
+    #adminTaskList .invalid-task-history-section,
+    #adminTaskList .work-assignment-history-list,
+    #adminTaskList .invalid-task-history-list,
+    #adminTaskList .ticket-tasks {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    #adminTaskList .work-assignment-history-row-content,
+    #adminTaskList .invalid-task-history-row-content,
+    #adminTaskList .work-assignment-history-title,
+    #adminTaskList .invalid-task-history-title,
+    #adminTaskList .ticket-group-toolbar,
+    #adminTaskList .ticket-group-header,
+    #adminTaskList .ticket-group-header > div,
+    #adminTaskList .task-top,
+    #adminTaskList .task-desktop-summary {
+      min-width: 0;
+      max-width: 100%;
+    }
+    #adminTaskList .work-assignment-history-title,
+    #adminTaskList .invalid-task-history-title,
+    #adminTaskList .work-assignment-history-title-actions,
+    #adminTaskList .ticket-actions {
+      flex-wrap: wrap;
+    }
+
     /* Nút cài Culao Task dưới dạng PWA ngay tại màn hình đăng nhập. */
     .pwa-install-btn {
       width: 100%;
@@ -12376,7 +12419,7 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20261002-schedule-title-new-line-v143"></script>
+  <script type="module" src="app.js?v=20261002-admin-list-containment-v144"></script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

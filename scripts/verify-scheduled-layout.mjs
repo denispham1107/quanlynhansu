@@ -198,6 +198,81 @@ const mobileSchedulePassed = mobileScheduleResult.visibleCount === 1
 console.log(`${mobileSchedulePassed ? "PASS" : "FAIL"} | Mobile chỉ có một nút Lên lịch | ${mobileScheduleResult.visibleCount} nút`);
 if (!mobileSchedulePassed) failures.push({ profile: "Mobile single schedule action", result: mobileScheduleResult });
 
+await send("Runtime.evaluate", {
+  returnByValue: true,
+  expression: `(() => {
+    const panel = document.querySelector("#adminView .task-panel");
+    const list = document.getElementById("adminTaskList");
+    const longTitle = "Dạ ngày 2/10, 12g bạn thợ bên em bắt đầu qua tắm vệ sinh tại nhà cho 2 bé cún 10-15kg ở đường số 3, Phường Hiệp Bình Chánh, Thủ Đức";
+    const summary = '<div class="task-desktop-summary">' + ["Nhân viên", "Ngày giao", "Đếm ngược", "Quy định", "Ảnh báo cáo"].map((label) => '<div class="task-desktop-summary-item"><span>' + label + '</span><strong>Đang chờ người - chưa bắt đầu</strong></div>').join('') + '</div>';
+    const actions = '<div class="task-compact-actions"><button class="btn">+ Thêm giờ</button><button class="btn">Chi tiết</button></div>';
+    document.getElementById("appView").classList.remove("hidden");
+    document.getElementById("adminView").classList.remove("hidden");
+    list.innerHTML = [
+      '<section class="work-assignment-history-section">',
+      '<div class="work-assignment-history-title"><strong>Lịch sử giao việc</strong><span>47 dòng lịch sử</span></div>',
+      '<div class="work-assignment-history-list"><article class="work-assignment-history-row"><div class="work-assignment-history-row-content"><span class="work-assignment-history-badge">Lịch sử giao việc</span><strong>' + longTitle + ' - đã giao việc cho nhân viên Ngọc</strong></div></article></div>',
+      '</section>',
+      '<section class="invalid-task-history-section">',
+      '<div class="invalid-task-history-title"><strong>Lịch sử công việc không hợp lệ</strong><span>6 công việc</span></div>',
+      '<div class="invalid-task-history-list"><article class="invalid-task-history-row"><div class="invalid-task-history-row-content"><span class="invalid-task-history-badge">Không hợp lệ</span><strong>' + longTitle + ' - thời gian thực tế 6 phút</strong></div><button class="invalid-task-history-convert-btn">Chuyển</button></article></div>',
+      '</section>',
+      '<section class="ticket-group is-draft-ticket"><div class="ticket-group-toolbar"><div class="ticket-group-header"><div><span class="ticket-badge">Chưa giao việc</span><h4>' + longTitle + '</h4></div></div><div class="ticket-actions"><button class="btn">Sửa phiếu</button><button class="btn">Giao việc</button></div></div><div class="ticket-tasks"><article class="task-card is-draft"><div class="task-top"><strong class="task-title">Tắm từ 10 - 15kg</strong></div>' + summary + actions + '</article></div></section>',
+      '<section class="ticket-group"><div class="ticket-group-toolbar"><div class="ticket-group-header"><div><span class="ticket-badge">Phiếu công việc</span><h4>' + longTitle + '</h4></div></div></div><div class="ticket-tasks"><article class="task-card"><div class="task-top"><strong class="task-title">Ship 8-12km (1 chiều)</strong></div>' + summary + actions + '</article></div></section>'
+    ].join('');
+    return Boolean(panel && list);
+  })()`
+});
+
+for (const profile of [
+  { name: "Desktop 1560", width: 1560, height: 900, mobile: false },
+  { name: "Desktop 1181", width: 1181, height: 820, mobile: false },
+  ...profiles.filter((entry) => entry.width !== 1919)
+]) {
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: profile.width,
+    height: profile.height,
+    deviceScaleFactor: profile.mobile === false ? 1 : 3,
+    mobile: profile.mobile !== false,
+    screenWidth: profile.width,
+    screenHeight: profile.height,
+  });
+  await delay(120);
+  const measurement = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const panel = document.querySelector("#adminView .task-panel");
+      const list = document.getElementById("adminTaskList");
+      const panelBox = panel.getBoundingClientRect();
+      const panelStyle = getComputedStyle(panel);
+      const left = panelBox.left + parseFloat(panelStyle.paddingLeft);
+      const right = panelBox.right - parseFloat(panelStyle.paddingRight);
+      const selectors = [".work-assignment-history-section", ".work-assignment-history-row", ".invalid-task-history-section", ".invalid-task-history-row", ".ticket-group", ".task-card"];
+      const boxes = selectors.flatMap((selector) => [...list.querySelectorAll(selector)].map((element) => {
+        const box = element.getBoundingClientRect();
+        return { selector, left: box.left, right: box.right, parentRight: element.parentElement.getBoundingClientRect().right };
+      }));
+      return {
+        panelLeft: left, panelRight: right,
+        listRight: list.getBoundingClientRect().right,
+        listScrollWidth: list.scrollWidth,
+        listClientWidth: list.clientWidth,
+        boxes,
+        pageScrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth
+      };
+    })()`
+  });
+  const result = measurement.result.value;
+  const passed = result.boxes.length === 8
+    && result.boxes.every((box) => box.left >= result.panelLeft - 1 && box.right <= result.panelRight + 1 && box.right <= box.parentRight + 1)
+    && result.listRight <= result.panelRight + 1
+    && result.listScrollWidth <= result.listClientWidth + 1
+    && result.pageScrollWidth <= result.viewportWidth;
+  console.log(`${passed ? "PASS" : "FAIL"} | Trang quản lý ${profile.name} | content ${Math.round(result.panelRight)} | list ${Math.round(result.listRight)} | widest ${Math.round(Math.max(...result.boxes.map((box) => box.right)))}`);
+  if (!passed) failures.push({ profile: `Trang quản lý ${profile.name}`, result });
+}
+
 const prepareExpression = `(() => {
   const modal = document.getElementById("taskModal");
   const card = modal?.querySelector(".task-create-modal-card");
