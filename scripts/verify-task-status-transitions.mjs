@@ -65,6 +65,8 @@ const context = vm.createContext({
   }
 });
 vm.runInContext([
+  sourceOf("repairApprovedTaskIfNeeded"),
+  sourceOf("repairApprovedTasksByAdmin"),
   sourceOf("markTaskOverdueIfStillActive"),
   sourceOf("syncOverdueTasksByAdmin"),
   sourceOf("approveTask"),
@@ -82,6 +84,13 @@ assert.equal(updates.length, 0, "Snapshot Admin cũ không được biến Phi�
 liveTasks.set("task-1", { ...base, status: "submitted", submittedAt: past });
 await context.syncOverdueTasksByAdmin();
 assert.equal(updates.length, 0, "Phiếu đã gửi chờ duyệt không được chạy lại");
+
+context.state.tasks = [{ id: "task-1", ...base, status: "overdue", approvedAt: past }];
+liveTasks.set("task-1", { ...base, status: "overdue", approvedAt: past });
+await context.repairApprovedTasksByAdmin();
+assert.equal(liveTasks.get("task-1").status, "completed", "Phiếu đã duyệt từ trước nhưng bị ghi đè phải tự khôi phục");
+updates.length = 0;
+context.state.tasks = [{ id: "task-1", ...base, status: "doing" }];
 
 liveTasks.set("task-1", { ...base, status: "doing", deadlineAt: future });
 await context.syncOverdueTasksByAdmin();
@@ -112,13 +121,17 @@ await context.requestRedo("task-1", {});
 assert.equal(liveTasks.get("task-1").status, "redo");
 
 const taskRules = rules.slice(rules.indexOf("match /tasks/{taskId}"), rules.indexOf("match /notifications/{notificationId}"));
+const updateRules = [...taskRules.matchAll(/allow update: if ([\s\S]*?);/g)];
+assert.ok(updateRules.length >= 16);
+assert.ok(updateRules.every(([, condition]) => condition.includes("preservesFinalTaskStatus")), "Mọi nhánh cập nhật task phải giữ trạng thái cuối");
 for (const actor of ["isAdmin()", 'hasPermission("reassignTasks")', 'hasPermission("extendTaskTime")', 'hasPermission("reviewTasks")', 'hasPermission("importData")']) {
   const escaped = actor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const matches = taskRules.match(new RegExp(`allow update: if ${escaped}\\s+&& preservesFinalTaskStatus`, "g")) || [];
   assert.ok(matches.length > 0, `Thiếu khóa trạng thái ở quyền ${actor}`);
 }
-assert.equal((taskRules.match(/allow update: if isAdmin\(\)\s+&& preservesFinalTaskStatus/g) || []).length, 3);
+assert.equal((taskRules.match(/allow update: if isAdmin\(\)\s+&& preservesFinalTaskStatus/g) || []).length, 5);
 assert.match(rules, /beforeData\.status != "completed" \|\| afterData\.status == "completed"/);
 assert.match(rules, /beforeData\.status != "submitted" \|\| afterData\.status in \["submitted", "completed", "redo"\]/);
+assert.match(rules, /beforeData\.get\("approvedAt", null\) == null \|\| afterData\.status == "completed"/);
 
 console.log("PASS | Phiếu đã duyệt/chờ duyệt không bị đồng bộ quá hạn hoặc thao tác trễ làm chạy lại; quy tắc Firestore giữ trạng thái cuối.");

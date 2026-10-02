@@ -6330,6 +6330,7 @@ function setupAdminDashboard() {
       // Chỉ tài khoản Admin tự đồng bộ trạng thái quá hạn vào database.
       // Giám sát vẫn nhìn thấy trạng thái tính toán realtime nhưng không tự ghi dữ liệu nếu không phải Admin.
       if (isAdminProfile() && !snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites) {
+        await repairApprovedTasksByAdmin();
         await syncOverdueTasksByAdmin();
       }
     },
@@ -13858,6 +13859,32 @@ els.adminEmployeeFilter.addEventListener("change", (event) => {
   state.adminEmployeeFilter = event.target.value;
   renderAdminTasks();
 });
+
+async function repairApprovedTasksByAdmin() {
+  if (!isAdminProfile()) return;
+  const repairs = state.tasks
+    .filter((task) => task.approvedAt && task.status !== "completed")
+    .slice(0, 10)
+    .map((task) => repairApprovedTaskIfNeeded(task.id));
+  if (!repairs.length) return;
+  try {
+    await Promise.all(repairs);
+  } catch (error) {
+    console.warn("Không thể khôi phục trạng thái Phiếu đã duyệt:", error);
+  }
+}
+
+async function repairApprovedTaskIfNeeded(taskId) {
+  const taskRef = doc(db, "tasks", taskId);
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(taskRef);
+    if (!snapshot.exists()) return false;
+    const task = snapshot.data();
+    if (!task.approvedAt || task.status === "completed") return false;
+    transaction.update(taskRef, { status: "completed" });
+    return true;
+  });
+}
 
 async function syncOverdueTasksByAdmin() {
   if (!isAdminProfile()) return;

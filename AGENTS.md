@@ -22,6 +22,7 @@
 - `completed` là trạng thái cuối. Một Phiếu đã được Admin xác nhận không được tự chuyển về `doing`, `hotel`, `redo`, `overdue`, `submitted` hoặc `waiting_assignee` do dữ liệu cũ, thao tác trễ hay bản app cũ. `submitted` chỉ có thể giữ nguyên, chuyển sang `completed`, hoặc sang `redo` khi Admin thực sự chọn “Yêu cầu làm lại”.
 - Mọi luồng nền tự cập nhật trạng thái (đặc biệt đồng bộ quá hạn) phải đọc lại document mới nhất trong Firestore transaction và kiểm tra trạng thái/mốc thời gian ngay trước khi ghi. Không ghi `status` dựa riêng vào `state.tasks` hoặc snapshot cache; transaction phải chịu được xung đột với thao tác duyệt của Admin.
 - Thao tác duyệt và yêu cầu làm lại cũng phải xác minh `submitted` trong transaction. Firestore Rules phải giữ khóa trạng thái cuối trên mọi nhánh `allow update` có thể đổi `status`, kể cả quyền Admin và Nhập dữ liệu; Cloud Functions dùng Admin SDK cần kiểm tra tương đương trong mã.
+- `approvedAt` đã có giá trị là bằng chứng Phiếu từng được duyệt: mọi cập nhật tiếp theo phải giữ `status = completed`. Khi đọc snapshot từ máy chủ, Admin cần phát hiện và khôi phục bằng transaction các Phiếu cũ có `approvedAt` nhưng `status` khác `completed`; không lấy snapshot cache làm căn cứ sửa dữ liệu.
 - Trước commit khi sửa luồng Phiếu, chạy `node scripts/verify-task-status-transitions.mjs` với các ca snapshot cũ, Phiếu đang chờ duyệt, Phiếu đã duyệt và hai thao tác Admin đến trễ. Không chỉ kiểm tra giao diện hiển thị ngay sau khi bấm; phải kiểm tra trạng thái vẫn đúng sau lần đồng bộ tiếp theo.
 
 ## Nhập thời gian

@@ -75,7 +75,9 @@ service cloud.firestore {
     // Phiếu chờ duyệt chỉ có thể tiếp tục chờ, được duyệt, hoặc được yêu cầu làm lại.
     function preservesFinalTaskStatus(beforeData, afterData) {
       return (beforeData.status != "completed" || afterData.status == "completed")
-        && (beforeData.status != "submitted" || afterData.status in ["submitted", "completed", "redo"]);
+        && (beforeData.status != "submitted" || afterData.status in ["submitted", "completed", "redo"])
+        && (beforeData.get("approvedAt", null) == null || afterData.status == "completed")
+        && (afterData.get("approvedAt", null) == null || afterData.status == "completed");
     }
 
     function dataIsLunchBreak(data) {
@@ -653,6 +655,7 @@ service cloud.firestore {
 
       // Admin/Giám sát có quyền chỉnh Phiếu hoặc quản lý ảnh được cập nhật Ảnh CV.
       allow update: if isManagement()
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && (isAdmin() || hasPermission("editWorkOrder") || hasPermission("deleteReportPhotos") || hasPermission("managePhotoRequirements"))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["workPhotos", "workPhotoCount", "lastWorkPhotoUploadedAt"])
         && request.resource.data.workPhotos is list
@@ -664,6 +667,7 @@ service cloud.firestore {
       // Nhân viên được đăng hình báo cáo cho task đang làm của chính mình.
       // Ảnh thật lưu ở Firebase Storage; Firestore chỉ lưu metadata + số lượng.
       allow update: if signedIn()
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && resource.data.assignedToUid == request.auth.uid
         && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["photos", "photoCount", "lastPhotoUploadedAt"])
@@ -678,6 +682,7 @@ service cloud.firestore {
       // Nhân viên chỉ được bấm Hoàn thành task của chính mình.
       // Không được tự chuyển sang completed, không được sửa nội dung/deadline/người nhận.
       allow update: if signedIn()
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && resource.data.assignedToUid == request.auth.uid
         && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
         && !(
@@ -705,6 +710,7 @@ service cloud.firestore {
       // Admin bấm "Giao việc" cho 1 phiếu đang ở trạng thái nháp: chuyển task draft -> doing,
       // bắt đầu tính hạn hoàn thành từ thời điểm này (có thể xếp hàng nếu nhân viên còn việc khác).
       allow update: if isAdmin()
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && resource.data.status == "draft"
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "dispatchedAt", "queueStartAt", "deadlineAt"])
         && request.resource.data.status in ["doing", "lunch_break", "hotel"]
@@ -724,6 +730,7 @@ service cloud.firestore {
       // - Nếu task đang chạy: chỉ đổi assignedToUid/assignedToName, giữ nguyên toàn bộ mốc thời gian.
       // - Nếu task đang chờ đến lượt (queueStartAt > request.time): đổi người và cho task bắt đầu ngay như mới giao.
       allow update: if isAdmin()
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && !isScheduledPhotoRequirementEditingLocked(resource.data)
         && resource.data.status in ["doing", "lunch_break", "hotel", "redo", "overdue"]
         && request.resource.data.id == resource.data.id
@@ -808,6 +815,7 @@ service cloud.firestore {
 
       // Giao task nháp: chỉ được thay đổi các field bắt đầu/xếp hàng thời gian.
       allow update: if hasPermission("dispatchWorkOrder")
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && resource.data.status == "draft"
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "status",
@@ -922,6 +930,7 @@ service cloud.firestore {
 
       // Chỉnh số lượng ảnh báo cáo bắt buộc.
       allow update: if hasPermission("managePhotoRequirements")
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && !isScheduledPhotoRequirementEditingLocked(resource.data)
         && !isDispatchedPhotoRequirementEditingLocked(resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -947,6 +956,7 @@ service cloud.firestore {
 
       // Xóa ảnh báo cáo: chỉ được cập nhật metadata ảnh, file thật do Storage Rules kiểm tra riêng.
       allow update: if hasPermission("deleteReportPhotos")
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["photos", "photoCount", "lastPhotoUploadedAt"])
         && request.resource.data.photos is list
         && request.resource.data.photos.size() <= 200
@@ -955,6 +965,7 @@ service cloud.firestore {
 
       // Xóa nhân viên có thể làm thay đổi thứ tự/số lượng task còn lại trong cùng Phiếu.
       allow update: if hasPermission("manageEmployeeAccounts")
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["rowIndex", "workOrderTaskCount"])
         && request.resource.data.rowIndex is int
         && request.resource.data.rowIndex >= 0
