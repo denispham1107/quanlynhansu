@@ -213,7 +213,7 @@ assert.match(extractFunction("renderScheduledWorkOrderList"), /sortScheduledWork
 assert.match(extractFunction("renderScheduledWorkOrderList"), /const assigned = schedule\.status === "assigned"/);
 assert.match(extractFunction("renderScheduledWorkOrderList"), /\$\{assigned \? " is-assigned" : ""\}/);
 assert.match(extractFunction("renderScheduledWorkOrderList"), /\$\{converted \? " is-converted" : ""\}/);
-assert.match(extractFunction("renderScheduledWorkOrderList"), /class="scheduled-work-order-list-prefix">\$\{escapeHtml\(formatScheduledListDateTime\(schedule\.scheduledForMs\)\)\}, \$\{escapeHtml\(schedule\.employeeGroupName \|\| "Nhóm nhân viên"\)\},<\/span>/);
+assert.match(extractFunction("renderScheduledWorkOrderList"), /class="scheduled-work-order-list-prefix">\$\{escapeHtml\(formatScheduledListDateTime\(schedule\.scheduledForMs\)\)\}, \$\{escapeHtml\(schedule\.employeeGroupName \|\| "Nhóm nhân viên"\)\}:<\/span>/);
 assert.match(pageSource, /\.scheduled-work-order-list-item\.is-assigned,\s*\.scheduled-work-order-list-item\.is-converted\s*\{[^}]*background:linear-gradient\(135deg,#dcfce7,#d1fae5\)/);
 assert.match(pageSource, /\.scheduled-work-order-list-prefix\s*\{\s*color:#c2410c;/);
 
