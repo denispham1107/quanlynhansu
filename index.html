@@ -31,6 +31,49 @@
       };
       const updateCheckIntervalMs = 5 * 60 * 1000;
       let lastUpdateCheckAt = 0;
+      const startupRecoveryKey = "culao-startup-recovery-v1";
+      const startupRecoveryParam = "_startupRecovery";
+      let startupFinished = false;
+      let authResolved = false;
+      const startupState = window.__CULAO_STARTUP__ = {
+        authResolved() { authResolved = true; },
+        complete() {
+          startupFinished = true;
+          window.clearTimeout(startupWatchdog);
+          try { sessionStorage.removeItem(startupRecoveryKey); } catch (_) {}
+          try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has(startupRecoveryParam)) {
+              url.searchParams.delete(startupRecoveryParam);
+              window.history.replaceState(window.history.state, "", url.href);
+            }
+          } catch (_) {}
+        },
+        fail(message) {
+          if (startupFinished) return;
+          const status = document.getElementById("startupStatus");
+          if (status) status.textContent = message;
+          document.getElementById("startupRetry")?.classList.remove("hidden");
+        },
+        recover() {
+          if (startupFinished) return;
+          try {
+            const url = new URL(window.location.href);
+            if (navigator.onLine !== false
+              && sessionStorage.getItem(startupRecoveryKey) !== "1"
+              && !url.searchParams.has(startupRecoveryParam)) {
+              sessionStorage.setItem(startupRecoveryKey, "1");
+              url.searchParams.set(startupRecoveryParam, "1");
+              window.location.replace(url.href);
+              return;
+            }
+          } catch (_) {}
+          startupState.fail(authResolved
+            ? "Không mở được dữ liệu tài khoản. Kiểm tra kết nối rồi chọn Thử tải lại."
+            : "Không khôi phục được phiên đăng nhập. Kiểm tra kết nối rồi chọn Thử tải lại.");
+        }
+      };
+      const startupWatchdog = window.setTimeout(() => startupState.recover(), 20000);
 
       const checkForAppUpdate = async () => {
         if (document.hidden || navigator.onLine === false) return;
@@ -76,10 +119,11 @@
       // Mã Firebase là module ngoài miền. Nếu mạng chậm, vẫn phải nói rõ ứng
       // dụng đang khôi phục phiên chứ không hiện nhầm màn hình đăng nhập.
       window.setTimeout(() => {
+        if (startupFinished) return;
         const view = document.getElementById("startupView");
         if (!view || view.classList.contains("hidden")) return;
         const status = document.getElementById("startupStatus");
-        if (status && !status.textContent.includes("Không tải được")) {
+        if (status && status.textContent === "Đang khôi phục phiên đăng nhập...") {
           status.textContent = "Đang chờ kết nối xác thực. Bạn vẫn đang giữ phiên đăng nhập.";
         }
         document.getElementById("startupRetry")?.classList.remove("hidden");
@@ -12419,7 +12463,12 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20261002-admin-list-containment-v144"></script>
+  <script type="module">
+    import("./app.js?v=20261002-startup-recovery-v145").catch((error) => {
+      console.error("Không tải được ứng dụng:", error);
+      window.__CULAO_STARTUP__?.recover();
+    });
+  </script>
 
 
   <div id="googleCalendarImportModal" class="google-calendar-import-modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleCalendarImportTitle">

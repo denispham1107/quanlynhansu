@@ -35,6 +35,30 @@ assert.match(app, /const cachedProfile = readStartupProfile\(user\.uid\)/);
 assert.match(app, /const profileRequest = cachedProfile \? getDocFromServer\(profileRef\) : getDoc\(profileRef\)/);
 assert.match(app, /if \(cachedProfile\) \{[\s\S]*?activateAuthenticatedDashboard\(cachedProfile\)/);
 assert.match(app, /showStartup\("Không tải được hồ sơ\.[^\n]+true\)/);
+assert.match(app, /window\.__CULAO_STARTUP__\?\.authResolved\(\)/);
+assert.match(app, /window\.__CULAO_STARTUP__\?\.complete\(\)/);
+assert.match(app, /const profileSnap = await withStartupDeadline\(profileRequest\)/);
+
+const pendingTimers = new Map();
+let nextTimer = 0;
+const deadlineContext = vm.createContext({
+  STARTUP_PROFILE_TIMEOUT_MS: 12000,
+  Promise,
+  Error,
+  window: {
+    setTimeout(callback) { const id = ++nextTimer; pendingTimers.set(id, callback); return id; },
+    clearTimeout(id) { pendingTimers.delete(id); }
+  }
+});
+vm.runInContext(sourceOf("withStartupDeadline"), deadlineContext);
+const resolved = await deadlineContext.withStartupDeadline(Promise.resolve("profile"));
+assert.equal(resolved, "profile");
+assert.equal(pendingTimers.size, 0, "Hủy bộ đếm khi hồ sơ tải thành công");
+const stalled = deadlineContext.withStartupDeadline(new Promise(() => {}));
+assert.equal(pendingTimers.size, 1);
+pendingTimers.values().next().value();
+await assert.rejects(stalled, /startup\/profile-timeout/);
+assert.equal(pendingTimers.size, 0, "Hủy bộ đếm khi quá hạn");
 
 const values = new Map();
 const storage = {

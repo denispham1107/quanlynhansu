@@ -95,7 +95,18 @@ async function fetchThroughWorker(url) {
   return { response, elapsed, waits };
 }
 
-const url = "https://example.com/app.js?v=20261002-admin-list-containment-v144";
+const firebaseUrl = "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+const firebaseFirst = await fetchThroughWorker(firebaseUrl);
+assert.equal(await firebaseFirst.response.text(), "fresh");
+await Promise.all(firebaseFirst.waits);
+assert.ok(stored.has(firebaseUrl), "Mô-đun Firebase được cache sau lần tải thành công");
+networkDelay = 100;
+const firebaseCached = await fetchThroughWorker(firebaseUrl);
+assert.equal(await firebaseCached.response.text(), "fresh");
+assert.ok(firebaseCached.elapsed < 70, "Lần mở sau phải dùng Firebase từ cache");
+networkDelay = 80;
+
+const url = "https://example.com/app.js?v=20261002-startup-recovery-v145";
 stored.set(url, new Response("cached"));
 const cachedResult = await fetchThroughWorker(url);
 assert.equal(await cachedResult.response.text(), "cached");
@@ -117,21 +128,38 @@ await Promise.all(noCacheResult.waits);
 console.log("PASS | Service worker kích hoạt an toàn, ép tab cũ nạp lại khi nâng cấp và vẫn trả cache nhanh khi mạng chậm.");
 
 const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "index.html"), "utf8");
+assert.match(html, /import\("\.\/app\.js\?v=20261002-startup-recovery-v145"\)/);
 const bootstrap = html.match(/<script>\s*(\(\(\) => \{[\s\S]*?\}\)\(\);)\s*<\/script>/)?.[1];
 assert.ok(bootstrap, "Không tìm thấy mã khởi tạo PWA");
 const bootstrapEvents = new Map();
 let currentTime = 100000;
 let updateCalls = 0;
 let registerOptions;
+let reloads = 0;
+const bootstrapTimers = new Map();
+const startupStatus = { textContent: "Đang khôi phục phiên đăng nhập..." };
+const startupRetry = { classList: { remove() { this.visible = true; } } };
+const startupView = { classList: { contains() { return false; } } };
+const recoveryStorage = new Map();
 const registration = { update() { updateCalls += 1; return Promise.resolve(); } };
 const bootstrapWindow = {
   addEventListener(name, listener) { bootstrapEvents.set(`window:${name}`, listener); },
   setInterval(listener) { bootstrapEvents.set("interval", listener); },
-  setTimeout() {}
+  setTimeout(listener, delay) { bootstrapTimers.set(delay, listener); return delay; },
+  clearTimeout(delay) { bootstrapTimers.delete(delay); },
+  location: {
+    href: "https://example.com/app/?taskId=task-1",
+    replace(url) { reloads += 1; this.href = url; }
+  },
+  history: {
+    state: null,
+    replaceState(_state, _title, url) { bootstrapWindow.location.href = url; }
+  }
 };
 const bootstrapDocument = {
   hidden: false,
-  addEventListener(name, listener) { bootstrapEvents.set(`document:${name}`, listener); }
+  addEventListener(name, listener) { bootstrapEvents.set(`document:${name}`, listener); },
+  getElementById(id) { return { startupView, startupStatus, startupRetry }[id]; }
 };
 const bootstrapNavigator = {
   onLine: true,
@@ -141,6 +169,12 @@ vm.runInNewContext(bootstrap, {
   window: bootstrapWindow,
   document: bootstrapDocument,
   navigator: bootstrapNavigator,
+  sessionStorage: {
+    getItem(key) { return recoveryStorage.get(key) ?? null; },
+    setItem(key, value) { recoveryStorage.set(key, value); },
+    removeItem(key) { recoveryStorage.delete(key); }
+  },
+  URL,
   Date: { now: () => currentTime },
   console,
   CustomEvent: class {}
@@ -162,4 +196,16 @@ currentTime += 5 * 60 * 1000;
 bootstrapEvents.get("interval")();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(updateCalls, 3, "Tab ẩn không nên kiểm tra mạng định kỳ");
+bootstrapTimers.get(20000)();
+assert.equal(reloads, 1, "Xác thực bị treo phải tự nạp lại đúng một lần");
+assert.equal(new URL(bootstrapWindow.location.href).searchParams.get("taskId"), "task-1");
+assert.equal(new URL(bootstrapWindow.location.href).searchParams.get("_startupRecovery"), "1");
+recoveryStorage.clear();
+bootstrapTimers.get(20000)();
+assert.equal(reloads, 1, "Không được nạp lại vô hạn ngay cả khi sessionStorage bị xóa");
+assert.match(startupStatus.textContent, /Không khôi phục được/);
+assert.equal(startupRetry.classList.visible, true);
+bootstrapWindow.__CULAO_STARTUP__.complete();
+assert.equal(recoveryStorage.size, 0, "Mở app thành công phải xóa cờ thử lại");
+assert.equal(new URL(bootstrapWindow.location.href).searchParams.has("_startupRecovery"), false);
 console.log("PASS | App kiểm tra cập nhật khi mở, trở lại và trong lúc đang chạy.");

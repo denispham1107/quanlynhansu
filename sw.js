@@ -1,11 +1,11 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20261002-admin-list-containment-v144";
+const CACHE_NAME = "culao-task-shell-v20261002-startup-recovery-v145";
 const APP_SHELL_NETWORK_TIMEOUT_MS = 1800;
 const APP_SHELL_BACKGROUND_TIMEOUT_MS = 15000;
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./app.js?v=20261002-admin-list-containment-v144",
+  "./app.js?v=20261002-startup-recovery-v145",
   "./styles.css"
 ];
 const OPTIONAL_SHELL = [
@@ -35,7 +35,7 @@ self.addEventListener("activate", (event) => {
     (async () => {
       const keys = await caches.keys();
       const replacingOldApp = keys.some((key) => key.startsWith("culao-task-shell-") && key !== CACHE_NAME);
-      await Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)));
+      await Promise.all(keys.filter((key) => key.startsWith("culao-task-shell-") && key !== CACHE_NAME).map((key) => caches.delete(key)));
       await self.clients.claim();
       if (!replacingOldApp) return;
 
@@ -56,7 +56,24 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) {
+    // Firebase được ghim phiên bản. Cache các mô-đun đã tải thành công để lần
+    // mở PWA sau không phải chờ CDN khi kết nối di động chập chờn.
+    if (url.origin !== "https://www.gstatic.com" || !url.pathname.startsWith("/firebasejs/10.12.5/") || !url.pathname.endsWith(".js")) return;
+    let cacheCopy = null;
+    const responsePromise = (async () => {
+      const cached = await caches.match(event.request);
+      if (cached) return cached;
+      const response = await fetch(event.request);
+      if (response.ok) cacheCopy = response.clone();
+      return response;
+    })();
+    event.respondWith(responsePromise);
+    event.waitUntil(responsePromise.then(async () => {
+      if (cacheCopy) await (await caches.open(CACHE_NAME)).put(event.request, cacheCopy);
+    }).catch(() => undefined));
+    return;
+  }
 
   // Lần nạp lại bắt buộc phải lấy đúng HTML đã đóng gói cùng worker mới,
   // kể cả khi CDN còn trả bản HTML cũ trong ít phút đầu sau triển khai.

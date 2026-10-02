@@ -380,6 +380,7 @@ let startupExtrasTimer = 0;
 let startupExtrasUid = "";
 let authBootGeneration = 0;
 let activeDashboardRole = "";
+const STARTUP_PROFILE_TIMEOUT_MS = 12000;
 const STARTUP_PROFILE_CACHE_PREFIX = "culao-startup-profile-v1:";
 const STARTUP_PROFILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -419,6 +420,16 @@ function saveStartupProfile(uid, profile) {
 function clearStartupProfile(uid) {
   if (!uid) return;
   try { localStorage.removeItem(`${STARTUP_PROFILE_CACHE_PREFIX}${uid}`); } catch (_) {}
+}
+
+function withStartupDeadline(request, timeoutMs = STARTUP_PROFILE_TIMEOUT_MS) {
+  let timer;
+  return Promise.race([
+    request,
+    new Promise((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error("startup/profile-timeout")), timeoutMs);
+    })
+  ]).finally(() => window.clearTimeout(timer));
 }
 
 
@@ -5708,6 +5719,7 @@ function activateAuthenticatedDashboard(profile) {
 }
 
 onAuthStateChanged(auth, async (user) => {
+  window.__CULAO_STARTUP__?.authResolved();
   const bootGeneration = ++authBootGeneration;
   const previousUid = state.user?.uid;
   cleanupSubscriptions();
@@ -5760,8 +5772,13 @@ onAuthStateChanged(auth, async (user) => {
   renderWorkSupervisionCountdown();
   state.workOrderSettingsAuthorizationToken = "";
   state.workOrderSettingsAuthorizationExpiresAt = 0;
-  state.pushToken = localStorage.getItem(PUSH_TOKEN_STORAGE_KEY) || "";
-  state.pushTokenOwnerUid = localStorage.getItem(PUSH_TOKEN_OWNER_STORAGE_KEY) || "";
+  try {
+    state.pushToken = localStorage.getItem(PUSH_TOKEN_STORAGE_KEY) || "";
+    state.pushTokenOwnerUid = localStorage.getItem(PUSH_TOKEN_OWNER_STORAGE_KEY) || "";
+  } catch (_) {
+    state.pushToken = "";
+    state.pushTokenOwnerUid = "";
+  }
   state.chatUsers = [];
   state.chatConversations = [];
   state.chatConversationMap = new Map();
@@ -5798,7 +5815,7 @@ onAuthStateChanged(auth, async (user) => {
       if (state.pendingPushTaskId) queuePushTaskOpen(state.pendingPushTaskId);
     }
 
-    const profileSnap = await profileRequest;
+    const profileSnap = await withStartupDeadline(profileRequest);
     if (bootGeneration !== authBootGeneration || state.user?.uid !== user.uid) return;
 
     if (!profileSnap.exists()) {
@@ -5835,6 +5852,10 @@ onAuthStateChanged(auth, async (user) => {
       showStartup("Không tải được hồ sơ. Kiểm tra kết nối rồi chọn Thử tải lại; phiên đăng nhập vẫn được giữ.", true);
     }
   }
+}, (error) => {
+  console.error("Không khôi phục được phiên đăng nhập:", error);
+  showStartup("Không khôi phục được phiên đăng nhập. Kiểm tra kết nối rồi chọn Thử tải lại.", true);
+  window.__CULAO_STARTUP__?.authResolved();
 });
 
 function showStartup(message, canRetry = false) {
@@ -5846,6 +5867,7 @@ function showStartup(message, canRetry = false) {
 }
 
 function showLogin() {
+  window.__CULAO_STARTUP__?.complete();
   stopImageGalleryListener();
   els.taskModal?.classList.add("hidden");
   els.scheduledWorkOrderListModal?.classList.add("hidden");
@@ -5868,6 +5890,7 @@ function showLogin() {
 }
 
 function showApp() {
+  window.__CULAO_STARTUP__?.complete();
   els.startupView?.classList.add("hidden");
   els.loginView.classList.add("hidden");
   els.appView.classList.remove("hidden");
