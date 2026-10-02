@@ -10,6 +10,13 @@
 - Sau thay đổi giao diện, phải tăng phiên bản cache của service worker để thiết bị iOS nhận CSS mới.
 - Trước khi commit, kiểm tra ít nhất cú pháp, `git diff --check`, rà soát các media query có thể ghi đè quy tắc mobile ở cuối stylesheet và chạy kiểm tra kích thước thực tế của từng ô so với card cha. Chỉ nhìn mã CSS là chưa đủ để kết luận không tràn.
 
+## Trang quản lý: ngăn tái diễn lỗi tràn lề phải
+
+- Sau mọi thay đổi hoặc chức năng mới trên trang quản lý, phải kiểm tra cùng lúc bốn loại nội dung trong `#adminTaskList`: “Lịch sử giao việc”, “Lịch sử công việc không hợp lệ”, Phiếu “Chưa giao việc” và Phiếu công việc. Một Phiếu có nội dung dài có thể kéo rộng cột Grid chung, khiến cả các mục khác tràn lề dù chúng không thay đổi.
+- Giữ `#adminTaskList`, các section/list lồng nhau, dòng lịch sử, `.ticket-group` và `.task-card` co được trong card cha: cột Grid dùng `minmax(0, 1fr)`, phần tử con dùng `min-width: 0`/`max-width: 100%` phù hợp; nhóm nút phải xuống hàng khi thiếu chỗ. Không chỉ che lỗi bằng `overflow-x: hidden`, vì cách đó có thể cắt chữ hoặc nút.
+- Khi dựng dữ liệu thử, giữ nguyên lớp `empty-box` của `#adminTaskList` như DOM thật; lớp này vẫn còn khi danh sách có dữ liệu và tạo thêm padding. Dùng ít nhất một tên Phiếu/địa chỉ dài và Phiếu có đủ các ô thông tin, nút thao tác.
+- Trước commit, chạy `node scripts/verify-scheduled-layout.mjs` và xác nhận riêng phần “Trang quản lý” đạt ở desktop 1181px, 1440px, 1560px; mobile 320px, 375px, 390px, 430px; cùng hai chiều ngang 844px, 932px. Đo `getBoundingClientRect()` của từng mục so với vùng nội dung của `.task-panel` và card cha, đồng thời kiểm tra `scrollWidth <= clientWidth` của danh sách và trang. Nếu thay đổi chế độ Thu gọn/Chi tiết hoặc nội dung Phiếu mở rộng, bổ sung ca kiểm tra hình học tương ứng trước khi hoàn tất.
+
 ## Nhập thời gian
 
 - Mọi ô nhập thời gian mới hoặc được chỉnh sửa phải hiển thị và nhận theo khung giờ 24 giờ (`HH:mm` hoặc `HH:mm:ss` khi có giây), không phụ thuộc cách hiển thị AM/PM của trình duyệt hay thiết bị. Kiểm tra giá trị trước khi lưu và giữ đúng định dạng này khi mở lại để sửa.
