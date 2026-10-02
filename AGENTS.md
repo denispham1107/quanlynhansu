@@ -17,6 +17,13 @@
 - Khi dựng dữ liệu thử, giữ nguyên lớp `empty-box` của `#adminTaskList` như DOM thật; lớp này vẫn còn khi danh sách có dữ liệu và tạo thêm padding. Dùng ít nhất một tên Phiếu/địa chỉ dài và Phiếu có đủ các ô thông tin, nút thao tác.
 - Trước commit, chạy `node scripts/verify-scheduled-layout.mjs` và xác nhận riêng phần “Trang quản lý” đạt ở desktop 1181px, 1440px, 1560px; mobile 320px, 375px, 390px, 430px; cùng hai chiều ngang 844px, 932px. Đo `getBoundingClientRect()` của từng mục so với vùng nội dung của `.task-panel` và card cha, đồng thời kiểm tra `scrollWidth <= clientWidth` của danh sách và trang. Nếu thay đổi chế độ Thu gọn/Chi tiết hoặc nội dung Phiếu mở rộng, bổ sung ca kiểm tra hình học tương ứng trước khi hoàn tất.
 
+## Trạng thái Phiếu công việc: không cho chạy lại sau khi duyệt
+
+- `completed` là trạng thái cuối. Một Phiếu đã được Admin xác nhận không được tự chuyển về `doing`, `hotel`, `redo`, `overdue`, `submitted` hoặc `waiting_assignee` do dữ liệu cũ, thao tác trễ hay bản app cũ. `submitted` chỉ có thể giữ nguyên, chuyển sang `completed`, hoặc sang `redo` khi Admin thực sự chọn “Yêu cầu làm lại”.
+- Mọi luồng nền tự cập nhật trạng thái (đặc biệt đồng bộ quá hạn) phải đọc lại document mới nhất trong Firestore transaction và kiểm tra trạng thái/mốc thời gian ngay trước khi ghi. Không ghi `status` dựa riêng vào `state.tasks` hoặc snapshot cache; transaction phải chịu được xung đột với thao tác duyệt của Admin.
+- Thao tác duyệt và yêu cầu làm lại cũng phải xác minh `submitted` trong transaction. Firestore Rules phải giữ khóa trạng thái cuối trên mọi nhánh `allow update` có thể đổi `status`, kể cả quyền Admin và Nhập dữ liệu; Cloud Functions dùng Admin SDK cần kiểm tra tương đương trong mã.
+- Trước commit khi sửa luồng Phiếu, chạy `node scripts/verify-task-status-transitions.mjs` với các ca snapshot cũ, Phiếu đang chờ duyệt, Phiếu đã duyệt và hai thao tác Admin đến trễ. Không chỉ kiểm tra giao diện hiển thị ngay sau khi bấm; phải kiểm tra trạng thái vẫn đúng sau lần đồng bộ tiếp theo.
+
 ## Nhập thời gian
 
 - Mọi ô nhập thời gian mới hoặc được chỉnh sửa phải hiển thị và nhận theo khung giờ 24 giờ (`HH:mm` hoặc `HH:mm:ss` khi có giây), không phụ thuộc cách hiển thị AM/PM của trình duyệt hay thiết bị. Kiểm tra giá trị trước khi lưu và giữ đúng định dạng này khi mở lại để sửa.

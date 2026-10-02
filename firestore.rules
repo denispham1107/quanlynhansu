@@ -71,6 +71,13 @@ service cloud.firestore {
       return status in ["waiting_assignee", "doing", "lunch_break", "hotel", "submitted", "completed", "redo", "overdue"];
     }
 
+    // Phiếu đã duyệt không được chạy lại vì một bản ghi trễ từ thiết bị cũ.
+    // Phiếu chờ duyệt chỉ có thể tiếp tục chờ, được duyệt, hoặc được yêu cầu làm lại.
+    function preservesFinalTaskStatus(beforeData, afterData) {
+      return (beforeData.status != "completed" || afterData.status == "completed")
+        && (beforeData.status != "submitted" || afterData.status in ["submitted", "completed", "redo"]);
+    }
+
     function dataIsLunchBreak(data) {
       return data.keys().hasAny(["isLunchBreak"]) && data.isLunchBreak == true;
     }
@@ -440,6 +447,7 @@ service cloud.firestore {
       // Admin được nhập/khôi phục dữ liệu task từ file backup JSON.
       allow create: if isAdmin();
       allow update: if isAdmin()
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
         && respectsScheduledAssigneeLock(resource.data, request.resource.data)
         && (
@@ -767,6 +775,7 @@ service cloud.firestore {
       // và đồng bộ trạng thái. Các ràng buộc cơ bản bên dưới giữ nguyên id/người giao
       // và chỉ cho assignedToUid rỗng hoặc trỏ tới user nhân viên hợp lệ.
       allow update: if isAdmin()
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
         && respectsScheduledAssigneeLock(resource.data, request.resource.data)
         && request.resource.data.id == resource.data.id
@@ -790,6 +799,7 @@ service cloud.firestore {
 
       // Admin được duyệt hoàn thành, yêu cầu làm lại, hoặc đánh dấu quá hạn.
       allow update: if isAdmin()
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.assignedToUid == resource.data.assignedToUid
@@ -820,6 +830,7 @@ service cloud.firestore {
 
       // Đổi nhân viên, chuyển về Chờ chọn người hoặc bắt đầu lại task đang chờ.
       allow update: if hasPermission("reassignTasks")
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && !isScheduledPhotoRequirementEditingLocked(resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.createdAt == resource.data.createdAt
@@ -852,6 +863,7 @@ service cloud.firestore {
 
       // Thêm giờ và lưu lịch sử thêm giờ.
       allow update: if hasPermission("extendTaskTime")
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && !dataIsHotel(resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.assignedToUid == resource.data.assignedToUid
@@ -874,6 +886,7 @@ service cloud.firestore {
 
       // Duyệt hoàn thành, yêu cầu làm lại, kết thúc Nghỉ trưa và dồn lại hàng đợi.
       allow update: if hasPermission("reviewTasks")
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && request.resource.data.id == resource.data.id
         && request.resource.data.assignedToUid == resource.data.assignedToUid
         && request.resource.data.assignedByUid == resource.data.assignedByUid
@@ -950,6 +963,7 @@ service cloud.firestore {
 
       // Nhập dữ liệu có thể khôi phục toàn bộ field task, nhưng không cho phép qua collection users.
       allow update: if hasPermission("importData")
+        && preservesFinalTaskStatus(resource.data, request.resource.data)
         && respectsDispatchedPhotoRequirementEditingLock(resource.data, request.resource.data)
         && respectsScheduledAssigneeLock(resource.data, request.resource.data);
 

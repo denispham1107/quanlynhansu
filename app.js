@@ -6329,7 +6329,9 @@ function setupAdminDashboard() {
 
       // Chỉ tài khoản Admin tự đồng bộ trạng thái quá hạn vào database.
       // Giám sát vẫn nhìn thấy trạng thái tính toán realtime nhưng không tự ghi dữ liệu nếu không phải Admin.
-      if (isAdminProfile() && state.adminTaskServerReady) await syncOverdueTasksByAdmin();
+      if (isAdminProfile() && !snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites) {
+        await syncOverdueTasksByAdmin();
+      }
     },
     (error) => {
       setAdminTasksSyncStatus("Không đồng bộ được công việc. Kiểm tra kết nối Firebase rồi tải lại trang.");
@@ -13860,16 +13862,15 @@ els.adminEmployeeFilter.addEventListener("change", (event) => {
 async function syncOverdueTasksByAdmin() {
   if (!isAdminProfile()) return;
 
+  const now = new Date();
   const updates = state.tasks
     .filter((task) => ["doing", "hotel", "redo"].includes(task.status))
     .filter((task) => {
       const deadline = timestampToDate(task.deadlineAt);
-      return deadline && deadline.getTime() < Date.now();
+      return deadline && deadline.getTime() < now.getTime();
     })
     .slice(0, 10)
-    .map((task) => updateDoc(doc(db, "tasks", task.id), {
-      status: "overdue"
-    }));
+    .map((task) => markTaskOverdueIfStillActive(task.id, now));
 
   if (updates.length) {
     try {
@@ -13878,6 +13879,21 @@ async function syncOverdueTasksByAdmin() {
       console.warn("Không thể tự đồng bộ quá hạn:", error);
     }
   }
+}
+
+async function markTaskOverdueIfStillActive(taskId, now = new Date()) {
+  const taskRef = doc(db, "tasks", taskId);
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(taskRef);
+    if (!snapshot.exists()) return false;
+    const task = snapshot.data();
+    const deadline = timestampToDate(task.deadlineAt);
+    if (!deadline || deadline.getTime() >= now.getTime()
+      || !["doing", "hotel", "redo"].includes(task.status)
+      || task.submittedAt || task.approvedAt) return false;
+    transaction.update(taskRef, { status: "overdue" });
+    return true;
+  });
 }
 
 // =========================
@@ -21213,21 +21229,6 @@ async function approveTask(taskId, button) {
   setButtonLoading(button, true, "Đang xác nhận...");
 
   try {
-    const taskSnap = await getDoc(doc(db, "tasks", taskId));
-
-    if (!taskSnap.exists()) {
-      throw new Error("Không tìm thấy công việc.");
-    }
-
-    const task = {
-      id: taskSnap.id,
-      ...taskSnap.data()
-    };
-
-    if (task.status !== "submitted") {
-      throw new Error("Công việc chưa ở trạng thái chờ xác nhận.");
-    }
-
     // Tính kết quả tại thời điểm Admin bấm duyệt, không lấy thời điểm nhân viên bấm "Hoàn thành".
     // Như vậy khi task đang ở trạng thái "Chờ Admin xác nhận", đồng hồ vẫn chạy bình thường
     // cho đến lúc Admin duyệt và kết quả nhanh/chậm phản ánh đúng thời gian duyệt thực tế.
@@ -21236,21 +21237,31 @@ async function approveTask(taskId, button) {
     // tại lúc nhân viên bấm “Hoàn thành”, không cộng thời gian chờ Admin duyệt.
     // Với Phiếu nghỉ trưa Giám sát, accumulatedWorkedMs vẫn chứa phần phút Admin
     // đã cài đặt cộng sẵn (kể cả khi phần cộng sẵn là 0 phút).
-    const resultCalculatedAt = (
-      isShipTask(task)
-      || (isLunchBreakTask(task) && task.autoCreatedByWorkSupervision === true)
-    )
-      ? (timestampToDate(task.submittedAt) || approvedDate)
-      : approvedDate;
-    const result = calculateResultAt(task, resultCalculatedAt);
-
-    await updateDoc(doc(db, "tasks", taskId), {
-      status: "completed",
-      approvedAt: Timestamp.fromDate(approvedDate),
-      actualMinutes: result.actualMinutes,
-      resultType: result.resultType,
-      differenceMinutes: result.differenceMinutes,
-      differencePercent: result.differencePercent
+    const taskRef = doc(db, "tasks", taskId);
+    let task;
+    let result;
+    await runTransaction(db, async (transaction) => {
+      const taskSnap = await transaction.get(taskRef);
+      if (!taskSnap.exists()) throw new Error("Không tìm thấy công việc.");
+      task = { id: taskSnap.id, ...taskSnap.data() };
+      if (task.status !== "submitted") {
+        throw new Error("Công việc chưa ở trạng thái chờ xác nhận.");
+      }
+      const resultCalculatedAt = (
+        isShipTask(task)
+        || (isLunchBreakTask(task) && task.autoCreatedByWorkSupervision === true)
+      )
+        ? (timestampToDate(task.submittedAt) || approvedDate)
+        : approvedDate;
+      result = calculateResultAt(task, resultCalculatedAt);
+      transaction.update(taskRef, {
+        status: "completed",
+        approvedAt: Timestamp.fromDate(approvedDate),
+        actualMinutes: result.actualMinutes,
+        resultType: result.resultType,
+        differenceMinutes: result.differenceMinutes,
+        differencePercent: result.differencePercent
+      });
     });
 
     // Dừng ngay công việc vừa xử lý khỏi danh sách chờ phát chuông.
@@ -21435,29 +21446,38 @@ async function requestRedo(taskId, button) {
   setButtonLoading(button, true, "Đang cập nhật...");
 
   try {
-    const task = state.tasks.find((item) => item.id === taskId);
+    const visibleTask = state.tasks.find((item) => item.id === taskId);
     const requestedAt = Timestamp.now();
     const requestedByUid = state.user?.uid || "";
     const requestedByName = state.profile?.name || state.user?.email || "Admin";
-    const historyRecord = {
-      requestedAt,
-      requestedByUid,
-      requestedByName,
-      previousStatus: task?.status || "submitted"
-    };
 
-    if (isHotelTask(task)) {
+    if (isHotelTask(visibleTask)) {
       await assertNoOtherActiveHotelTask([taskId]);
     }
 
-    await updateDoc(doc(db, "tasks", taskId), {
-      status: "redo",
-      submittedAt: null,
-      redoRequestHistory: arrayUnion(historyRecord),
-      redoRequestCount: increment(1),
-      lastRedoRequestedAt: requestedAt,
-      lastRedoRequestedByUid: requestedByUid,
-      lastRedoRequestedByName: requestedByName
+    const taskRef = doc(db, "tasks", taskId);
+    let task;
+    await runTransaction(db, async (transaction) => {
+      const taskSnap = await transaction.get(taskRef);
+      if (!taskSnap.exists()) throw new Error("Không tìm thấy công việc.");
+      task = { id: taskSnap.id, ...taskSnap.data() };
+      if (task.status !== "submitted") {
+        throw new Error("Công việc không còn ở trạng thái chờ xác nhận.");
+      }
+      transaction.update(taskRef, {
+        status: "redo",
+        submittedAt: null,
+        redoRequestHistory: arrayUnion({
+          requestedAt,
+          requestedByUid,
+          requestedByName,
+          previousStatus: task.status
+        }),
+        redoRequestCount: increment(1),
+        lastRedoRequestedAt: requestedAt,
+        lastRedoRequestedByUid: requestedByUid,
+        lastRedoRequestedByName: requestedByName
+      });
     });
 
     // Dừng ngay công việc vừa bị yêu cầu làm lại khỏi danh sách chờ phát chuông.
