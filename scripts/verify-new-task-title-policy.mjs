@@ -104,6 +104,8 @@ assert.match(harness.validateTaskRowsForDraft(harness.readTaskRowsData()), /ch�
 const emptyDraft = makeRow("");
 harness.setRow(emptyDraft);
 assert.equal(harness.validateTaskRowsForDraft(harness.readTaskRowsData()), null);
+assert.match(harness.validateTaskRows(harness.readTaskRowsData()), /vui lòng nhập tên công việc/);
+assert.equal(harness.validateTaskRows(harness.readTaskRowsData(), { allowUntitled: true }), null);
 
 const typedCleaning = makeRow("Tên vệ sinh riêng");
 typedCleaning.querySelector(".row-cleaning").checked = true;

@@ -791,7 +791,6 @@ function normalizeScheduledWorkOrderRows(rawRows) {
       .map(normalizeScheduledWorkPhoto)
       .filter(Boolean);
 
-    if (!title) throw new HttpsError("invalid-argument", `Công việc #${index + 1}: thiếu tên công việc.`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(taskDate)) {
       throw new HttpsError("invalid-argument", `Công việc #${index + 1}: ngày giao việc không hợp lệ.`);
     }
@@ -1984,7 +1983,7 @@ async function materializeScheduledWorkOrderById(scheduleIdInput) {
 
       transaction.set(taskRef, {
         id: taskRef.id,
-        title: String(row.title || "Công việc"),
+        title: String(row.title || ""),
         description: String(row.description || ""),
         taskDate: dateKey,
         scheduledForDate: dateKey,
@@ -2836,6 +2835,9 @@ exports.assignScheduledWorkOrderToGroupEmployee = onCall({
       const freshTask = allSnapshots[3 + index]?.data() || {};
       if (freshTask.status !== "draft") {
         throw new HttpsError("failed-precondition", "Một công việc trong Phiếu đã được thay đổi.");
+      }
+      if (!String(freshTask.title || "").trim()) {
+        throw new HttpsError("failed-precondition", "Phiếu chưa có tên công việc. Hãy chỉnh sửa Phiếu trước khi giao cho nhóm.");
       }
       const deadlineMinutes = Math.max(0, Number(freshTask.deadlineMinutes || 0));
       if (deadlineMinutes <= 0) {

@@ -8961,6 +8961,7 @@ function createTaskRowElement(prefill = null) {
   `;
 
   const dateInput = wrapper.querySelector(".row-date");
+  wrapper.querySelector(".row-title").required = !["schedule", "scheduled-draft-edit"].includes(state.taskModalMode);
   // Không dùng valueAsDate vì input date đọc ngày theo UTC, dễ bị lùi 1 ngày
   // khi máy người dùng ở múi giờ Việt Nam và mở form sau nửa đêm.
   dateInput.value = prefill?.taskDate || todayInputValue();
@@ -9546,6 +9547,9 @@ function setTaskModalMode(mode = "create") {
   $$("#taskRowsContainer .row-assignee").forEach((select) => {
     if (scheduleMode) select.value = "";
     select.disabled = scheduleMode;
+  });
+  $$("#taskRowsContainer .row-title").forEach((input) => {
+    input.required = !scheduleMode;
   });
   $$("#taskRowsContainer .row-date").forEach((dateInput) => {
     dateInput.disabled = scheduleMode;
@@ -10170,7 +10174,7 @@ async function saveScheduledDraftEdit(button) {
     const name = els.workOrderName?.value.trim() || "";
     if (!name) throw new Error("Vui lòng nhập tên Phiếu công việc.");
     const rows = readTaskRowsData();
-    const validationError = validateTaskRows(rows);
+    const validationError = validateTaskRows(rows, { allowUntitled: true });
     if (validationError) throw new Error(validationError);
     const photoOptions = readPhotoRequirementOptions();
     const photoError = validatePhotoRequirementOptions(photoOptions);
@@ -10349,7 +10353,7 @@ function validateTaskRowTitlePolicies(rows) {
   return null;
 }
 
-function validateTaskRows(rows) {
+function validateTaskRows(rows, { allowUntitled = false } = {}) {
   if (!rows.length) {
     return "Phiếu cần có ít nhất 1 công việc.";
   }
@@ -10360,7 +10364,7 @@ function validateTaskRows(rows) {
   for (const row of rows) {
     const rowLabel = `Công việc #${row.index + 1}`;
 
-    if (!row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
+    if (!allowUntitled && !row.title) return `${rowLabel}: vui lòng nhập tên công việc.`;
     if (row.assignedToUid && !row.assignedEmployee) return `${rowLabel}: nhân viên được chọn không hợp lệ.`;
     if (row.isLunchBreak && row.isHotel) return `${rowLabel}: chỉ được chọn Nghỉ trưa hoặc Hotel, không chọn cả hai.`;
     if (!row.taskDate) return `${rowLabel}: vui lòng chọn ngày giao việc.`;
@@ -11174,7 +11178,7 @@ async function createScheduledWorkOrder(button) {
       assignedEmployee: null
     }));
     await prepareHotelRowsForPersistence(rows);
-    const validationError = validateTaskRows(rows);
+    const validationError = validateTaskRows(rows, { allowUntitled: true });
     if (validationError) throw new Error(validationError);
 
     const photoOptions = readPhotoRequirementOptions();
@@ -16695,7 +16699,7 @@ function renderTaskCard(task, mode) {
     <article class="task-card ${taskCardClass(displayStatus)} ${attentionClass} ${mobileExpandedClass} ${desktopExpandedClass}" data-task-card data-task-id="${escapeHtml(task.id)}" data-work-order-id="${escapeHtml(task.workOrderId || "legacy")}" data-deadline-ms="${deadlineMs}" data-deadline-minutes="${Number(task.deadlineMinutes || 0)}" data-queue-start-ms="${queueStartMs}" data-remaining-pause-ms="${remainingPauseMs}" data-raw-status="${escapeHtml(task.status)}" data-display-status="${escapeHtml(displayStatus)}">
       <div class="task-top">
         <div class="task-heading-copy">
-          <h4 class="task-title" title="${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}">${escapeHtml(task.title) || "(Chưa đặt tên công việc)"}</h4>
+          <h4 class="task-title" title="${escapeHtml(task.title) || "Chưa cho công việc"}">${escapeHtml(task.title) || "Chưa cho công việc"}</h4>
           <p class="task-desc" title="${escapeHtml(task.description)}">${escapeHtml(task.description)}</p>
         </div>
         <span class="status-pill status-${displayStatus}">${statusLabel(displayStatus)}</span>
@@ -20392,6 +20396,11 @@ function openScheduledGroupAssignmentModal(workOrderId) {
     || workOrder.scheduledGroupAssignmentPending !== true
   ) {
     toast("Phiếu lên lịch này không còn chờ giao.", "error");
+    return;
+  }
+
+  if (state.tasks.some((task) => task.workOrderId === workOrderId && !String(task.title || "").trim())) {
+    toast("Phiếu chưa có tên công việc. Bấm Chỉnh sửa để điền tên trước khi giao cho nhóm.", "error");
     return;
   }
 
