@@ -11641,7 +11641,7 @@ function renderScheduledWorkOrderList() {
         <div class="scheduled-work-order-list-row${deletable ? "" : " is-locked"}">
           <div class="scheduled-work-order-list-main">
             <span class="scheduled-work-order-list-prefix">${escapeHtml(formatScheduledListDateTime(schedule.scheduledForMs))}, ${escapeHtml(schedule.employeeGroupName || "Nhóm nhân viên")}:</span>
-            “${escapeHtml(title)}”
+            <span class="scheduled-work-order-list-title">“${escapeHtml(title)}”</span>
           </div>
           ${deletable ? `<button
             class="btn danger scheduled-work-order-delete-btn"

@@ -443,7 +443,7 @@ await send("Runtime.evaluate", {
     list.innerHTML = Array.from({ length: 24 }, (_, index) => \`
       <article class="scheduled-work-order-list-item\${index === 23 ? " is-deleted" : index === 22 ? " is-replaced" : index === 21 ? " is-assigned" : index === 20 ? " is-converted" : ""}">
         <div class="scheduled-work-order-list-row">
-          <div class="scheduled-work-order-list-main"><span class="scheduled-work-order-list-prefix">22/09/2026, 08:30:00, Nhóm nhân viên:</span> “Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</div>
+          <div class="scheduled-work-order-list-main"><span class="scheduled-work-order-list-prefix">22/09/2026, 08:30:00, Nhóm nhân viên:</span><span class="scheduled-work-order-list-title">“Phiếu #\${index + 1} - Công việc kiểm tra giao diện”</span></div>
           <button class="btn danger scheduled-work-order-delete-btn" data-delete-scheduled-work-order="test-\${index}" type="button">×</button>
         </div>
         <div class="scheduled-work-order-list-meta"><span>Lặp lại hằng ngày</span><span>Đếm ngược 10 phút</span><span>\${index === 23 ? "Đã xóa" : index === 22 ? "Đã thay thế" : index === 21 ? "Đã giao việc" : index === 20 ? "Đã chuyển thành Phiếu thường" : "Đang chờ đến giờ"}</span>\${index === 21 || index === 20 ? '<span class="scheduled-work-order-assignee-badge">Nhân viên: Nguyễn Thị Minh Anh Nguyễn Thị Minh Anh Nguyễn Thị Minh Anh</span>' : ""}\${index === 22 ? '<button class="scheduled-work-order-replacement-link" type="button">Lịch mới: 09:45:00 30/09/2026 →</button>' : ""}</div>
@@ -490,6 +490,7 @@ for (const profile of profiles) {
     ];
     const listElement = document.getElementById("scheduledWorkOrderList");
     const prefixElements = [...listElement.querySelectorAll(".scheduled-work-order-list-prefix")];
+    const titleElements = [...listElement.querySelectorAll(".scheduled-work-order-list-title")];
       const firstRowElement = listElement.querySelector(".scheduled-work-order-list-row");
       const firstDeleteButtonElement = listElement.querySelector(".scheduled-work-order-delete-btn");
       const deletedElement = listElement.querySelector(".scheduled-work-order-list-item.is-deleted");
@@ -560,6 +561,8 @@ for (const profile of profiles) {
         allSchedulePrefixesOrange: prefixElements.length === 24
           && prefixElements.every((element) => getComputedStyle(element).color === "rgb(194, 65, 12)"
             && element.textContent.trim().endsWith(":")),
+        allScheduleTitlesOnNextLine: titleElements.length === prefixElements.length
+          && titleElements.every((element, index) => box(element).top >= box(prefixElements[index]).bottom - 0.5),
         firstRow,
         firstDeleteButton,
         deletedInsideList: box(deletedElement).left >= list.left - 0.5 && box(deletedElement).right <= list.right + 0.5,
@@ -633,6 +636,7 @@ for (const profile of profiles) {
     && result.footerButtonInsideFooter
     && result.listInsideContentWidth
     && result.allSchedulePrefixesOrange
+    && result.allScheduleTitlesOnNextLine
     && result.filterInsideContentWidth
     && result.controlsInsideShells
     && result.filterControlsDoNotOverlap
