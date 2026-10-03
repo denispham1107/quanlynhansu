@@ -74,6 +74,20 @@ assert.equal(lunch.differenceMinutes, 5);
 assert.equal(lunch.autoCompletedByScheduledConversion, true);
 assert.equal(lunch.convertedScheduledWorkOrderId, "ticket-1");
 
+for (const reason of ["updated", "deleted"]) {
+  const endedLunch = linkedLunchCompletionUpdate({
+    queueStartAt: new Date("2026-09-30T08:05:00.000Z"),
+    accumulatedWorkedMs: 0,
+    deadlineMinutes: 30
+  }, now, "ticket-1", reason);
+  assert.equal(endedLunch.status, "completed");
+  assert.equal(endedLunch.actualMinutes, 25);
+  assert.equal(endedLunch.autoCompletedByScheduledChange, true);
+  assert.equal(endedLunch.scheduledChangeReason, reason);
+  assert.equal(endedLunch.changedScheduledWorkOrderId, "ticket-1");
+  assert.equal(endedLunch.autoCompletedByScheduledConversion, undefined);
+}
+
 const server = readFileSync(join(__dirname, "index.js"), "utf8");
 assert.match(server, /collectWorkOrderAssignees\(relatedTasks, relatedWorkOrderIds\)/);
 assert.match(server, /\.where\("workOrderId", "in", relatedIds\.slice\(offset, offset \+ 25\)\)/);

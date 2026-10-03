@@ -30,9 +30,15 @@ for (const source of [update, deletion]) {
   assert.match(source, /where\("workOrderId", "==", generatedWorkOrderId\)/);
   assert.doesNotMatch(source, /lunchTaskSnapshot|where\("sourceScheduledWorkOrderId"/);
 }
+assert.match(update, /finishScheduledLunchesInTransaction\(transaction, generatedWorkOrderId, updatedAt, "updated"\)/);
+assert.match(deletion, /finishScheduledLunchesInTransaction\(transaction, generatedWorkOrderId, deletingAt, "deleted"\)/);
+const finishLunch = backend.slice(backend.indexOf("async function finishScheduledLunchesInTransaction("), backend.indexOf("async function enqueueScheduledAssignmentTimeout("));
+assert.match(finishLunch, /transaction\.get\([\s\S]*?where\("sourceScheduledWorkOrderId", "==", workOrderId\)/);
+assert.match(finishLunch, /\["lunch_break", "overdue"\]/);
+assert.match(finishLunch, /linkedLunchCompletionUpdate\(lunch, endedAt, workOrderId, reason\)/);
 const timeout = backend.slice(backend.indexOf("async function processScheduledGroupAssignmentTimeoutById("), backend.indexOf("exports.processScheduledGroupAssignmentTimeout ="));
 assert.match(timeout, /employeesWithoutActiveScheduledLunch\(/);
 assert.match(timeout, /scheduledLunchDocumentId\(scheduleId, generatedAt, employee\.uid\)/);
 assert.match(timeout, /lunchEntries\.length\s*\? await transaction\.getAll/);
 
-console.log("PASS | Xóa/sửa/dời lịch giữ Phiếu nghỉ trưa; lần tạo mới không ghi đè hoặc tạo trùng Phiếu đang chạy.");
+console.log("PASS | Xóa/sửa/dời lịch kết thúc và giữ Phiếu nghỉ trưa; lần tạo mới không ghi đè hoặc tạo trùng Phiếu.");

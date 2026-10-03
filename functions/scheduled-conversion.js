@@ -92,7 +92,7 @@ function timestampMs(value) {
   return Number.isFinite(Number(value)) ? Number(value) : 0;
 }
 
-function linkedLunchCompletionUpdate(task, now, workOrderId) {
+function linkedLunchCompletionUpdate(task, now, workOrderId, scheduleChangeReason = "") {
   const nowMs = timestampMs(now);
   const startMs = timestampMs(task.queueStartAt)
     || timestampMs(task.dispatchedAt)
@@ -107,7 +107,7 @@ function linkedLunchCompletionUpdate(task, now, workOrderId) {
   const differencePercent = resultType === "on_time"
     ? 0
     : Number(((differenceMinutes / (resultType === "slower" ? actualMinutes : deadlineMinutes)) * 100).toFixed(1));
-  return {
+  const completion = {
     status: "completed",
     submittedAt: now,
     approvedAt: now,
@@ -115,8 +115,19 @@ function linkedLunchCompletionUpdate(task, now, workOrderId) {
     resultType,
     differenceMinutes,
     differencePercent,
+    autoCompletedAt: now
+  };
+  if (scheduleChangeReason === "updated" || scheduleChangeReason === "deleted") {
+    return {
+      ...completion,
+      autoCompletedByScheduledChange: true,
+      scheduledChangeReason: scheduleChangeReason,
+      changedScheduledWorkOrderId: workOrderId
+    };
+  }
+  return {
+    ...completion,
     autoCompletedByScheduledConversion: true,
-    autoCompletedAt: now,
     convertedScheduledWorkOrderId: workOrderId
   };
 }

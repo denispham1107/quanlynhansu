@@ -1019,6 +1019,22 @@ function scheduledCountdownEligibleEmployees(usersSnapshot, activeTasksSnapshot,
   );
 }
 
+// Dừng Phiếu nghỉ trưa cùng transaction với thao tác đổi/xóa lịch. Giữ nguyên
+// document và số phút đã nghỉ; thao tác giao việc đến trễ không thể làm nó chạy lại.
+async function finishScheduledLunchesInTransaction(transaction, workOrderId, endedAt, reason) {
+  const lunchSnapshot = await transaction.get(
+    db.collection("tasks").where("sourceScheduledWorkOrderId", "==", workOrderId)
+  );
+  lunchSnapshot.docs.forEach((item) => {
+    const lunch = item.data() || {};
+    if (lunch.autoCreatedByScheduledGroupTimeout !== true
+      || !["lunch_break", "overdue"].includes(String(lunch.status || ""))) return;
+    transaction.update(item.ref, lunch.approvedAt
+      ? { status: "completed" }
+      : linkedLunchCompletionUpdate(lunch, endedAt, workOrderId, reason));
+  });
+}
+
 async function enqueueScheduledAssignmentTimeout(scheduleId, assignmentDeadlineAt) {
   const deadline = firestoreTimestampOrNull(assignmentDeadlineAt);
   if (!deadline) return false;
@@ -1260,6 +1276,7 @@ exports.updateScheduledWorkOrder = onCall({
     existingNextScheduleId = String(currentSchedule.nextScheduleId || "").slice(0, 180);
     seriesId = String(currentSchedule.seriesId || scheduleId).slice(0, 180);
     const updatedAt = Timestamp.now();
+    await finishScheduledLunchesInTransaction(transaction, generatedWorkOrderId, updatedAt, "updated");
     // Bản lịch cũ chỉ dùng để xem lại. Nó không nằm trong scheduledWorkOrders,
     // nên không thể kích hoạt bộ đếm hoặc tự tạo Phiếu lần nữa.
     transaction.set(replacedHistoryRef, {
@@ -1552,6 +1569,9 @@ exports.deleteScheduledWorkOrder = onCall({
     )) {
       throw new HttpsError("failed-precondition", "Lịch này đã khóa Sửa-Xóa và không thể xóa.");
     }
+    const generatedWorkOrderId = String(currentSchedule.generatedWorkOrderId || `scheduled_${scheduleId}`).slice(0, 180);
+    const deletingAt = Timestamp.now();
+    await finishScheduledLunchesInTransaction(transaction, generatedWorkOrderId, deletingAt, "deleted");
     const deletionPreviousStatus = String(
       currentSchedule.deletionPreviousStatus || currentSchedule.status || "pending"
     );
@@ -1559,9 +1579,9 @@ exports.deleteScheduledWorkOrder = onCall({
       status: "deleting",
       deletionPreviousStatus,
       deletionReason,
-      deletingAt: Timestamp.now(),
+      deletingAt,
       deletingByUid: adminUid,
-      updatedAt: Timestamp.now()
+      updatedAt: deletingAt
     });
     return { ...currentSchedule, deletionPreviousStatus, deletionReason };
   });
@@ -2418,7 +2438,7 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
       transaction.set(entry.taskRef, {
         id: entry.taskRef.id,
         title: "Phiếu nghỉ trưa",
-        description: `Tự động tạo vì Phiếu lên lịch “${String(freshSchedule.name || "Phiếu công việc")}” của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau ${assignmentCountdownMinutes} phút. Phiếu chỉ kết thúc khi công việc được giao cho một thành viên trong nhóm.`,
+        description: `Tự động tạo vì Phiếu lên lịch “${String(freshSchedule.name || "Phiếu công việc")}” của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau ${assignmentCountdownMinutes} phút. Phiếu kết thúc khi nhân viên nhận việc mới hoặc Admin chỉnh sửa, dời, xóa lịch.`,
         taskDate: supervisionDateKey(new Date(now.toMillis())),
         assignedToUid: entry.employee.uid,
         assignedToName: employeeName,
@@ -2468,7 +2488,7 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
         recipientUid: entry.employee.uid,
         type: "scheduled_group_lunch_created",
         title: "Phiếu nghỉ trưa tự động",
-        message: `Phiếu lên lịch của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau ${assignmentCountdownMinutes} phút. Phiếu nghỉ trưa này sẽ tự kết thúc khi một thành viên trong nhóm nhận việc.`,
+        message: `Phiếu lên lịch của nhóm ${String(freshSchedule.employeeGroupName || "Nhân viên")} chưa được giao sau ${assignmentCountdownMinutes} phút. Phiếu nghỉ trưa sẽ kết thúc khi nhận việc mới hoặc lịch được chỉnh sửa, dời, xóa.`,
         taskId: entry.taskRef.id,
         taskTitle: "Phiếu nghỉ trưa",
         actorUid: "system",
