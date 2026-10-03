@@ -68,7 +68,7 @@ const timeout = server.slice(
 assert.match(timeout, /transaction\.get\(\s*db\.collection\("tasks"\)\.where\("status", "in", SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES\)/);
 assert.match(timeout, /const employees = scheduledCountdownEligibleEmployees\(/);
 assert.match(timeout, /if \(!employees\.length\) \{[\s\S]*?assignmentDeadlineAt: null/);
-assert.match(timeout, /const lunchEntries = employees\.map\(/);
+assert.match(timeout, /const lunchEntries = lunchEmployees\.map\(/);
 assert.match(server, /pauseScheduledAssignmentCountdownIfNoEligibleEmployee\(item\.id\)/);
 
 console.log("PASS | Bộ đếm chỉ hiện người rảnh; hết hạn kiểm tra lại và không tạo Nghỉ trưa cho người đang bận.");

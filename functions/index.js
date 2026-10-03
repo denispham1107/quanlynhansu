@@ -14,6 +14,7 @@ const {
   findScheduledCountdownEmployees
 } = require("./scheduled-availability");
 const { scheduledTaskDateKey } = require("./scheduled-task-date");
+const { scheduledLunchDocumentId, employeesWithoutActiveScheduledLunch } = require("./scheduled-lunch");
 const { shouldPrepareNextDailyScheduledOccurrence } = require("./scheduled-recurrence");
 const { reconcileExcludedEmployees } = require("./work-supervision-exclusions");
 const {
@@ -1316,10 +1317,7 @@ exports.updateScheduledWorkOrder = onCall({
   });
 
   if (previousStatus === "generated") {
-    const [taskSnapshot, lunchTaskSnapshot] = await Promise.all([
-      db.collection("tasks").where("workOrderId", "==", generatedWorkOrderId).get(),
-      db.collection("tasks").where("sourceScheduledWorkOrderId", "==", generatedWorkOrderId).get()
-    ]);
+    const taskSnapshot = await db.collection("tasks").where("workOrderId", "==", generatedWorkOrderId).get();
     const oldHotelDates = Array.from(new Set(taskSnapshot.docs
       .filter((item) => item.data()?.isHotel === true)
       .map((item) => String(item.data()?.taskDate || "").trim())
@@ -1328,14 +1326,6 @@ exports.updateScheduledWorkOrder = onCall({
       [db.doc(`workOrders/${generatedWorkOrderId}`).path, db.doc(`workOrders/${generatedWorkOrderId}`)]
     ]);
     taskSnapshot.docs.forEach((item) => refsToDelete.set(item.ref.path, item.ref));
-    lunchTaskSnapshot.docs.forEach((item) => {
-      refsToDelete.set(item.ref.path, item.ref);
-      const lunchWorkOrderId = String(item.data()?.workOrderId || "").trim();
-      if (lunchWorkOrderId && !lunchWorkOrderId.includes("/")) {
-        const lunchWorkOrderRef = db.doc(`workOrders/${lunchWorkOrderId}`);
-        refsToDelete.set(lunchWorkOrderRef.path, lunchWorkOrderRef);
-      }
-    });
     const refs = [...refsToDelete.values()];
     for (let offset = 0; offset < refs.length; offset += 450) {
       const batch = db.batch();
@@ -1580,13 +1570,10 @@ exports.deleteScheduledWorkOrder = onCall({
   const workOrderRef = generatedWorkOrderId
     ? db.doc(`workOrders/${generatedWorkOrderId}`)
     : null;
-  const [workOrderSnapshot, taskSnapshot, lunchTaskSnapshot] = await Promise.all([
+  const [workOrderSnapshot, taskSnapshot] = await Promise.all([
     workOrderRef ? workOrderRef.get() : Promise.resolve(null),
     generatedWorkOrderId
       ? db.collection("tasks").where("workOrderId", "==", generatedWorkOrderId).get()
-      : Promise.resolve(null),
-    generatedWorkOrderId
-      ? db.collection("tasks").where("sourceScheduledWorkOrderId", "==", generatedWorkOrderId).get()
       : Promise.resolve(null)
   ]);
   const workOrder = workOrderSnapshot?.exists ? workOrderSnapshot.data() || {} : {};
@@ -1604,14 +1591,6 @@ exports.deleteScheduledWorkOrder = onCall({
   if (shouldRemoveGeneratedDraft && workOrderRef) {
     refsToDelete.set(workOrderRef.path, workOrderRef);
     taskSnapshot?.docs.forEach((item) => refsToDelete.set(item.ref.path, item.ref));
-    lunchTaskSnapshot?.docs.forEach((item) => {
-      refsToDelete.set(item.ref.path, item.ref);
-      const lunchWorkOrderId = String(item.data()?.workOrderId || "").trim();
-      if (lunchWorkOrderId && !lunchWorkOrderId.includes("/")) {
-        const lunchWorkOrderRef = db.doc(`workOrders/${lunchWorkOrderId}`);
-        refsToDelete.set(lunchWorkOrderRef.path, lunchWorkOrderRef);
-      }
-    });
   }
   const refs = [...refsToDelete.values()];
   for (let offset = 0; offset < refs.length; offset += 450) {
@@ -2395,18 +2374,25 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
       });
       return { created: 0, waitingForAvailableEmployee: true };
     }
-    const lunchEntries = employees.map((employee) => {
-      const suffix = crypto.createHash("sha256").update(employee.uid).digest("hex").slice(0, 18);
-      const lunchWorkOrderId = `scheduledGroupLunch_${scheduleId}_${suffix}`.slice(0, 180);
+    const generatedAt = firestoreTimestampOrNull(workOrder.scheduledGeneratedAt)
+      || firestoreTimestampOrNull(freshSchedule.generatedAt)
+      || firestoreTimestampOrNull(workOrder.createdAt);
+    const lunchEmployees = employeesWithoutActiveScheduledLunch(
+      employees,
+      activeTasksSnapshot.docs.map((item) => item.data() || {}),
+      workOrderId
+    );
+    const lunchEntries = lunchEmployees.map((employee) => {
+      const lunchWorkOrderId = scheduledLunchDocumentId(scheduleId, generatedAt, employee.uid);
       return {
         employee,
         workOrderRef: db.doc(`workOrders/${lunchWorkOrderId}`),
         taskRef: db.doc(`tasks/${lunchWorkOrderId}`)
       };
     });
-    const snapshots = await transaction.getAll(
-      ...lunchEntries.flatMap((entry) => [entry.workOrderRef, entry.taskRef])
-    );
+    const snapshots = lunchEntries.length
+      ? await transaction.getAll(...lunchEntries.flatMap((entry) => [entry.workOrderRef, entry.taskRef]))
+      : [];
 
     lunchEntries.forEach((entry, index) => {
       const workOrderSnapshotAtIndex = snapshots[index * 2];
@@ -2476,7 +2462,7 @@ async function processScheduledGroupAssignmentTimeoutById(scheduleIdInput) {
         lastPhotoUploadedAt: null
       }, { merge: false });
 
-      const notificationRef = db.doc(`notifications/${`scheduledLunch_${scheduleId}_${crypto.createHash("sha256").update(entry.employee.uid).digest("hex").slice(0, 18)}`.slice(0, 180)}`);
+      const notificationRef = db.doc(`notifications/${`scheduledLunch_${entry.taskRef.id}`.slice(0, 180)}`);
       transaction.set(notificationRef, {
         id: notificationRef.id,
         recipientUid: entry.employee.uid,
@@ -2947,9 +2933,11 @@ exports.assignScheduledWorkOrderToGroupEmployee = onCall({
       });
     });
 
+    let completedScheduledLunchCount = 0;
     lunchTasks.forEach((lunchTask, index) => {
       const freshLunch = allSnapshots[3 + orderedTasks.length + index]?.data() || {};
       if (freshLunch.autoCreatedByScheduledGroupTimeout !== true || !["lunch_break", "overdue"].includes(String(freshLunch.status || ""))) return;
+      completedScheduledLunchCount += 1;
       const start = firestoreTimestampOrNull(freshLunch.queueStartAt)
         || firestoreTimestampOrNull(freshLunch.dispatchedAt)
         || firestoreTimestampOrNull(freshLunch.createdAt)
@@ -3018,7 +3006,7 @@ exports.assignScheduledWorkOrderToGroupEmployee = onCall({
       scheduleId,
       scheduledEmployeeGroupId: String(freshWorkOrder.scheduledEmployeeGroupId || ""),
       scheduledEmployeeGroupName: String(freshWorkOrder.scheduledEmployeeGroupName || ""),
-      completedScheduledLunchCount: lunchTasks.length
+      completedScheduledLunchCount
     }, { merge: false });
 
     const employeeNotificationRef = db.doc(`notifications/${`scheduledAssigned_${scheduleId}_${crypto.createHash("sha256").update(employeeUid).digest("hex").slice(0, 18)}`.slice(0, 180)}`);
