@@ -14133,6 +14133,14 @@ function hasGeneralUnassignedWorkForSupervision() {
   ));
 }
 
+function isEmployeeEligibleForScheduledCountdown(employee, workOrder) {
+  if (!employee?.uid || !isEmployeeWorking(employee)
+    || String(employee.employeeGroupId || "") !== String(workOrder?.scheduledEmployeeGroupId || "")) return false;
+  const startedFor = workOrder?.scheduledCountdownEmployeeUids;
+  if (Array.isArray(startedFor) && !startedFor.includes(employee.uid)) return false;
+  return !employeeHasBlockingTaskForScheduledAssignment(employee.uid, workOrder.id);
+}
+
 function getActiveScheduledGroupCountdownStates() {
   const scheduledWorkOrders = state.workOrders
     .filter((workOrder) => (
@@ -14148,21 +14156,16 @@ function getActiveScheduledGroupCountdownStates() {
     ));
 
   return scheduledWorkOrders.flatMap((workOrder) => {
-    const groupId = String(workOrder.scheduledEmployeeGroupId || "");
     const groupName = String(workOrder.scheduledEmployeeGroupName || "Nhóm nhân viên");
     return state.employees
-      .filter((employee) => (
-        employee?.uid
-        && isEmployeeWorking(employee)
-        && String(employee.employeeGroupId || "") === groupId
-      ))
+      .filter((employee) => isEmployeeEligibleForScheduledCountdown(employee, workOrder))
       .map((employee) => ({
         kind: "scheduled_group",
         id: "scheduled:" + workOrder.id + ":" + employee.uid,
         cycleId: String(workOrder.scheduleId || workOrder.id),
         employeeUid: employee.uid,
         employeeName: getEmployeeSummaryName(employee),
-        groupId,
+        groupId: String(workOrder.scheduledEmployeeGroupId || ""),
         groupName,
         workOrderId: workOrder.id,
         workOrderName: String(workOrder.name || "Phiếu lên lịch"),
@@ -14190,6 +14193,7 @@ function getCurrentEmployeeScheduledGroupCountdownState() {
       && item?.scheduledGroupAssignmentPending === true
       && String(item.scheduledEmployeeGroupId || "") === groupId
       && timestampToDate(item.scheduledAssignmentDeadlineAt)
+      && isEmployeeEligibleForScheduledCountdown({ ...state.profile, uid: state.user.uid }, item)
     ))
     .sort((left, right) => (
       (timestampToDate(left.scheduledAssignmentDeadlineAt)?.getTime() || Number.MAX_SAFE_INTEGER)
@@ -15930,6 +15934,7 @@ function renderTicketGroup(group, mode = "admin") {
   const scheduledWaitingForAvailableEmployee = Boolean(
     workOrder?.scheduledAssignmentWaitingForAvailableEmployee === true
     || !scheduledAssignmentDeadlineMs
+    || !state.employees.some((employee) => isEmployeeEligibleForScheduledCountdown(employee, workOrder))
   );
   const scheduledAssignmentCountdownMinutes = normalizeScheduledCountdownMinutes(
     workOrder?.scheduledAssignmentCountdownMinutes

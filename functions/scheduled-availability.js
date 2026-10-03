@@ -5,7 +5,8 @@ const SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES = [
   "lunch_break",
   "hotel",
   "redo",
-  "overdue"
+  "overdue",
+  "submitted"
 ];
 
 function findAvailableScheduledEmployees(users = [], tasks = [], groupId = "", ignoredWorkOrderId = "") {
@@ -37,7 +38,15 @@ function findAvailableScheduledEmployees(users = [], tasks = [], groupId = "", i
   ));
 }
 
+function findScheduledCountdownEmployees(users = [], tasks = [], groupId = "", ignoredWorkOrderId = "", startedForUids = null) {
+  const available = findAvailableScheduledEmployees(users, tasks, groupId, ignoredWorkOrderId);
+  if (!Array.isArray(startedForUids)) return available;
+  const startedFor = new Set(startedForUids.map((uid) => String(uid || "")));
+  return available.filter((employee) => startedFor.has(String(employee.uid || "")));
+}
+
 module.exports = {
   SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES,
-  findAvailableScheduledEmployees
+  findAvailableScheduledEmployees,
+  findScheduledCountdownEmployees
 };
