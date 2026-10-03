@@ -1,12 +1,13 @@
 "use strict";
 
+// "submitted" đã là lúc nhân viên báo làm xong: cùng quy tắc với ô
+// "Chưa có việc" ở trang quản lý và hàng đợi công việc.
 const SCHEDULED_ASSIGNMENT_BLOCKING_TASK_STATUSES = [
   "doing",
   "lunch_break",
   "hotel",
   "redo",
-  "overdue",
-  "submitted"
+  "overdue"
 ];
 
 function findAvailableScheduledEmployees(users = [], tasks = [], groupId = "", ignoredWorkOrderId = "") {

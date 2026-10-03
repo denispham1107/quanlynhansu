@@ -29,12 +29,12 @@ const tasks = [
 
 assert.deepEqual(
   findAvailableScheduledEmployees(users, tasks, "group-a", "scheduled-1").map((item) => item.uid).sort(),
-  ["free", "own-timeout-lunch"]
+  ["free", "own-timeout-lunch", "submitted"]
 );
 
 assert.deepEqual(
   findAvailableScheduledEmployees(users, tasks, "group-a", "another-schedule").map((item) => item.uid),
-  ["free"]
+  ["free", "submitted"]
 );
 
 assert.deepEqual(findAvailableScheduledEmployees(users, tasks, "", "scheduled-1"), []);
@@ -49,12 +49,27 @@ const busyGroupTasks = [
   { assignedToUid: "meo", status: "hotel" },
   { assignedToUid: "ngoc", status: "submitted" }
 ];
-assert.deepEqual(findAvailableScheduledEmployees(groupEmployees, busyGroupTasks, "spa"), []);
-assert.deepEqual(findScheduledCountdownEmployees(groupEmployees, busyGroupTasks, "spa", "ticket", ["hao", "meo", "ngoc"]), []);
+assert.deepEqual(findAvailableScheduledEmployees(groupEmployees, busyGroupTasks, "spa").map((item) => item.uid), ["ngoc"]);
+assert.deepEqual(findScheduledCountdownEmployees(groupEmployees, busyGroupTasks, "spa", "ticket", ["hao", "meo", "ngoc"])
+  .map((item) => item.uid), ["ngoc"]);
 assert.deepEqual(findScheduledCountdownEmployees(groupEmployees, busyGroupTasks.slice(0, 2), "spa", "ticket", ["ngoc"])
   .map((employee) => employee.uid), ["ngoc"]);
 assert.deepEqual(findScheduledCountdownEmployees(groupEmployees, busyGroupTasks.slice(0, 2), "spa", "ticket", ["hao"]), []);
 assert.deepEqual(findScheduledCountdownEmployees(groupEmployees, busyGroupTasks.slice(0, 2), "spa", "ticket")
   .map((employee) => employee.uid), ["ngoc"]);
 
-console.log("PASS | Lịch chỉ đếm và tạo Nghỉ trưa cho nhân viên rảnh từ lúc bắt đầu; người đang làm hoặc chờ duyệt bị loại.");
+const botEmployees = [
+  { uid: "ai", role: "employee", employmentStatus: "working", employeeGroupId: "bot-ai" },
+  { uid: "ai-1", role: "employee", employmentStatus: "working", employeeGroupId: "bot-ai" }
+];
+const botTasks = [
+  { assignedToUid: "ai", status: "overdue" },
+  { assignedToUid: "ai-1", status: "overdue" }
+];
+assert.deepEqual(findAvailableScheduledEmployees(botEmployees, botTasks, "bot-ai"), []);
+botTasks[0].status = "submitted";
+assert.deepEqual(findAvailableScheduledEmployees(botEmployees, botTasks, "bot-ai").map((item) => item.uid), ["ai"]);
+botTasks[1].status = "completed";
+assert.deepEqual(findAvailableScheduledEmployees(botEmployees, botTasks, "bot-ai").map((item) => item.uid), ["ai", "ai-1"]);
+
+console.log("PASS | Lịch bắt đầu đếm khi nhân viên đã báo xong/chờ duyệt; chỉ người còn thực sự đang làm bị loại.");
