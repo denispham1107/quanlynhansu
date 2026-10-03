@@ -35,6 +35,14 @@ const context = vm.createContext({
   Promise,
   console: { error() {}, warn() {} },
   doc(_db, _collection, id) { return id; },
+  collection() { return "tasks"; },
+  where(_field, _operator, uid) { return uid; },
+  query(_collection, uid) { return uid; },
+  async getDocsFromServer(uid) {
+    return { docs: [...liveTasks.entries()]
+      .filter(([, task]) => task.assignedToUid === uid)
+      .map(([id, task]) => ({ id, data: () => ({ ...task }) })) };
+  },
   isAdminProfile: () => true,
   requirePermission: () => true,
   setButtonLoading() {},
@@ -65,6 +73,9 @@ const context = vm.createContext({
   }
 });
 vm.runInContext([
+  sourceOf("isTaskBlockingQueue"),
+  sourceOf("compareTaskQueueOrder"),
+  sourceOf("getBlockingQueuePredecessor"),
   sourceOf("repairApprovedTaskIfNeeded"),
   sourceOf("repairApprovedTasksByAdmin"),
   sourceOf("markTaskOverdueIfStillActive"),
@@ -113,12 +124,26 @@ assert.equal(toasts.at(-1).type, "error");
 liveTasks.set("task-1", { ...base, status: "submitted", submittedAt: past });
 await context.approveTask("task-1", {});
 assert.equal(liveTasks.get("task-1").status, "completed");
-assert.equal(reflows, 1);
+assert.equal(reflows, 0, "Duyệt sau khi nhân viên đã báo xong không được khởi động lại việc kế tiếp");
 assert.equal(notifications.length, 2);
 
 liveTasks.set("task-1", { ...base, status: "submitted", submittedAt: past });
 await context.requestRedo("task-1", {});
 assert.equal(liveTasks.get("task-1").status, "redo");
+
+liveTasks.clear();
+const queueStart = new Date(past.getTime() - 60000);
+const firstQueuedTask = { ...base, status: "doing", rowIndex: 0, queueStartAt: queueStart, deadlineAt: past };
+const secondQueuedTask = { ...base, status: "doing", rowIndex: 1, queueStartAt: past, deadlineAt: past };
+context.state.tasks = [
+  { id: "CV1", ...firstQueuedTask },
+  { id: "CV2", ...secondQueuedTask }
+];
+liveTasks.set("CV1", firstQueuedTask);
+liveTasks.set("CV2", secondQueuedTask);
+await context.syncOverdueTasksByAdmin();
+assert.equal(liveTasks.get("CV1").status, "overdue");
+assert.equal(liveTasks.get("CV2").status, "doing", "Việc đang chờ CV1 không được đánh dấu quá hạn riêng");
 
 const taskRules = rules.slice(rules.indexOf("match /tasks/{taskId}"), rules.indexOf("match /notifications/{notificationId}"));
 const updateRules = [...taskRules.matchAll(/allow update: if ([\s\S]*?);/g)];

@@ -41,6 +41,7 @@ const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onTaskDispatched } = require("firebase-functions/v2/tasks");
 const { defineSecret } = require("firebase-functions/params");
+const { blocksQueue, planTaskQueue } = require("./task-queue");
 
 initializeApp();
 
@@ -3785,6 +3786,57 @@ exports.monitorWorkSupervisionOnTaskChange = onDocumentWritten({
     evaluateWorkSupervision({ source: "task_change" }),
     startWaitingScheduledAssignmentCountdowns()
   ]);
+});
+
+function taskQueueSignature(task = {}) {
+  return [
+    String(task.status || ""),
+    String(task.assignedToUid || ""),
+    supervisionTimestampToMillis(task.dispatchedAt),
+    supervisionTimestampToMillis(task.queueStartAt),
+    supervisionTimestampToMillis(task.deadlineAt),
+    Number(task.deadlineMinutes || 0),
+    Number(task.rowIndex || 0)
+  ].join("|");
+}
+
+async function reconcileEmployeeTaskQueue(employeeUid, releasedTask = null, eventTime = null) {
+  if (!employeeUid) return;
+  const snapshot = await db.collection("tasks").where("assignedToUid", "==", employeeUid).get();
+  if (snapshot.empty) return;
+  const refs = snapshot.docs.map((item) => item.ref);
+  await db.runTransaction(async (transaction) => {
+    const current = await transaction.getAll(...refs);
+    const tasks = current.filter((item) => item.exists)
+      .map((item) => ({ id: item.id, ...item.data() }))
+      .filter((task) => task.assignedToUid === employeeUid);
+    const nowMs = releasedTask && eventTime ? Date.parse(eventTime) || Date.now() : Date.now();
+    const updates = planTaskQueue(tasks, nowMs, releasedTask);
+    updates.forEach(({ id, start, end }) => {
+      transaction.update(db.doc(`tasks/${id}`), {
+        queueStartAt: Timestamp.fromMillis(start),
+        deadlineAt: Timestamp.fromMillis(end)
+      });
+    });
+  });
+}
+
+exports.reconcileTaskQueueOnChange = onDocumentWritten({
+  document: "tasks/{taskId}",
+  region: REGION,
+  timeoutSeconds: 120,
+  memory: "256MiB",
+  maxInstances: 10
+}, async (event) => {
+  const before = { id: event.params.taskId, ...(event.data?.before?.data() || {}) };
+  const after = { id: event.params.taskId, ...(event.data?.after?.data() || {}) };
+  if (taskQueueSignature(before) === taskQueueSignature(after)) return;
+  const beforeUid = String(before.assignedToUid || "");
+  const afterUid = String(after.assignedToUid || "");
+  const released = blocksQueue(before) && (!blocksQueue(after) || beforeUid !== afterUid);
+  await Promise.all([...new Set([beforeUid, afterUid].filter(Boolean))].map((uid) =>
+    reconcileEmployeeTaskQueue(uid, released && uid === beforeUid ? before : null, event.time)
+  ));
 });
 
 exports.monitorWorkSupervisionOnWorkOrderChange = onDocumentWritten({

@@ -16,6 +16,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -2520,13 +2521,11 @@ function getDisplayStatus(task) {
   if (task.status === "waiting_assignee" || !task.assignedToUid) return "waiting_assignee";
   if (task.status === "completed") return "completed";
   if (task.status === "submitted") return "submitted";
-  if (task.status === "lunch_break" || (task.isLunchBreak && task.status === "doing")) return "lunch_break";
-  if (task.status === "hotel" || (task.isHotel && task.status === "doing")) return "hotel";
-
-  // Công việc đã giao nhưng nhân viên chưa tới lượt (vẫn còn đang trong thời gian
-  // quy định của (các) công việc được giao trước đó cho chính người này).
+  if (getBlockingQueuePredecessor(task)) return "queued";
   const queueStart = timestampToDate(task.queueStartAt);
   if (queueStart && Date.now() < queueStart.getTime()) return "queued";
+  if (task.status === "lunch_break" || (task.isLunchBreak && task.status === "doing")) return "lunch_break";
+  if (task.status === "hotel" || (task.isHotel && task.status === "doing")) return "hotel";
 
   if (task.status === "redo") {
     const deadline = timestampToDate(task.deadlineAt);
@@ -10511,10 +10510,51 @@ async function prepareHotelRowsForPersistence(rows) {
 // để nếu nhân viên làm xong sớm thì công việc mới được bắt đầu ngay thay vì phải chờ tới hạn cũ.
 function isTaskBlockingQueue(task) {
   return Boolean(task?.assignedToUid)
-    && !["draft", "waiting_assignee", "submitted", "completed"].includes(task.status);
+    && ["doing", "lunch_break", "hotel", "redo", "overdue"].includes(task.status);
+}
+
+function compareTaskQueueOrder(a, b) {
+  const aStart = timestampToDate(a.queueStartAt)?.getTime()
+    || timestampToDate(a.dispatchedAt)?.getTime() || 0;
+  const bStart = timestampToDate(b.queueStartAt)?.getTime()
+    || timestampToDate(b.dispatchedAt)?.getTime() || 0;
+  if (aStart !== bStart) return aStart - bStart;
+  const aDispatch = timestampToDate(a.dispatchedAt)?.getTime() || 0;
+  const bDispatch = timestampToDate(b.dispatchedAt)?.getTime() || 0;
+  if (aDispatch !== bDispatch) return aDispatch - bDispatch;
+  const rowDifference = Number(a.rowIndex || 0) - Number(b.rowIndex || 0);
+  return rowDifference || String(a.id || "").localeCompare(String(b.id || ""));
+}
+
+function getBlockingQueuePredecessor(task, tasks = state.tasks) {
+  if (!isTaskBlockingQueue(task)) return null;
+  const ordered = tasks.filter((item) =>
+    item.assignedToUid === task.assignedToUid && isTaskBlockingQueue(item)
+  ).sort(compareTaskQueueOrder);
+  const index = ordered.findIndex((item) => item.id === task.id);
+  return index > 0 ? ordered[index - 1] : null;
+}
+
+function getQueuePredecessorsByTaskId(tasks = state.tasks) {
+  const groups = new Map();
+  tasks.forEach((task) => {
+    if (!isTaskBlockingQueue(task)) return;
+    if (!groups.has(task.assignedToUid)) groups.set(task.assignedToUid, []);
+    groups.get(task.assignedToUid).push(task);
+  });
+  const predecessors = new Map();
+  groups.forEach((group) => {
+    group.sort(compareTaskQueueOrder);
+    group.forEach((task, index) => {
+      if (index > 0) predecessors.set(task.id, group[index - 1]);
+    });
+  });
+  return predecessors;
 }
 
 function getTaskQueueEndMs(task) {
+  const deadline = timestampToDate(task.deadlineAt);
+  if (deadline) return deadline.getTime();
   const start = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt);
   if (!start) return 0;
 
@@ -10668,45 +10708,37 @@ async function reflowQueuedTasksForEmployee(employeeUid, completedTaskId = "", n
   if (!employeeUid) return 0;
 
   const nowMs = now.getTime();
-  let latestActiveEndMs = 0;
-  const queuedTasks = [];
-
-  state.tasks.forEach((task) => {
-    if (task.id === completedTaskId) return;
-    if (task.assignedToUid !== employeeUid) return;
-    if (!isTaskBlockingQueue(task)) return;
-
-    const queueStart = timestampToDate(task.queueStartAt) || timestampToDate(task.dispatchedAt);
-    const deadlineMinutes = Number(task.deadlineMinutes || 0);
-    if (!queueStart || deadlineMinutes <= 0) return;
-
-    if (queueStart.getTime() > nowMs) {
-      queuedTasks.push(task);
-      return;
-    }
-
-    latestActiveEndMs = Math.max(latestActiveEndMs, getTaskQueueEndMs(task));
-  });
-
+  const releasedTask = state.tasks.find((task) => task.id === completedTaskId);
+  const releasedWasBlocking = releasedTask && isTaskBlockingQueue(releasedTask);
+  const queuedTasks = state.tasks.filter((task) =>
+    task.id !== completedTaskId
+    && task.assignedToUid === employeeUid
+    && isTaskBlockingQueue(task)
+    && Number(task.deadlineMinutes || 0) > 0
+  ).sort(compareTaskQueueOrder);
   if (!queuedTasks.length) return 0;
 
-  queuedTasks.sort((a, b) => {
-    const aStart = timestampToDate(a.queueStartAt)?.getTime() || 0;
-    const bStart = timestampToDate(b.queueStartAt)?.getTime() || 0;
-    if (aStart !== bStart) return aStart - bStart;
-    return Number(a.rowIndex || 0) - Number(b.rowIndex || 0);
-  });
-
-  let cursorMs = Math.max(nowMs, latestActiveEndMs);
+  const first = queuedTasks[0];
+  const firstStartMs = timestampToDate(first.queueStartAt)?.getTime() || 0;
+  const releasedBeforeFirst = releasedWasBlocking && compareTaskQueueOrder(releasedTask, first) < 0;
+  const restartFirst = releasedBeforeFirst || !firstStartMs || firstStartMs > nowMs;
+  let cursorMs = restartFirst
+    ? nowMs
+    : Math.max(nowMs, getTaskQueueEndMs(first));
   const batch = writeBatch(db);
   let changedCount = 0;
   const localQueueUpdates = [];
 
-  queuedTasks.forEach((task) => {
+  queuedTasks.forEach((task, index) => {
+    if (index === 0 && !restartFirst) return;
     const deadlineMinutes = Number(task.deadlineMinutes || 0);
     const newStartMs = cursorMs;
     const newEndMs = newStartMs + deadlineMinutes * 60 * 1000;
     cursorMs = newEndMs;
+
+    // Khi việc trước đã quá hạn mà chưa xong, không chạy đồng hồ việc sau.
+    // Giữ mốc cũ làm chỗ dự phòng; lượt thực tế được khóa bởi predecessor.
+    if (index > 0 && !restartFirst && getTaskQueueEndMs(first) <= nowMs) return;
 
     const oldStartMs = timestampToDate(task.queueStartAt)?.getTime() || 0;
     const oldEndMs = timestampToDate(task.deadlineAt)?.getTime() || 0;
@@ -13896,6 +13928,7 @@ async function syncOverdueTasksByAdmin() {
   const now = new Date();
   const updates = state.tasks
     .filter((task) => ["doing", "hotel", "redo"].includes(task.status))
+    .filter((task) => !getBlockingQueuePredecessor(task))
     .filter((task) => {
       const deadline = timestampToDate(task.deadlineAt);
       return deadline && deadline.getTime() < now.getTime();
@@ -13913,6 +13946,14 @@ async function syncOverdueTasksByAdmin() {
 }
 
 async function markTaskOverdueIfStillActive(taskId, now = new Date()) {
+  const candidate = state.tasks.find((task) => task.id === taskId);
+  if (candidate?.assignedToUid) {
+    const employeeTasksSnapshot = await getDocsFromServer(query(
+      collection(db, "tasks"), where("assignedToUid", "==", candidate.assignedToUid)
+    ));
+    const employeeTasks = employeeTasksSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    if (getBlockingQueuePredecessor(candidate, employeeTasks)) return false;
+  }
   const taskRef = doc(db, "tasks", taskId);
   return runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(taskRef);
@@ -16808,6 +16849,7 @@ function getInitialCountdownText(task) {
   }
   if (task.status === "completed") return "Đã hoàn thành";
 
+  if (getBlockingQueuePredecessor(task)) return "Chờ công việc trước hoàn thành";
   const queueStart = timestampToDate(task.queueStartAt);
   if (queueStart && Date.now() < queueStart.getTime()) {
     return `Chờ đến lượt (bắt đầu ${formatDateTime(task.queueStartAt)})`;
@@ -21227,6 +21269,15 @@ async function submitTask(taskId, button) {
       throw new Error("Bạn không có quyền hoàn thành công việc này.");
     }
 
+    const employeeTasksSnapshot = await getDocsFromServer(query(
+      collection(db, "tasks"), where("assignedToUid", "==", state.user.uid)
+    ));
+    const freshEmployeeTasks = employeeTasksSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    if (getBlockingQueuePredecessor(task, freshEmployeeTasks)
+      || (timestampToDate(task.queueStartAt)?.getTime() || 0) > Date.now()) {
+      throw new Error("Hãy hoàn thành công việc trước khi bắt đầu hoặc gửi công việc này.");
+    }
+
     if (isEmployeeCompletionLockedLunchTask(task)) {
       throw new Error(
         isScheduledGroupLockedLunchTask(task)
@@ -21308,8 +21359,6 @@ async function approveTask(taskId, button) {
     // Dừng ngay công việc vừa xử lý khỏi danh sách chờ phát chuông.
     // Nếu vẫn còn công việc khác chờ xác nhận, âm báo tiếp tục phát.
     markTaskReviewDecisionLocally(taskId, "completed");
-
-    await reflowQueuedTasksForEmployee(task.assignedToUid, taskId);
 
     const resultText = taskResultShortText(result);
 
@@ -21822,6 +21871,7 @@ function calculateResultFromActualMinutes(task, actualMinutesInput) {
 setInterval(updateCountdowns, 1000);
 
 function updateCountdowns() {
+  const queuePredecessors = getQueuePredecessorsByTaskId();
   $$("[data-scheduled-assignment-deadline-ms]").forEach((countdown) => {
     const deadlineMs = Number(countdown.dataset.scheduledAssignmentDeadlineMs || 0);
     const countdownMinutes = normalizeScheduledCountdownMinutes(
@@ -21866,9 +21916,12 @@ function updateCountdowns() {
     }
 
     const queueStartMs = Number(card.dataset.queueStartMs || 0);
+    const predecessor = queuePredecessors.get(card.dataset.taskId);
 
-    if (queueStartMs && Date.now() < queueStartMs) {
-      setCountdownText(`Chờ đến lượt (bắt đầu ${formatDateTime(new Date(queueStartMs))})`);
+    if (predecessor || (queueStartMs && Date.now() < queueStartMs)) {
+      setCountdownText(predecessor
+        ? "Chờ công việc trước hoàn thành"
+        : `Chờ đến lượt (bắt đầu ${formatDateTime(new Date(queueStartMs))})`);
       card.classList.add("is-queued");
       card.classList.remove("is-overdue", "is-near-due");
       return;
