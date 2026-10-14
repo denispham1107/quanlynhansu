@@ -106,7 +106,12 @@ assert.equal(await firebaseCached.response.text(), "fresh");
 assert.ok(firebaseCached.elapsed < 70, "Lần mở sau phải dùng Firebase từ cache");
 networkDelay = 80;
 
-const url = "https://example.com/app.js?v=20261003-task-queue-v150";
+const pinnedUrl = "https://example.com/startup-sync.mjs?v=20261014-startup-v151";
+stored.set(pinnedUrl, new Response("pinned cache"));
+const pinnedResult = await fetchThroughWorker(pinnedUrl);
+assert.equal(await pinnedResult.response.text(), "pinned cache");
+assert.ok(pinnedResult.elapsed < 20, "Mô-đun có phiên bản phải mở ngay từ cache");
+const url = "https://example.com/styles.css";
 stored.set(url, new Response("cached"));
 const cachedResult = await fetchThroughWorker(url);
 assert.equal(await cachedResult.response.text(), "cached");
@@ -128,7 +133,7 @@ await Promise.all(noCacheResult.waits);
 console.log("PASS | Service worker kích hoạt an toàn, ép tab cũ nạp lại khi nâng cấp và vẫn trả cache nhanh khi mạng chậm.");
 
 const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "index.html"), "utf8");
-assert.match(html, /import\("\.\/app\.js\?v=20261003-task-queue-v150"\)/);
+assert.match(html, /import\("\.\/app\.js\?v=20261014-startup-v151"\)/);
 const bootstrap = html.match(/<script>\s*(\(\(\) => \{[\s\S]*?\}\)\(\);)\s*<\/script>/)?.[1];
 assert.ok(bootstrap, "Không tìm thấy mã khởi tạo PWA");
 const bootstrapEvents = new Map();

@@ -243,6 +243,10 @@ for (const profile of [
     expression: `(() => {
       const panel = document.querySelector("#adminView .task-panel");
       const list = document.getElementById("adminTaskList");
+      const syncNotice = document.getElementById("dashboardSyncNotice");
+      syncNotice.classList.remove("hidden");
+      document.getElementById("dashboardSyncMessage").textContent = "Đang mất kết nối. Dữ liệu đã lưu vẫn có thể xem; ứng dụng sẽ đồng bộ khi có mạng.";
+      const syncBox = syncNotice.getBoundingClientRect();
       const panelBox = panel.getBoundingClientRect();
       const panelStyle = getComputedStyle(panel);
       const left = panelBox.left + parseFloat(panelStyle.paddingLeft);
@@ -257,6 +261,9 @@ for (const profile of [
         listRight: list.getBoundingClientRect().right,
         listScrollWidth: list.scrollWidth,
         listClientWidth: list.clientWidth,
+        syncNoticeFits: syncBox.left >= 0 && syncBox.right <= document.documentElement.clientWidth
+          && syncNotice.scrollWidth <= syncNotice.clientWidth
+          && [...syncNotice.children].every((child) => child.getBoundingClientRect().right <= syncBox.right),
         boxes,
         pageScrollWidth: document.documentElement.scrollWidth,
         viewportWidth: document.documentElement.clientWidth
@@ -265,6 +272,7 @@ for (const profile of [
   });
   const result = measurement.result.value;
   const passed = result.boxes.length === 8
+    && result.syncNoticeFits
     && result.boxes.every((box) => box.left >= result.panelLeft - 1 && box.right <= result.panelRight + 1 && box.right <= box.parentRight + 1)
     && result.listRight <= result.panelRight + 1
     && result.listScrollWidth <= result.listClientWidth + 1

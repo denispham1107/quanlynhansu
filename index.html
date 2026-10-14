@@ -10919,6 +10919,11 @@
       </div>
     </header>
 
+    <div id="dashboardSyncNotice" class="dashboard-sync-notice hidden" role="status" aria-live="polite">
+      <span id="dashboardSyncMessage"></span>
+      <button id="retryDashboardSyncBtn" class="btn ghost small" type="button">Kết nối lại</button>
+    </div>
+
     <!-- ADMIN DASHBOARD -->
     <main id="adminView" class="page hidden">
       <section class="hero-panel management-dashboard-hero">
@@ -12464,7 +12469,7 @@
   </div>
 
   <script type="module">
-    import("./app.js?v=20261003-task-queue-v150").catch((error) => {
+    import("./app.js?v=20261014-startup-v151").catch((error) => {
       console.error("Không tải được ứng dụng:", error);
       window.__CULAO_STARTUP__?.recover();
     });

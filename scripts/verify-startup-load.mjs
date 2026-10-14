@@ -113,6 +113,12 @@ const startupContext = vm.createContext({
   query(ref) { return ref; },
   orderBy() { return {}; },
   onSnapshot(ref) { subscribedCollections.push(ref); return () => {}; },
+  subscribeProgressively({ listen, primaryQueries }) { primaryQueries.forEach((ref) => listen(ref)); return () => {}; },
+  beginDashboardSync() {},
+  where() { return {}; },
+  limit() { return {}; },
+  todayInputValue: () => "2026-10-14",
+  Timestamp: { fromDate: (value) => value },
   handleSnapshotError() {},
   setAdminTasksSyncStatus() {},
   applyManagementPermissionUI() {},
@@ -127,6 +133,9 @@ assert.equal(subscribedCollections.includes("workAssignmentHistory"), false);
 assert.equal(startupTimers.length, 1);
 assert.equal(startupTimers[0].delay, 12000);
 startupTimers[0].callback();
+assert.equal(subscribedCollections.includes("workAssignmentHistory"), false, "Mạng treo không được mở truy vấn lịch sử lớn trước dữ liệu chính");
+startupContext.state.adminTaskDataReady = true;
+startupTimers.at(-1).callback();
 assert.ok(subscribedCollections.includes("workAssignmentHistory"));
 assert.ok(subscribedCollections.includes("hotelDailyBudgets"));
 assert.equal(startupContext.state.unsubs.length, 12);

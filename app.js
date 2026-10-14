@@ -1,4 +1,5 @@
 import { firebaseConfig } from "./firebase-config.js?v=20260905-push-vapid-fix-v67";
+import { subscribeProgressively, createSyncRecovery } from "./startup-sync.mjs?v=20261014-startup-v151";
 import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getAuth,
@@ -9,8 +10,11 @@ import {
   updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  getFirestore,
   initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  disableNetwork,
+  enableNetwork,
   collection,
   doc,
   getDoc,
@@ -71,12 +75,14 @@ const isIosWebKit = shouldUseIosLongPolling(
   navigator.platform,
   navigator.maxTouchPoints
 );
-const db = isIosWebKit
-  ? initializeFirestore(app, {
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  ...(isIosWebKit ? {
       experimentalForceLongPolling: true,
-      experimentalLongPollingOptions: { timeoutSeconds: 20 }
-    })
-  : getFirestore(app);
+      experimentalLongPollingOptions: { timeoutSeconds: 10 },
+      useFetchStreams: false
+    } : {})
+});
 const storage = getStorage(app);
 const functions = getFunctions(app, "asia-southeast1");
 
@@ -370,6 +376,7 @@ const state = {
   adminTaskDataReady: false,
   adminUsersSnapshotReady: false,
   adminTaskServerReady: false,
+  adminWorkOrdersServerReady: false,
   adminHotelDailyBudgetsServerReady: false,
   adminAutoScrollSubmittedTaskId: "",
   adminAutoScrollSubmittedTaskTimer: null
@@ -381,6 +388,9 @@ let startupExtrasTimer = 0;
 let startupExtrasUid = "";
 let authBootGeneration = 0;
 let activeDashboardRole = "";
+let dashboardSyncRecovery = null;
+let dashboardHiddenAt = 0;
+let firestoreReconnectPromise = null;
 const STARTUP_PROFILE_TIMEOUT_MS = 12000;
 const STARTUP_PROFILE_CACHE_PREFIX = "culao-startup-profile-v1:";
 const STARTUP_PROFILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -5741,6 +5751,7 @@ onAuthStateChanged(auth, async (user) => {
   state.invalidTaskHistory = [];
   state.invalidTaskHistoryExpanded = false;
   state.adminTaskServerReady = false;
+  state.adminWorkOrdersServerReady = false;
   state.adminTaskSnapshotReady = false;
   state.adminTaskDataReady = false;
   state.adminUsersSnapshotReady = false;
@@ -5903,6 +5914,9 @@ function showApp() {
 }
 
 function cleanupSubscriptions() {
+  dashboardSyncRecovery?.stop();
+  dashboardSyncRecovery = null;
+  document.getElementById("dashboardSyncNotice")?.classList.add("hidden");
   state.unsubs.forEach((unsubscribe) => unsubscribe());
   state.unsubs = [];
   if (startupExtrasTimer) window.clearTimeout(startupExtrasTimer);
@@ -5916,6 +5930,49 @@ function cleanupSubscriptions() {
     adminTasksRenderFrame = 0;
   }
 }
+
+function beginDashboardSync(required) {
+  dashboardSyncRecovery?.stop();
+  dashboardSyncRecovery = createSyncRecovery({
+    required,
+    online: () => navigator.onLine !== false,
+    reconnect: reconnectFirestore,
+    notify(status) {
+      const notice = document.getElementById("dashboardSyncNotice");
+      const message = document.getElementById("dashboardSyncMessage");
+      if (!notice || !message) return;
+      notice.classList.toggle("hidden", status === "ready");
+      message.textContent = status === "offline"
+        ? "Đang mất kết nối. Dữ liệu đã lưu vẫn có thể xem; ứng dụng sẽ đồng bộ khi có mạng."
+        : status === "reconnecting"
+          ? "Kết nối chậm. Ứng dụng đang tự kết nối lại…"
+          : "Chưa nhận được dữ liệu mới. Bạn có thể thử kết nối lại ngay tại đây.";
+    }
+  });
+}
+
+function reconnectFirestore() {
+  if (firestoreReconnectPromise) return firestoreReconnectPromise;
+  firestoreReconnectPromise = withStartupDeadline(
+    disableNetwork(db).then(() => enableNetwork(db)), 6000
+  ).finally(() => { firestoreReconnectPromise = null; });
+  return firestoreReconnectPromise;
+}
+
+document.getElementById("retryDashboardSyncBtn")?.addEventListener("click", () => {
+  void dashboardSyncRecovery?.retry();
+});
+window.addEventListener("online", () => dashboardSyncRecovery?.resume());
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) dashboardSyncRecovery?.resume();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) dashboardHiddenAt = Date.now();
+  else if (dashboardHiddenAt && Date.now() - dashboardHiddenAt >= 15000) {
+    dashboardHiddenAt = 0;
+    dashboardSyncRecovery?.resume();
+  }
+});
 
 function startStartupExtras(uid) {
   if (!uid || state.user?.uid !== uid || startupExtrasUid !== uid) return;
@@ -6205,6 +6262,7 @@ function setAdminTasksSyncStatus(message) {
 function setupAdminDashboard() {
   const bootUid = state.user?.uid;
   const bootGeneration = authBootGeneration;
+  beginDashboardSync(["tasks", "users"]);
   els.adminView.classList.remove("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
@@ -6216,8 +6274,10 @@ function setupAdminDashboard() {
 
   const unsubUsers = onSnapshot(
     collection(db, "users"),
+    { includeMetadataChanges: true },
     (snapshot) => {
       if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
+      dashboardSyncRecovery?.received("users", snapshot.metadata);
       state.adminUsersSnapshotReady = snapshot.docs.length > 0 || !snapshot.metadata.fromCache;
       const users = snapshot.docs
         .map((item) => ({ id: item.id, ...item.data() }));
@@ -6270,6 +6330,7 @@ function setupAdminDashboard() {
   state.adminTaskSnapshotReady = false;
   state.adminTaskDataReady = false;
   state.adminTaskServerReady = false;
+  state.adminWorkOrdersServerReady = false;
   state.adminHotelDailyBudgetsServerReady = false;
   state.adminAutoScrollSubmittedTaskId = "";
   if (state.adminAutoScrollSubmittedTaskTimer) {
@@ -6277,16 +6338,24 @@ function setupAdminDashboard() {
     state.adminAutoScrollSubmittedTaskTimer = null;
   }
 
-  const unsubTasks = onSnapshot(
-    tasksQuery,
-    { includeMetadataChanges: true },
-    async (snapshot) => {
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const unsubTasks = subscribeProgressively({
+    listen: onSnapshot,
+    primaryQueries: [
+      query(collection(db, "tasks"), where("status", "in", ["draft", "waiting_assignee", "doing", "lunch_break", "hotel", "redo", "overdue", "submitted"])),
+      query(collection(db, "tasks"), where("taskDate", "==", todayInputValue())),
+      query(collection(db, "tasks"), where("createdAt", ">=", Timestamp.fromDate(dayStart)))
+    ],
+    fullQuery: tasksQuery,
+    next: async (snapshot) => {
       if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
-      state.adminTaskDataReady = snapshot.docs.length > 0 || !snapshot.metadata.fromCache;
+      state.adminTaskDataReady = snapshot.metadata.startupReady ?? (snapshot.docs.length > 0 || !snapshot.metadata.fromCache);
+      dashboardSyncRecovery?.received("tasks", snapshot.metadata);
       const wasServerReady = state.adminTaskServerReady;
       if (!snapshot.metadata.fromCache) {
-        state.adminTaskServerReady = true;
-        setAdminTasksSyncStatus("");
+        if (!snapshot.metadata.partial) state.adminTaskServerReady = true;
+        setAdminTasksSyncStatus(snapshot.metadata.partial ? "Đã tải công việc hiện tại; đang nạp lịch sử ở nền…" : "");
       } else if (snapshot.docs.length) {
         setAdminTasksSyncStatus("Đang hiển thị dữ liệu lưu tạm; chờ đồng bộ Firebase...");
       }
@@ -6333,19 +6402,23 @@ function setupAdminDashboard() {
         await syncOverdueTasksByAdmin();
       }
     },
-    (error) => {
-      setAdminTasksSyncStatus("Không đồng bộ được công việc. Kiểm tra kết nối Firebase rồi tải lại trang.");
+    error: (error) => {
+      setAdminTasksSyncStatus("Chưa đồng bộ được công việc. Ứng dụng sẽ thử kết nối lại.");
       handleSnapshotError(error);
     }
-  );
+  });
 
   // Theo dõi riêng collection workOrders để những phiếu nháp CHƯA có công việc nào
   // (0 dòng) vẫn hiển thị được trên danh sách (nếu chỉ dựa vào tasks sẽ không thấy được).
   const workOrdersQuery = query(collection(db, "workOrders"), orderBy("createdAt", "desc"));
 
-  const unsubWorkOrders = onSnapshot(
-    workOrdersQuery,
-    (snapshot) => {
+  const unsubWorkOrders = subscribeProgressively({
+    listen: onSnapshot,
+    primaryQueries: [query(workOrdersQuery, limit(100)), query(collection(db, "workOrders"), where("status", "==", "draft"))],
+    fullQuery: workOrdersQuery,
+    next: (snapshot) => {
+      if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
+      if (!snapshot.metadata.fromCache && !snapshot.metadata.partial) state.adminWorkOrdersServerReady = true;
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       state.workOrderById = new Map(state.workOrders.map((workOrder) => [workOrder.id, workOrder]));
       scheduleAdminTasksRender();
@@ -6353,17 +6426,21 @@ function setupAdminDashboard() {
       renderWorkSupervisionCountdown();
       syncTaskReviewAlertSound();
     },
-    handleSnapshotError
-  );
+    error: handleSnapshotError
+  });
 
   function startAdminSupplementaryListeners() {
     if (adminSupplementaryStarted || state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
+    if (!state.adminTaskDataReady) {
+      adminSupplementaryTimer = window.setTimeout(startAdminSupplementaryListeners, 12000);
+      return;
+    }
     adminSupplementaryStarted = true;
     if (adminSupplementaryTimer) window.clearTimeout(adminSupplementaryTimer);
     adminSupplementaryTimer = 0;
 
   // Các dữ liệu lịch sử/mẫu/báo cáo được nạp sau snapshot công việc chính.
-  // Trên mạng chậm vẫn bắt đầu sau 12 giây để các màn hình phụ không chờ vô hạn.
+  // Không tranh lượt tải với dữ liệu chính khi kết nối đang cần phục hồi.
   // Lịch sử mỗi lần Phiếu Chưa giao việc được giao thành công.
   // Dùng collection riêng để lịch sử vẫn còn ngay cả khi Phiếu gốc thay đổi trạng thái.
   const assignmentHistoryQuery = query(
@@ -12449,6 +12526,11 @@ async function deleteWorkOrder(workOrderId, button) {
     return;
   }
 
+  if (!state.adminTaskServerReady) {
+    toast("Danh sách đầy đủ còn đang tải. Vui lòng thử xóa Phiếu lại sau ít giây.", "info");
+    return;
+  }
+
   const tasksInGroup = state.tasks.filter((task) => (task.workOrderId || "legacy") === workOrderId);
 
   const workOrder = getWorkOrderMeta(workOrderId);
@@ -12499,6 +12581,11 @@ async function deleteAllWorkOrders(button) {
 
   if (isWorkOrderDeletionLocked()) {
     toast("Chức năng Xóa Phiếu và Xóa toàn bộ Phiếu đang bị khóa trong Cài đặt.", "error");
+    return;
+  }
+
+  if (!state.adminTaskServerReady || !state.adminWorkOrdersServerReady) {
+    toast("Danh sách đầy đủ còn đang tải. Vui lòng thử xóa toàn bộ lại sau ít giây.", "info");
     return;
   }
 
@@ -14404,6 +14491,7 @@ window.addEventListener("focus", ensureWorkSupervisionEmployeeReminderTimer);
 function setupEmployeeDashboard() {
   const bootUid = state.user?.uid;
   const bootGeneration = authBootGeneration;
+  beginDashboardSync(["tasks", "profile"]);
   els.adminView.classList.add("hidden");
   els.workTemplateView?.classList.add("hidden");
   els.employeeManagerView?.classList.add("hidden");
@@ -14413,8 +14501,10 @@ function setupEmployeeDashboard() {
 
   const unsubOwnProfile = onSnapshot(
     doc(db, "users", state.user.uid),
+    { includeMetadataChanges: true },
     (snapshot) => {
       if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
+      dashboardSyncRecovery?.received("profile", snapshot.metadata);
       if (snapshot.exists()) {
         state.profile = { id: snapshot.id, ...snapshot.data() };
         if (!snapshot.metadata.fromCache) saveStartupProfile(bootUid, state.profile);
@@ -14434,7 +14524,10 @@ function setupEmployeeDashboard() {
 
   const unsubTasks = onSnapshot(
     ownTasksQuery,
+    { includeMetadataChanges: true },
     (snapshot) => {
+      if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
+      dashboardSyncRecovery?.received("tasks", snapshot.metadata);
       state.tasks = snapshot.docs
         .map((item) => ({ id: item.id, ...item.data() }))
         // Nhân viên không bao giờ thấy công việc còn ở trạng thái nháp (chưa giao việc).
@@ -14457,9 +14550,12 @@ function setupEmployeeDashboard() {
   // dù nhân viên đó chỉ được giao 1 công việc bên trong phiếu.
   const employeeWorkOrdersQuery = query(collection(db, "workOrders"), orderBy("createdAt", "desc"));
 
-  const unsubEmployeeWorkOrders = onSnapshot(
-    employeeWorkOrdersQuery,
-    (snapshot) => {
+  const unsubEmployeeWorkOrders = subscribeProgressively({
+    listen: onSnapshot,
+    primaryQueries: [query(employeeWorkOrdersQuery, limit(100))],
+    fullQuery: employeeWorkOrdersQuery,
+    next: (snapshot) => {
+      if (state.user?.uid !== bootUid || bootGeneration !== authBootGeneration) return;
       state.workOrders = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       state.workOrderById = new Map(state.workOrders.map((workOrder) => [workOrder.id, workOrder]));
       // Bất kỳ thay đổi nào ở Phiếu công việc (tạo mới, giao việc hoặc xoá phiếu)
@@ -14471,11 +14567,11 @@ function setupEmployeeDashboard() {
       renderEmployeeTasks();
       renderWorkSupervisionCountdown();
     },
-    (error) => {
+    error: (error) => {
       console.error(error);
       toast("Không đọc được thông tin phiếu công việc. Cần cập nhật Firestore Rules cho collection workOrders.", "error");
     }
-  );
+  });
 
   const unsubHotelDailyBudgets = onSnapshot(
     collection(db, "hotelDailyBudgets"),
@@ -15772,7 +15868,8 @@ function renderAdminTasks() {
     completed: baseFiltered.filter((task) => task.displayStatus === "completed").length
   };
 
-  const displayCount = (count) => state.adminTaskDataReady ? count : "…";
+  const displayCount = (count) => state.adminTaskDataReady
+    && (state.adminTaskServerReady || state.adminDateFilter.mode === "today") ? count : "…";
   if (els.statDraft) els.statDraft.textContent = displayCount(stats.draft);
   if (els.statDoing) els.statDoing.textContent = displayCount(stats.doing);
   if (els.statHotel) els.statHotel.textContent = displayCount(stats.hotel);

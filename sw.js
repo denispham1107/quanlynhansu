@@ -1,11 +1,13 @@
 /* Culao Task PWA + Web Push service worker */
-const CACHE_NAME = "culao-task-shell-v20261003-task-queue-v150";
+const CACHE_NAME = "culao-task-shell-v20261014-startup-v151";
 const APP_SHELL_NETWORK_TIMEOUT_MS = 1800;
 const APP_SHELL_BACKGROUND_TIMEOUT_MS = 15000;
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./app.js?v=20261003-task-queue-v150",
+  "./app.js?v=20261014-startup-v151",
+  "./startup-sync.mjs?v=20261014-startup-v151",
+  "./firebase-config.js?v=20260905-push-vapid-fix-v67",
   "./styles.css"
 ];
 const OPTIONAL_SHELL = [
@@ -84,7 +86,15 @@ self.addEventListener("fetch", (event) => {
 
   // Ưu tiên bản mới, nhưng không để mạng treo giữ trang trắng nhiều phút.
   // Khi có cache, giới hạn thời gian chờ và cập nhật cache ở nền.
-  if (event.request.mode === "navigate" || /\.(?:js|html|css)$/.test(url.pathname)) {
+  if (/\.(?:js|mjs)$/.test(url.pathname) && url.searchParams.has("v")) {
+    event.respondWith(caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request);
+    }));
+    return;
+  }
+
+  if (event.request.mode === "navigate" || /\.(?:js|mjs|html|css)$/.test(url.pathname)) {
     let backgroundUpdate = Promise.resolve();
     const responsePromise = (async () => {
       const cached = await caches.match(event.request)
